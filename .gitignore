@@ -1,0 +1,141 @@
+# ---------------------------------------------------------------------------
+# Secretos y credenciales - NUNCA subir a GitHub
+# ---------------------------------------------------------------------------
+.env
+.env.*
+*.env
+!.env.example
+!.env.template
+
+secrets/
+.secrets/
+*.secret
+*.secrets
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.csr
+*.jks
+*.keystore
+client_secret*.json
+service-account*.json
+service_account*.json
+credentials*.json
+token*.json
+application_default_credentials.json
+adc.json
+
+# Configuraciones locales con posibles overrides de API keys.
+# Mantener scripts/arbiters_config.json sin secretos si se decide versionarlo.
+*.local.json
+*.private.json
+*secret*.json
+*credentials*.json
+
+# ---------------------------------------------------------------------------
+# Datos locales, datasets grandes y material que no debe publicarse
+# ---------------------------------------------------------------------------
+data/**/*.csv
+data/**/*.tsv
+data/**/*.jsonl
+data/**/*.parquet
+data/**/*.arrow
+data/**/*.feather
+data/**/*.xlsx
+data/**/*.zip
+data/**/*.gz
+data/**/*.7z
+data/**/*.tar
+data/**/*.tar.gz
+!data/**/README*
+!data/**/*.md
+!data/**/*.txt
+
+biblio/**/*.pdf
+biblio/**/*.doc
+biblio/**/*.docx
+!biblio/**/README*
+!biblio/**/*.md
+!biblio/**/*.txt
+
+# ---------------------------------------------------------------------------
+# Salidas, checkpoints y archivos generados por ejecuciones
+# ---------------------------------------------------------------------------
+output/
+logs/
+checkpoints/
+*.log
+*.out
+*.err
+!output/.gitkeep
+!logs/.gitkeep
+!checkpoints/.gitkeep
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+site/
+.venv/
+venv/
+env/
+ENV/
+
+# ---------------------------------------------------------------------------
+# Conda / empaquetado local
+# ---------------------------------------------------------------------------
+.conda/
+*.conda
+*.tar.bz2
+
+# ---------------------------------------------------------------------------
+# Testing, linting, coverage y notebooks
+# ---------------------------------------------------------------------------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.ipynb_checkpoints/
+
+# ---------------------------------------------------------------------------
+# Bases locales, modelos y artefactos pesados
+# ---------------------------------------------------------------------------
+*.db
+*.sqlite
+*.sqlite3
+*.pkl
+*.pickle
+*.joblib
+*.model
+*.bin
+*.pt
+*.pth
+*.onnx
+models/
+artifacts/
+
+# ---------------------------------------------------------------------------
+# IDE, sistema operativo y temporales
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini

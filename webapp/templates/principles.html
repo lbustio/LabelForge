@@ -1,0 +1,306 @@
+{% extends "base.html" %}
+{% block title %}Principios — LabelForge{% endblock %}
+{% block content %}
+<style>
+  .prompt-color-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .55rem;
+    margin-bottom: 1rem;
+  }
+  .prompt-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    border: 1px solid #2d3148;
+    border-radius: 999px;
+    color: #cbd5e1;
+    font-size: .78rem;
+    padding: .28rem .65rem;
+    background: #111522;
+  }
+  .prompt-legend-swatch {
+    width: .7rem;
+    height: .7rem;
+    border-radius: 50%;
+    display: inline-block;
+    flex: 0 0 auto;
+  }
+  .prompt-legend-system { background: #3d3966; border: 1px solid #c4b5fd; }
+  .prompt-legend-rule { background: #102a43; border: 1px solid #93c5fd; }
+  .prompt-legend-claim { background: #3a2c0a; border: 1px solid #fde68a; }
+  .prompt-legend-output { background: #082f24; border: 1px solid #86efac; }
+</style>
+
+<div class="page-title">Principios y Prompt Template</div>
+
+<!-- Principios -->
+<div class="card-dark accent-panel accent-violet mb-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="card-header-label mb-0">Principios de persuasion</div>
+    <button class="btn btn-outline-secondary btn-sm" onclick="addPrinciple()">
+      <i class="bi bi-plus-lg me-1"></i>Agregar principio
+    </button>
+  </div>
+  <div id="principles-list"></div>
+  <button class="btn btn-primary btn-sm mt-3" onclick="savePrinciples()">
+    <i class="bi bi-floppy me-1"></i>Guardar principios
+  </button>
+</div>
+
+<!-- Prompt template -->
+<div class="card-dark accent-panel accent-blue">
+  <div class="card-header-label">User Prompt Template</div>
+  <p class="text-secondary small mb-3">
+    Este es el prompt que recibe cada arbitro. Debe contener el placeholder
+    <code>{claim}</code>
+    donde se insertara el claim a analizar. Usa <code>{% raw %}{{ }}{% endraw %}</code>
+    para llaves literales en el JSON de salida. Puedes usar
+    <code>{output_instruction}</code>
+    para insertar automaticamente el formato de salida segun el check.
+  </p>
+  <div class="form-check form-switch mb-3">
+    <input class="form-check-input" type="checkbox" role="switch" id="include-justifications">
+    <label class="form-check-label small" for="include-justifications">
+      Incluir justificaciones <span class="text-secondary">(*_why)</span>
+    </label>
+  </div>
+  <textarea id="prompt-template" class="form-control" rows="18"></textarea>
+  <button class="btn btn-primary btn-sm mt-3" onclick="savePromptTemplate()">
+    <i class="bi bi-floppy me-1"></i>Guardar template
+  </button>
+</div>
+
+<!-- Prompt preview -->
+<div class="card-dark accent-panel accent-emerald">
+  <div class="card-header-label">Ejemplo de prompt final</div>
+  <div class="row g-3 mb-3">
+    <div class="col-lg-4">
+      <label class="form-label small text-secondary">Arbitro</label>
+      <select id="preview-arbiter" class="form-select"></select>
+    </div>
+    <div class="col-lg-8">
+      <label class="form-label small text-secondary">Claim de ejemplo</label>
+      <input id="preview-claim" class="form-control"
+        value="Says the Annies List political group supports third-trimester abortions on demand.">
+    </div>
+  </div>
+  <div class="prompt-color-legend" aria-label="Leyenda de colores del prompt">
+    <span class="prompt-legend-item">
+      <span class="prompt-legend-swatch prompt-legend-system"></span>
+      SYSTEM: instrucciones del arbitro
+    </span>
+    <span class="prompt-legend-item">
+      <span class="prompt-legend-swatch prompt-legend-rule"></span>
+      Azul: restriccion de analisis
+    </span>
+    <span class="prompt-legend-item">
+      <span class="prompt-legend-swatch prompt-legend-claim"></span>
+      Amarillo: claim insertado
+    </span>
+    <span class="prompt-legend-item">
+      <span class="prompt-legend-swatch prompt-legend-output"></span>
+      Verde: JSON esperado
+    </span>
+  </div>
+  <div id="prompt-preview"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let principles = {};
+let arbiters = [];
+
+async function loadAll() {
+  const [pr, pt, arbs] = await Promise.all([
+    fetch('/api/principles').then(r => r.json()),
+    fetch('/api/prompt-template').then(r => r.json()),
+    fetch('/api/arbiters').then(r => r.json()),
+  ]);
+  principles = pr;
+  arbiters = arbs;
+  renderPrinciples();
+  renderArbiterOptions();
+  document.getElementById('prompt-template').value = pt.user_prompt_template;
+  document.getElementById('include-justifications').checked = !!pt.include_justifications;
+  renderPromptPreview();
+}
+
+function renderPrinciples() {
+  const el = document.getElementById('principles-list');
+  const keys = Object.keys(principles);
+  if (!keys.length) {
+    el.innerHTML = '<div class="text-secondary small">Sin principios.</div>';
+    return;
+  }
+  el.innerHTML = keys.map(k => `
+    <div class="entity-row accent-violet mb-3" id="principle-row-${k}">
+      <div class="entity-icon mt-1">
+        <i class="bi bi-tag"></i>
+      </div>
+      <input type="text" class="form-control" style="max-width:120px;font-weight:700;font-family:monospace"
+        value="${k}" id="pk-${k}" placeholder="ID">
+      <textarea class="form-control" rows="2" id="pv-${k}" placeholder="Descripcion">${principles[k]}</textarea>
+      <button class="btn btn-danger-soft btn-sm mt-1" onclick="removePrinciple('${k}')" title="Eliminar">
+        <i class="bi bi-trash3"></i>
+      </button>
+    </div>
+  `).join('');
+}
+
+function addPrinciple() {
+  const id = 'NEW_' + Date.now();
+  principles[id] = '';
+  renderPrinciples();
+  document.getElementById(`pk-${id}`).focus();
+  renderPromptPreview();
+}
+
+function removePrinciple(key) {
+  delete principles[key];
+  renderPrinciples();
+  renderPromptPreview();
+}
+
+async function savePrinciples() {
+  // Recoger valores actuales del DOM
+  const updated = {};
+  for (const key of Object.keys(principles)) {
+    const newKey = document.getElementById(`pk-${key}`)?.value.trim();
+    const newVal = document.getElementById(`pv-${key}`)?.value.trim();
+    if (newKey) updated[newKey] = newVal || '';
+  }
+  if (!Object.keys(updated).length) {
+    showToast('Debe haber al menos un principio', 'error'); return;
+  }
+  const res = await fetch('/api/principles', {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(updated),
+  });
+  const data = await res.json();
+  if (!res.ok) { showToast(data.error || 'Error al guardar', 'error'); return; }
+  principles = data;
+  renderPrinciples();
+  renderPromptPreview();
+  showToast('Principios guardados');
+}
+
+async function savePromptTemplate() {
+  const template = document.getElementById('prompt-template').value;
+  const includeJustifications = document.getElementById('include-justifications').checked;
+  const res = await fetch('/api/prompt-template', {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      user_prompt_template: template,
+      include_justifications: includeJustifications,
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) { showToast(data.error || 'Error al guardar', 'error'); return; }
+  renderPromptPreview();
+  showToast('Template guardado');
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+}
+
+function renderArbiterOptions() {
+  const select = document.getElementById('preview-arbiter');
+  if (!arbiters.length) {
+    select.innerHTML = '<option value="">Sin arbitros</option>';
+    return;
+  }
+  select.innerHTML = arbiters.map(a => `
+    <option value="${escapeHtml(a.id)}">${escapeHtml(a.id)} — ${escapeHtml(a.name || a.id)}</option>
+  `).join('');
+}
+
+function currentPrincipleKeys() {
+  return Object.keys(principles).map(key => {
+    const input = document.getElementById(`pk-${key}`);
+    return (input?.value || key).trim();
+  }).filter(Boolean);
+}
+
+function buildOutputInstruction() {
+  const keys = currentPrincipleKeys();
+  const includeWhy = document.getElementById('include-justifications').checked;
+  if (includeWhy) {
+    const fields = [];
+    for (const key of keys) {
+      fields.push(`"${key}":0`);
+      fields.push(`"${key}_why":"..."`);
+    }
+    return `Return JSON only: {${fields.join(',')}}\nEach *_why <=8 words. If absent, use "no cue".`;
+  }
+  return `Return JSON only: {${keys.map(k => `"${k}":0`).join(',')}}`;
+}
+
+function renderTemplate(template, claim, outputInstruction) {
+  let rendered = template
+    .replaceAll('{claim}', claim)
+    .replaceAll('{output_instruction}', outputInstruction)
+    .replaceAll('{output_schema}', outputInstruction);
+  if (!template.includes('{output_instruction}') && !template.includes('{output_schema}')) {
+    rendered = `${rendered}\n\n${outputInstruction}`;
+  }
+  return rendered.replaceAll('\x7b\x7b', '\x7b').replaceAll('\x7d\x7d', '\x7d');
+}
+
+function highlightFragment(text, fragment, style) {
+  if (!fragment) return text;
+  const escaped = escapeHtml(fragment);
+  return text.split(escaped).join(`<span style="${style}">${escaped}</span>`);
+}
+
+function highlightPrompt(text, claim, outputInstruction) {
+  let html = escapeHtml(text);
+  html = highlightFragment(html, claim, 'background:#3a2c0a;color:#fde68a;border-radius:.25rem;padding:.05rem .2rem');
+  html = highlightFragment(html, outputInstruction, 'background:#082f24;color:#86efac;border-radius:.25rem;padding:.05rem .2rem');
+  html = html.replaceAll(
+    'No fact-checking, outside context, or inferred intent.',
+    '<span style="background:#102a43;color:#93c5fd;border-radius:.25rem;padding:.05rem .2rem">No fact-checking, outside context, or inferred intent.</span>'
+  );
+  return html;
+}
+
+function renderPromptPreview() {
+  const target = document.getElementById('prompt-preview');
+  if (!target) return;
+
+  const selectedId = document.getElementById('preview-arbiter').value;
+  const arbiter = arbiters.find(a => a.id === selectedId) || arbiters[0] || {};
+  const claim = document.getElementById('preview-claim').value || '';
+  const template = document.getElementById('prompt-template').value || '';
+  const outputInstruction = buildOutputInstruction();
+  const finalPrompt = renderTemplate(template, claim, outputInstruction);
+  const systemPrompt = arbiter.system_prompt || '';
+
+  target.innerHTML = `
+    <div class="mb-3">
+      <div class="small fw-semibold mb-2" style="color:#c4b5fd">SYSTEM</div>
+      <pre class="mb-0" style="white-space:pre-wrap;background:#0a0c14;border:1px solid #3d3966;border-radius:.5rem;color:#ddd6fe;padding:1rem;font-size:.82rem">${escapeHtml(systemPrompt)}</pre>
+    </div>
+    <div>
+      <div class="small fw-semibold mb-2" style="color:#93c5fd">USER</div>
+      <pre class="mb-0" style="white-space:pre-wrap;background:#0a0c14;border:1px solid #2d3148;border-radius:.5rem;color:#dbeafe;padding:1rem;font-size:.82rem">${highlightPrompt(finalPrompt, claim, outputInstruction)}</pre>
+    </div>`;
+}
+
+document.addEventListener('input', (event) => {
+  if (['prompt-template', 'include-justifications', 'preview-claim'].includes(event.target.id) || event.target.id?.startsWith('pk-')) {
+    renderPromptPreview();
+  }
+});
+
+document.addEventListener('change', (event) => {
+  if (['preview-arbiter', 'include-justifications'].includes(event.target.id)) {
+    renderPromptPreview();
+  }
+});
+
+loadAll();
+</script>
+{% endblock %}

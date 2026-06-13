@@ -1,0 +1,788 @@
+{% extends "base.html" %}
+{% block title %}Ejecutar — LabelForge{% endblock %}
+{% block content %}
+<div class="page-title">
+  <i class="bi bi-play-circle me-2" style="color:#34d399"></i>Ejecutar etiquetado
+</div>
+
+<!-- Fila 1: Configurar + Estado -->
+<div class="row g-3 mb-4">
+  <div class="col-md-5">
+    <div class="card-dark accent-panel accent-violet h-100">
+      <div class="card-header-label"><i class="bi bi-gear me-1"></i>Configurar run</div>
+      <div class="mb-3">
+        <label class="form-label small text-secondary">
+          <i class="bi bi-sliders me-1"></i>Limite de claims
+        </label>
+        <input type="number" id="limit-input" class="form-control" min="1" placeholder="Vacio = procesar todo">
+        <div class="form-text text-secondary">Util para pruebas rapidas. Deja vacio para procesar el dataset completo.</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label small text-secondary">
+          <i class="bi bi-bookmark-check me-1"></i>Checkpoint
+        </label>
+        <div id="checkpoint-info" class="p-2 rounded" style="background:#0a0c14;border:1px solid #2d3148">
+          <span class="text-secondary small">Cargando...</span>
+        </div>
+        <button class="btn btn-sm btn-danger-soft mt-2" onclick="clearCheckpoint()">
+          <i class="bi bi-x-circle me-1"></i>Limpiar checkpoint
+        </button>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-7">
+    <div class="card-dark accent-panel accent-emerald h-100">
+      <div class="card-header-label"><i class="bi bi-activity me-1"></i>Estado del proceso</div>
+      <div class="d-flex align-items-center gap-2 mb-3">
+        <span class="status-dot idle" id="status-dot"></span>
+        <span class="small text-secondary" id="status-text">Inactivo</span>
+      </div>
+      <div class="row g-2 mb-3">
+        <div class="col-4">
+          <div class="metric-mini accent-emerald text-center">
+            <div class="metric-value" id="stat-processed">—</div>
+            <div class="metric-label">Claims OK</div>
+          </div>
+        </div>
+        <div class="col-4">
+          <div class="metric-mini accent-amber text-center">
+            <div class="metric-value" id="stat-failed">—</div>
+            <div class="metric-label">Fallidos</div>
+          </div>
+        </div>
+        <div class="col-4">
+          <div class="metric-mini accent-rose text-center">
+            <div class="metric-value" id="stat-errors">—</div>
+            <div class="metric-label">Errores</div>
+          </div>
+        </div>
+      </div>
+      <div class="d-flex gap-2">
+        <button id="btn-start" class="btn btn-primary" onclick="startRun()">
+          <i class="bi bi-play-fill me-1"></i>Iniciar
+        </button>
+        <button id="btn-stop" class="btn btn-danger" onclick="stopRun()" disabled>
+          <i class="bi bi-stop-fill me-1"></i>Detener
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Fila 2: Live metrics (visible solo durante run) -->
+<div class="card-dark accent-panel accent-emerald mb-3" id="live-stats-panel" style="display:none">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="card-header-label mb-0"><i class="bi bi-graph-up me-1"></i>Metricas en vivo</div>
+    <span class="badge bg-primary-subtle text-primary border border-primary" id="live-source">Sin run activo</span>
+  </div>
+  <div class="row g-2 mb-3">
+    <div class="col-md-2 col-6">
+      <div class="metric-mini accent-violet text-center">
+        <div class="metric-value" id="live-total-tokens">—</div>
+        <div class="metric-label">Tokens ahora</div>
+      </div>
+    </div>
+    <div class="col-md-2 col-6">
+      <div class="metric-mini accent-blue text-center">
+        <div class="metric-value" id="live-progress">—</div>
+        <div class="metric-label">Progreso</div>
+      </div>
+    </div>
+    <div class="col-md-2 col-6">
+      <div class="metric-mini accent-emerald text-center">
+        <div class="metric-value" id="live-successful-rows">—</div>
+        <div class="metric-label">Claims OK</div>
+      </div>
+    </div>
+    <div class="col-md-2 col-6">
+      <div class="metric-mini accent-rose text-center">
+        <div class="metric-value" id="live-failed-rows">—</div>
+        <div class="metric-label">Fallidos</div>
+      </div>
+    </div>
+    <div class="col-md-2 col-6">
+      <div class="metric-mini accent-amber text-center">
+        <div class="metric-value" id="live-tpr">—</div>
+        <div class="metric-label">Tokens / claim</div>
+      </div>
+    </div>
+    <div class="col-md-2 col-6">
+      <div class="metric-mini accent-cyan text-center">
+        <div class="metric-value" id="live-total-latency">—</div>
+        <div class="metric-label">Latencia ahora</div>
+      </div>
+    </div>
+  </div>
+  <div id="live-arbiters-table"></div>
+  <div id="live-last-claim" class="mt-3"></div>
+</div>
+
+<!-- Fila 3: Log en tiempo real + Errores/Cola -->
+<div class="row g-3 mb-3">
+  <div class="col-lg-7">
+    <div class="card-dark accent-panel accent-blue h-100">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="card-header-label mb-0"><i class="bi bi-terminal me-1"></i>Log en tiempo real</div>
+        <div>
+          <button class="btn btn-sm btn-outline-secondary me-2" onclick="clearLog()">
+            <i class="bi bi-eraser me-1"></i>Limpiar
+          </button>
+          <span class="text-secondary small">
+            <i class="bi bi-info-circle me-1"></i>Usa Detener solo si es necesario.
+          </span>
+        </div>
+      </div>
+      <div class="log-box" id="log-box"></div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="row g-3">
+      <div class="col-12">
+        <div class="card-dark accent-panel accent-rose h-100">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <div class="card-header-label mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Errores detectados</div>
+            <span class="badge bg-danger-subtle text-danger border border-danger" id="errors-count">0</span>
+          </div>
+          <div id="errors-list" class="small text-secondary" style="max-height:200px;overflow-y:auto">Sin errores detectados.</div>
+        </div>
+      </div>
+      <div class="col-12">
+        <div class="card-dark accent-panel accent-amber h-100">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <div class="card-header-label mb-0"><i class="bi bi-queue me-1"></i>Claims en cola de reintentos</div>
+            <span class="badge bg-warning-subtle text-warning border border-warning" id="queued-count">0</span>
+          </div>
+          <div id="queued-list" class="small text-secondary" style="max-height:200px;overflow-y:auto">Sin claims encolados.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Fila 4: Resultados post-run -->
+<div class="card-dark accent-panel accent-blue mb-3" id="stats-panel" style="display:none">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="card-header-label mb-0"><i class="bi bi-bar-chart me-1"></i>Resumen del ultimo output guardado</div>
+    <span class="badge bg-success-subtle text-success border border-success" id="stats-source"></span>
+  </div>
+  <div class="row g-2 mb-3">
+    <div class="col-md-2 col-6">
+      <div class="metric-mini accent-violet text-center">
+        <div class="metric-value" id="stats-total-tokens">—</div>
+        <div class="metric-label">Tokens globales</div>
+      </div>
+    </div>
+    <div class="col-md-2 col-6">
+      <div class="metric-mini accent-blue text-center">
+        <div class="metric-value" id="stats-total-rows">—</div>
+        <div class="metric-label">Claims totales</div>
+      </div>
+    </div>
+    <div class="col-md-2 col-6">
+      <div class="metric-mini accent-emerald text-center">
+        <div class="metric-value" id="stats-successful-rows">—</div>
+        <div class="metric-label">Claims OK</div>
+      </div>
+    </div>
+    <div class="col-md-2 col-6">
+      <div class="metric-mini accent-rose text-center">
+        <div class="metric-value" id="stats-failed-rows">—</div>
+        <div class="metric-label">Fallidos</div>
+      </div>
+    </div>
+    <div class="col-md-2 col-6">
+      <div class="metric-mini accent-amber text-center">
+        <div class="metric-value" id="stats-tpr">—</div>
+        <div class="metric-label">Tokens / claim</div>
+      </div>
+    </div>
+    <div class="col-md-2 col-6">
+      <div class="metric-mini accent-cyan text-center">
+        <div class="metric-value" id="stats-total-latency">—</div>
+        <div class="metric-label">Latencia total</div>
+      </div>
+    </div>
+  </div>
+  <div id="stats-arbiters-table"></div>
+</div>
+
+<!-- Fila 5: Resultados obtenidos (tabla por claim) -->
+<div class="card-dark accent-panel accent-cyan mb-3" id="results-panel" style="display:none">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="card-header-label mb-0"><i class="bi bi-table me-1"></i>Resultados obtenidos</div>
+    <span class="badge bg-info-subtle text-info border border-info" id="stats-results-count"></span>
+  </div>
+  <div id="stats-results-table"></div>
+</div>
+
+<!-- Fila 6: Outputs generados -->
+<div class="card-dark accent-panel accent-emerald mb-3">
+  <div class="card-header-label"><i class="bi bi-folder me-1"></i>Archivos de salida generados</div>
+  <div id="outputs-table"><span class="text-secondary small">Cargando...</span></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let sseSource = null;
+let statsOK = 0, statsFailed = 0, statsErrors = 0;
+let runErrors = [];
+let queuedClaims = [];
+let lastArbErrors = {};
+let latestLiveStats = null;
+
+// ---------- checkpoint ----------
+async function loadCheckpoint() {
+  const cp = await fetch('/api/checkpoint/status').then(r => r.json());
+  const el = document.getElementById('checkpoint-info');
+  const runState = cp.run_state;
+  if (runState?.status === 'paused') {
+    el.innerHTML = `<div class="text-warning small">
+      <div><i class="bi bi-pause-circle me-1"></i><strong>Run pausado:</strong> ${escapeHtml(runState.run_id || '')}</div>
+      <div class="mt-1">Procesados: <strong>${formatNumber(runState.processed_rows)}</strong> / ${formatNumber(runState.total_rows)}</div>
+      <div class="mt-1">Motivo: <span class="text-danger">${escapeHtml(runState.pause_kind || 'pausa')}</span> — ${escapeHtml(runState.pause_reason || 'sin detalle')}</div>
+      <div class="mt-1 text-secondary">Presiona Iniciar para reanudar desde el checkpoint.</div>
+    </div>`;
+  } else if (cp.exists) {
+    const status = runState?.status ? ` · estado: ${escapeHtml(runState.status)}` : '';
+    el.innerHTML = `<span class="text-warning small"><i class="bi bi-bookmark-check me-1"></i>
+      Checkpoint activo: <strong>${cp.claims_done}</strong> claims procesados (ultimo indice: ${cp.last_index})${status}</span>`;
+  } else {
+    el.innerHTML = '<span class="text-secondary small"><i class="bi bi-bookmark-x me-1"></i>Sin checkpoint — se procesara desde el inicio</span>';
+  }
+}
+
+async function clearCheckpoint() {
+  if (!confirm('¿Limpiar el checkpoint? Se perdera el progreso guardado.')) return;
+  await fetch('/api/checkpoint/clear', {method: 'POST'});
+  await loadCheckpoint();
+  showToast('Checkpoint limpiado');
+}
+
+// ---------- outputs ----------
+async function loadOutputs() {
+  const files = await fetch('/api/outputs').then(r => r.json());
+  const el = document.getElementById('outputs-table');
+  if (!files.length) {
+    el.innerHTML = '<span class="text-secondary small">Sin outputs todavia.</span>';
+    return;
+  }
+  el.innerHTML = `
+    <table class="table table-dark table-sm" style="border-color:#2d3148;font-size:.82rem">
+      <thead><tr>
+        <th class="text-secondary">Archivo</th>
+        <th class="text-secondary">Descripcion</th>
+        <th class="text-secondary">Tamano</th>
+        <th class="text-secondary">Modificado</th>
+        <th class="text-secondary" style="width:70px">Accion</th>
+      </tr></thead>
+      <tbody>${files.map(f => `
+        <tr>
+          <td class="text-truncate" style="max-width:260px">
+            <a href="/outputs/${encodeURIComponent(f.name)}" target="_blank" style="color:#34d399;text-decoration:none;font-weight:600" title="Abrir CSV">
+              <i class="bi bi-filetype-csv me-1"></i>${escapeHtml(f.name)}
+            </a>
+          </td>
+          <td style="min-width:360px">
+            <div>${escapeHtml(f.description || 'CSV etiquetado generado por el pipeline.')}</div>
+            <div class="text-secondary small mt-1">
+              ${f.row_count !== null && f.row_count !== undefined ? `${formatNumber(f.row_count)} filas` : 'filas no calculadas'}
+              ${f.total_tokens_global !== null && f.total_tokens_global !== undefined ? ` / ${formatNumber(f.total_tokens_global)} tokens` : ''}
+              ${f.has_latency ? ' / con latencia' : ' / sin latencia'}
+            </div>
+          </td>
+          <td>${f.size_kb} KB</td>
+          <td>${f.modified}</td>
+          <td>
+            <button class="btn btn-sm btn-danger-soft" style="padding:.15rem .5rem;font-size:.75rem" onclick="deleteOutput('${encodeURIComponent(f.name)}')" title="Eliminar archivo">
+              <i class="bi bi-trash"></i>
+            </button>
+          </td>
+        </tr>
+      `).join('')}</tbody>
+    </table>`;
+}
+
+async function deleteOutput(name) {
+  const decoded = decodeURIComponent(name);
+  if (!confirm(`Eliminar el archivo "${decoded}"?`)) return;
+  try {
+    const r = await fetch(`/api/outputs/${name}`, { method: 'DELETE' });
+    if (!r.ok) { const e = await r.json(); throw new Error(e.error); }
+    showToast(`Archivo "${decoded}" eliminado`, 'success');
+    await loadOutputs();
+  } catch (err) {
+    showToast(`Error: ${err.message}`, 'error');
+  }
+}
+
+async function loadFailedQueue() {
+  const items = await fetch('/api/failed-queue').then(r => r.json()).catch(() => []);
+  queuedClaims = items.map(item => ({
+    claim: item.index,
+    arbiter: 'cola persistida',
+    reason: item.reason || item.claim || 'sin detalle',
+  }));
+  renderRunLists();
+}
+
+// ---------- run ----------
+async function startRun() {
+  const limit = document.getElementById('limit-input').value.trim();
+
+  statsOK = 0; statsFailed = 0; statsErrors = 0;
+  runErrors = [];
+  queuedClaims = [];
+  lastArbErrors = {};
+  latestLiveStats = null;
+  updateStats();
+  renderRunLists();
+  resetLiveStats();
+  clearLog();
+
+  const body = {};
+  if (limit) body.limit = parseInt(limit);
+
+  const res = await fetch('/api/run/start', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) { showToast(data.error || 'Error al iniciar', 'error'); return; }
+
+  setRunning(true);
+  startSSE();
+}
+
+async function stopRun() {
+  const res = await fetch('/api/run/stop', {method: 'POST'});
+  const data = await res.json();
+  if (!res.ok) { showToast(data.error || 'Error al detener', 'error'); return; }
+  showToast('Proceso detenido', 'warn');
+  setRunning(false);
+  if (sseSource) { sseSource.close(); sseSource = null; }
+}
+
+function startSSE() {
+  if (sseSource) sseSource.close();
+  sseSource = new EventSource('/api/run/logs');
+
+  sseSource.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'heartbeat') return;
+    if (msg.type === 'metric') {
+      renderLiveStats(msg.data);
+      return;
+    }
+    if (msg.type === 'exit') {
+      const code = msg.msg.replace('__EXIT__ ', '');
+      appendLog(`--- Proceso finalizado (${code}) ---`, code === '0' ? 'ok' : 'error');
+      setRunning(false);
+      sseSource.close(); sseSource = null;
+      loadCheckpoint();
+      loadOutputs();
+      loadCurrentRunStats();
+      loadRunStats();
+      return;
+    }
+    appendLog(msg.msg);
+    parseStats(msg.msg);
+  };
+
+  sseSource.onerror = () => {
+    if (!document.getElementById('btn-stop').disabled) {
+      appendLog('--- Conexion SSE perdida ---', 'warn');
+      setRunning(false);
+    }
+  };
+}
+
+function appendLog(line, type = null) {
+  const box = document.getElementById('log-box');
+  const div = document.createElement('div');
+  if (!type) {
+    if (line.includes('[WARNING]') || line.includes('Fallo') || line.includes('fallido')) type = 'warn';
+    else if (line.includes('[ERROR]') || line.includes('Error') || line.includes('FAILED')) type = 'error';
+    else if (line.includes('OK') || line.includes('completad') || line.includes('guardado')) type = 'ok';
+    else type = 'info';
+  }
+  div.className = `log-${type}`;
+  div.textContent = line;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+function clearLog() {
+  document.getElementById('log-box').innerHTML = '';
+}
+
+function parseStats(line) {
+  const isErrorLine = line.includes('[ERROR]') || line.includes('Error permanente') || line.includes('ClientError') || line.includes('RESOURCE_EXHAUSTED') || line.includes('Too Many Requests');
+  const isWarnError = line.includes('[WARNING]') && (line.includes('Rate limiter') || line.includes('fallo') || line.includes('Fallo') || line.includes('429'));
+  const arbError = line.match(/\[(arb[^\]]+)\]\s+\[([^\]]+)\]\s+(.+)/);
+  if (arbError) {
+    lastArbErrors[arbError[1]] = `${arbError[2]}: ${arbError[3]}`;
+  }
+
+  const queued = line.match(/\[claim\s+(\d+)\]\s+Arbitro\s+(\S+)\s+fallo\s+—\s+claim encolado(?:\s+—\s+(.+))?/);
+  if (queued) {
+    const reason = queued[3] || lastArbErrors[queued[2]] || 'No se encontro detalle previo del error.';
+    queuedClaims.push({claim: queued[1], arbiter: queued[2], reason});
+    statsFailed++;
+    renderRunLists();
+    updateStats();
+    return;
+  }
+
+  if (line.includes('] OK —')) {
+    statsOK++;
+    updateStats();
+  } else if (line.includes('Fallo definitivo')) {
+    statsFailed++;
+    runErrors.push({kind: 'Fallo definitivo', detail: line});
+    renderRunLists();
+    updateStats();
+  } else if (isErrorLine || isWarnError) {
+    statsErrors++;
+    runErrors.push({kind: line.includes('429') || line.includes('RESOURCE_EXHAUSTED') ? 'Rate limit / cuota' : 'Error', detail: line});
+    renderRunLists();
+    updateStats();
+  }
+}
+
+function updateStats() {
+  document.getElementById('stat-processed').textContent = statsOK;
+  document.getElementById('stat-failed').textContent = statsFailed;
+  document.getElementById('stat-errors').textContent = statsErrors;
+}
+
+function resetLiveStats() {
+  const panel = document.getElementById('live-stats-panel');
+  panel.style.display = '';
+  document.getElementById('live-source').textContent = 'Iniciando run...';
+  document.getElementById('live-total-tokens').textContent = '0';
+  document.getElementById('live-progress').textContent = '0/—';
+  document.getElementById('live-successful-rows').textContent = '0';
+  document.getElementById('live-failed-rows').textContent = '0';
+  document.getElementById('live-tpr').textContent = '0';
+  document.getElementById('live-total-latency').textContent = '0.000s';
+  document.getElementById('live-arbiters-table').innerHTML = '<span class="text-secondary small">Esperando metricas del pipeline...</span>';
+  document.getElementById('live-last-claim').innerHTML = '';
+}
+
+async function loadCurrentRunStats() {
+  const res = await fetch('/api/run/current-stats').catch(() => null);
+  if (!res || !res.ok) return;
+  const data = await res.json();
+  if (data.run_id || data.active || data.finished) {
+    renderLiveStats(data);
+  }
+}
+
+function renderLiveStats(data) {
+  if (!data) return;
+  latestLiveStats = data;
+  const panel = document.getElementById('live-stats-panel');
+  panel.style.display = '';
+
+  const source = data.source_file || data.run_id || 'run actual';
+  const state = data.active ? 'en vivo' : data.finished ? 'finalizado' : data.pause_kind ? 'pausado' : 'preparado';
+  document.getElementById('live-source').textContent = `${source} / ${state}`;
+
+  const processed = Number(data.processed_rows || 0);
+  const total = Number(data.total_rows || 0);
+  const ok = Number(data.successful_rows || 0);
+  const failed = Number(data.failed_rows || 0);
+  const totalTokens = Number(data.total_tokens_global || 0);
+
+  document.getElementById('live-total-tokens').textContent = formatNumber(totalTokens);
+  document.getElementById('live-progress').textContent = `${formatNumber(processed)}/${total ? formatNumber(total) : '—'}`;
+  document.getElementById('live-successful-rows').textContent = formatNumber(ok);
+  document.getElementById('live-failed-rows').textContent = formatNumber(failed);
+  document.getElementById('live-tpr').textContent = processed > 0 ? formatNumber(Math.round(totalTokens / processed)) : '0';
+  document.getElementById('live-total-latency').textContent = formatSeconds(data.total_latency_s);
+
+  statsOK = ok;
+  statsFailed = failed;
+  updateStats();
+
+  const arbiters = Object.entries(data.arbiters || {});
+  const tbody = arbiters.map(([id, s]) => `
+    <tr>
+      <td class="text-secondary">
+        <div>${escapeHtml(id)}</div>
+        ${s.name && s.name !== id ? `<div class="small text-secondary">${escapeHtml(s.name)}</div>` : ''}
+      </td>
+      <td>${formatNumber(s.prompt_tokens)}</td>
+      <td>${formatNumber(s.completion_tokens)}</td>
+      <td class="fw-semibold">${formatNumber(s.total_tokens)}</td>
+      <td>${formatNumber(s.calls)}</td>
+      <td>${formatSeconds(s.latency_avg_s)}</td>
+      <td>${formatSeconds(s.latency_min_s)} / ${formatSeconds(s.latency_max_s)}</td>
+      <td>${formatSeconds(s.latency_total_s)}</td>
+    </tr>
+  `).join('');
+
+  document.getElementById('live-arbiters-table').innerHTML = `
+    <div style="overflow-x:auto">
+      <table class="table table-dark table-sm mb-0" style="border-color:#2d3148;font-size:.8rem">
+        <thead><tr>
+          <th class="text-secondary">Arbitro</th>
+          <th class="text-secondary">Prompt tok.</th>
+          <th class="text-secondary">Complet. tok.</th>
+          <th class="text-secondary">Total tok.</th>
+          <th class="text-secondary">Llamadas</th>
+          <th class="text-secondary">Lat. prom.</th>
+          <th class="text-secondary">Min / Max</th>
+          <th class="text-secondary">Lat. total</th>
+        </tr></thead>
+        <tbody>${tbody || '<tr><td colspan="8" class="text-secondary">Sin metricas por arbitro todavia.</td></tr>'}</tbody>
+      </table>
+    </div>`;
+
+  const last = data.last_claim;
+  if (data.pause_kind && !last) {
+    document.getElementById('live-last-claim').innerHTML = `
+      <div class="p-3 rounded" style="background:#130b10;border:1px solid #3f1f2a">
+        <div class="fw-semibold text-danger">Run pausado</div>
+        <div class="small mt-1">${escapeHtml(data.pause_kind)} — ${escapeHtml(data.pause_reason || 'sin detalle')}</div>
+      </div>`;
+    return;
+  }
+  if (!last) {
+    document.getElementById('live-last-claim').innerHTML = '';
+    return;
+  }
+  const status = last.event === 'claim_ok' ? 'OK' : last.event === 'claim_failed' ? 'Fallido' : 'Saltado';
+  const statusClass = last.event === 'claim_ok' ? 'text-success' : last.event === 'claim_failed' ? 'text-danger' : 'text-warning';
+  const consensus = last.consensus && data.principles ? renderConsensus(last.consensus, data.principles) : '';
+  document.getElementById('live-last-claim').innerHTML = `
+    <div class="p-3 rounded" style="background:#0a0c14;border:1px solid #2d3148">
+      <div class="d-flex justify-content-between gap-3 mb-2">
+        <div class="fw-semibold">Ultimo claim procesado</div>
+        <div class="${statusClass} small text-nowrap">#${escapeHtml(last.row_index)} / ${status}</div>
+      </div>
+      <div class="small">${escapeHtml(last.claim || last.reason || '')}</div>
+      ${consensus ? `<div class="mt-2">${consensus}</div>` : ''}
+      <div class="text-secondary small mt-2">
+        ${last.stage ? `Etapa: ${escapeHtml(last.stage)}` : ''}
+        ${last.total_tokens ? ` / ${formatNumber(last.total_tokens)} tokens` : ''}
+        ${last.total_latency_s !== null && last.total_latency_s !== undefined ? ` / ${formatSeconds(last.total_latency_s)}` : ''}
+      </div>
+    </div>`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+}
+
+function formatNumber(value) {
+  const n = Number(value || 0);
+  return Number.isFinite(n) ? n.toLocaleString() : '—';
+}
+
+function formatSeconds(value) {
+  if (value === null || value === undefined || value === '') return '—';
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return '—';
+  return `${n >= 10 ? n.toFixed(1) : n.toFixed(3)}s`;
+}
+
+function labelBadge(principle, value) {
+  let cls = 'bg-secondary-subtle text-secondary border-secondary';
+  let text = '—';
+  if (value === 1) { cls = 'bg-success-subtle text-success border-success'; text = '1'; }
+  else if (value === 0) { cls = 'bg-dark text-secondary border-secondary'; text = '0'; }
+  else if (value === -1) { cls = 'bg-danger-subtle text-danger border-danger'; text = 'ERR'; }
+  return `<span class="badge border ${cls} me-1 mb-1">${escapeHtml(principle)}=${text}</span>`;
+}
+
+function renderConsensus(consensus, principles) {
+  return principles.map(p => labelBadge(p, consensus?.[p])).join('');
+}
+
+function renderArbiterResult(arb, principles) {
+  const labels = arb.labels || {};
+  const badges = principles.map(p => labelBadge(p, labels[p]?.value)).join('');
+  const reasons = principles.map(p => {
+    const why = labels[p]?.why || '';
+    if (!why) return '';
+    return `<div class="mt-1"><span class="text-secondary">${escapeHtml(p)}</span>: ${escapeHtml(why)}</div>`;
+  }).join('');
+  const usage = `${formatNumber(arb.total_tokens)} tok / ${formatSeconds(arb.latency_s)}`;
+  return `
+    <div class="pb-2 mb-2" style="border-bottom:1px solid #2d3148">
+      <div class="d-flex justify-content-between gap-3">
+        <span class="fw-semibold">${escapeHtml(arb.id)}</span>
+        <span class="text-secondary small text-nowrap">${usage}</span>
+      </div>
+      <div class="mt-1">${badges}</div>
+      ${reasons ? `
+        <details class="mt-1">
+          <summary class="text-secondary small">Justificaciones</summary>
+          <div class="small mt-1" style="max-width:560px">${reasons}</div>
+        </details>` : ''}
+    </div>`;
+}
+
+function renderResultsTable(data) {
+  const panel = document.getElementById('results-panel');
+  const target = document.getElementById('stats-results-table');
+  const rows = data.results || [];
+  const principles = data.principles || [];
+
+  if (!rows.length) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = '';
+  document.getElementById('stats-results-count').textContent = data.results_truncated
+    ? `Mostrando ${formatNumber(data.results_count)} de ${formatNumber(data.results_total)}`
+    : `${formatNumber(data.results_total)} claims`;
+
+  const body = rows.map(row => {
+    const meta = [row.dataset, row.class ? `class ${row.class}` : ''].filter(Boolean).join(' / ');
+    const claimEs = row.claim_es && row.claim_es !== row.claim
+      ? `<div class="text-secondary small mt-2">${escapeHtml(row.claim_es)}</div>`
+      : '';
+    const statusClass = row.status === 'failed' ? 'text-danger' : row.status === 'ok' ? 'text-success' : 'text-secondary';
+    const statusText = row.status === 'failed' ? 'Fallido' : row.status === 'ok' ? 'OK' : 'Pendiente';
+    return `
+      <tr>
+        <td class="text-secondary text-nowrap">
+          #${row.index}
+          <div class="${statusClass} small">${statusText}</div>
+        </td>
+        <td style="min-width:300px;max-width:420px">
+          <div>${escapeHtml(row.claim)}</div>
+          ${claimEs}
+          ${meta ? `<div class="text-secondary small mt-2">${escapeHtml(meta)}</div>` : ''}
+        </td>
+        <td style="min-width:170px">${renderConsensus(row.consensus, principles)}</td>
+        <td style="min-width:420px">${(row.arbiters || []).map(arb => renderArbiterResult(arb, principles)).join('')}</td>
+        <td class="text-nowrap fw-semibold">${formatNumber(row.total_tokens)}</td>
+        <td class="text-nowrap">${formatSeconds(row.total_latency_s)}</td>
+      </tr>`;
+  }).join('');
+
+  target.innerHTML = `
+    <div style="overflow:auto;max-height:720px">
+      <table class="table table-dark table-sm align-middle mb-0" style="border-color:#2d3148;font-size:.8rem">
+        <thead style="position:sticky;top:0;z-index:1">
+          <tr>
+            <th class="text-secondary">#</th>
+            <th class="text-secondary">Claim</th>
+            <th class="text-secondary">Consenso</th>
+            <th class="text-secondary">Arbitros</th>
+            <th class="text-secondary">Tokens</th>
+            <th class="text-secondary">Tiempo</th>
+          </tr>
+        </thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>`;
+}
+
+function renderRunLists() {
+  document.getElementById('errors-count').textContent = runErrors.length;
+  document.getElementById('queued-count').textContent = queuedClaims.length;
+
+  const errorsEl = document.getElementById('errors-list');
+  if (!runErrors.length) {
+    errorsEl.innerHTML = 'Sin errores detectados.';
+  } else {
+    errorsEl.innerHTML = `<div style="max-height:260px;overflow:auto">${runErrors.slice(-30).reverse().map(e => `
+      <div class="p-2 mb-2 rounded" style="background:#130b10;border:1px solid #3f1f2a">
+        <div class="text-danger fw-semibold">${escapeHtml(e.kind)}</div>
+        <div class="text-secondary" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.76rem">${escapeHtml(e.detail)}</div>
+      </div>
+    `).join('')}</div>`;
+  }
+
+  const queuedEl = document.getElementById('queued-list');
+  if (!queuedClaims.length) {
+    queuedEl.innerHTML = 'Sin claims encolados.';
+  } else {
+    queuedEl.innerHTML = `<div style="max-height:260px;overflow:auto">${queuedClaims.slice(-30).reverse().map(q => `
+      <div class="p-2 mb-2 rounded" style="background:#151107;border:1px solid #49350e">
+        <div class="text-warning fw-semibold">Claim ${escapeHtml(q.claim)} · ${escapeHtml(q.arbiter)}</div>
+        <div class="text-secondary" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.76rem">${escapeHtml(q.reason)}</div>
+      </div>
+    `).join('')}</div>`;
+  }
+}
+
+function setRunning(running) {
+  document.getElementById('btn-start').disabled = running;
+  document.getElementById('btn-stop').disabled = !running;
+  const dot = document.getElementById('status-dot');
+  const txt = document.getElementById('status-text');
+  dot.className = `status-dot ${running ? 'running' : 'idle'}`;
+  txt.textContent = running ? 'Corriendo...' : 'Inactivo';
+}
+
+// ---------- token / latency stats ----------
+async function loadRunStats() {
+  const res = await fetch('/api/run/stats?limit=250');
+  if (!res.ok) return;
+  const data = await res.json();
+  if (data.error) return;
+
+  const panel = document.getElementById('stats-panel');
+  panel.style.display = '';
+  document.getElementById('stats-source').textContent = data.source_file;
+  document.getElementById('stats-total-tokens').textContent = formatNumber(data.total_tokens_global);
+  document.getElementById('stats-total-rows').textContent = formatNumber(data.total_rows);
+  document.getElementById('stats-successful-rows').textContent = formatNumber(data.successful_rows);
+  document.getElementById('stats-failed-rows').textContent = formatNumber(data.failed_rows);
+  const tpr = data.total_rows > 0 ? Math.round((data.total_tokens_global || 0) / data.total_rows) : 0;
+  document.getElementById('stats-tpr').textContent = formatNumber(tpr);
+  document.getElementById('stats-total-latency').textContent = formatSeconds(data.total_latency_s);
+
+  const arbiters = Object.entries(data.arbiters || {});
+  const tbody = arbiters.map(([id, s]) => `
+    <tr>
+      <td class="text-secondary">${id}</td>
+      <td>${formatNumber(s.prompt_tokens)}</td>
+      <td>${formatNumber(s.completion_tokens)}</td>
+      <td class="fw-semibold">${formatNumber(s.total_tokens)}</td>
+      <td>${formatNumber(s.calls)}</td>
+      <td>${formatSeconds(s.latency_avg_s)}</td>
+      <td>${formatSeconds(s.latency_min_s)} / ${formatSeconds(s.latency_max_s)}</td>
+      <td>${formatSeconds(s.latency_total_s)}</td>
+    </tr>
+  `).join('');
+
+  document.getElementById('stats-arbiters-table').innerHTML = `
+    <div style="overflow-x:auto">
+    <table class="table table-dark table-sm mb-0" style="border-color:#2d3148;font-size:.8rem">
+      <thead><tr>
+        <th class="text-secondary">Arbitro</th>
+        <th class="text-secondary">Prompt tok.</th>
+        <th class="text-secondary">Complet. tok.</th>
+        <th class="text-secondary">Total tok.</th>
+        <th class="text-secondary">Llamadas</th>
+        <th class="text-secondary">Lat. prom.</th>
+        <th class="text-secondary">Min / Max</th>
+        <th class="text-secondary">Lat. total</th>
+      </tr></thead>
+      <tbody>${tbody || '<tr><td colspan="8" class="text-secondary">Sin metricas por arbitro.</td></tr>'}</tbody>
+    </table>
+    </div>`;
+
+  renderResultsTable(data);
+}
+
+// ---------- init ----------
+loadCheckpoint();
+loadOutputs();
+loadFailedQueue();
+loadCurrentRunStats();
+loadRunStats();
+
+fetch('/api/run/status').then(r => r.json()).then(s => {
+  if (s.running) { setRunning(true); startSSE(); }
+});
+</script>
+{% endblock %}

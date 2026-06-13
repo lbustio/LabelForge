@@ -1,0 +1,656 @@
+{% extends "base.html" %}
+{% block title %}Arbitros — LabelForge{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div class="page-title mb-0">Arbitros</div>
+  <button class="btn btn-primary btn-sm" onclick="openModal()">
+    <i class="bi bi-plus-lg me-1"></i>Nuevo arbitro
+  </button>
+</div>
+
+<div id="arbiters-list"></div>
+
+<!-- ===================== MODAL CREAR / EDITAR ===================== -->
+<div class="modal fade" id="arbModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content" style="background:#1a1d27;border:1px solid #2d3148;color:#e2e8f0">
+      <div class="modal-header border-0 pb-0">
+        <h5 class="modal-title" id="modalTitle">Nuevo arbitro</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body pt-3">
+        <input type="hidden" id="arb-editing-id">
+
+        <!-- Identidad -->
+        <div class="row g-3 mb-4">
+          <div class="col-md-3">
+            <label class="form-label small text-secondary">ID <span class="text-danger">*</span></label>
+            <input type="text" id="arb-id" class="form-control" placeholder="ej: arb4">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small text-secondary">Nombre del rol <span class="text-danger">*</span></label>
+            <input type="text" id="arb-name" class="form-control" placeholder="ej: Linguista Forense">
+          </div>
+          <div class="col-md-5">
+            <label class="form-label small text-secondary">Persona</label>
+            <input type="text" id="arb-persona" class="form-control" placeholder="ej: Dr. Amara Osei">
+          </div>
+        </div>
+
+        <!-- Proveedor -->
+        <div class="p-3 rounded mb-4 accent-panel accent-cyan" style="background:#12141e;border:1px solid rgba(var(--tone-cyan), .28)">
+          <div class="card-header-label mb-3">Configuracion del proveedor LLM</div>
+
+          <!-- Selector de proveedor -->
+          <div class="row g-3 mb-3">
+            <div class="col-md-12">
+              <label class="form-label small text-secondary">Proveedor <span class="text-danger">*</span></label>
+              <div class="d-flex gap-2 flex-wrap" id="provider-tabs">
+                <button type="button" class="btn btn-sm provider-tab active" data-provider="gemini"        onclick="selectProvider('gemini')">
+                  <i class="bi bi-google me-1"></i>Gemini AI Studio
+                </button>
+                <button type="button" class="btn btn-sm provider-tab" data-provider="vertex_gemini" onclick="selectProvider('vertex_gemini')">
+                  <i class="bi bi-cloud-check me-1"></i>Gemini Vertex AI
+                </button>
+                <button type="button" class="btn btn-sm provider-tab" data-provider="anthropic"    onclick="selectProvider('anthropic')">
+                  <i class="bi bi-stars me-1"></i>Anthropic Claude
+                </button>
+                <button type="button" class="btn btn-sm provider-tab" data-provider="openai"       onclick="selectProvider('openai')">
+                  <i class="bi bi-robot me-1"></i>OpenAI ChatGPT
+                </button>
+                <button type="button" class="btn btn-sm provider-tab" data-provider="ollama"       onclick="selectProvider('ollama')">
+                  <i class="bi bi-hdd-rack me-1"></i>Ollama (local)
+                </button>
+                <button type="button" class="btn btn-sm provider-tab" data-provider="openai_compat" onclick="selectProvider('openai_compat')">
+                  <i class="bi bi-plug me-1"></i>OpenAI-compatible
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- API Key (no para ollama) -->
+          <div class="row g-3 mb-3" id="apikey-section">
+            <div class="col-md-6">
+              <label class="form-label small text-secondary">Variable de entorno de la API key</label>
+              <input type="text" id="arb-api-key-env" class="form-control" placeholder="ej: GEMINI_API_KEY">
+              <div class="form-text text-secondary">Nombre de la variable en tu archivo .env</div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small text-secondary">API key override (opcional)</label>
+              <input type="password" id="arb-api-key-override" class="form-control" placeholder="Solo si quieres sobreescribir el .env">
+              <div class="form-text text-secondary">Si se rellena, tiene prioridad sobre el .env</div>
+            </div>
+          </div>
+
+          <!-- Base URL (ollama / openai_compat) -->
+          <div class="row g-3 mb-3" id="baseurl-section" style="display:none!important">
+            <div class="col-md-8">
+              <label class="form-label small text-secondary">Base URL <span class="text-danger">*</span></label>
+              <input type="text" id="arb-base-url" class="form-control" placeholder="ej: http://localhost:11434/v1">
+              <div class="form-text text-secondary">URL base del servidor local. Para Ollama: http://localhost:11434/v1</div>
+            </div>
+          </div>
+
+          <!-- Vertex AI (Google Cloud credits / ADC) -->
+          <div class="row g-3 mb-3" id="vertex-section" style="display:none!important">
+            <div class="col-md-6">
+              <label class="form-label small text-secondary">Google Cloud Project ID <span class="text-danger">*</span></label>
+              <input type="text" id="arb-vertex-project" class="form-control" placeholder="ej: mi-proyecto-gcp">
+              <div class="form-text text-secondary">Tambien puede venir de GOOGLE_CLOUD_PROJECT en .env.</div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small text-secondary">Region Vertex AI</label>
+              <input type="text" id="arb-vertex-location" class="form-control" placeholder="us-central1" value="us-central1">
+              <div class="form-text text-secondary">Ej: us-central1, europe-west4.</div>
+            </div>
+          </div>
+
+          <!-- Selector de modelo -->
+          <div class="mb-2">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <label class="form-label small text-secondary mb-0">
+                Modelo <span class="text-danger">*</span>
+              </label>
+              <div class="d-flex align-items-center gap-2">
+                <div class="btn-group btn-group-sm" id="tier-filter-group">
+                  <button type="button" class="btn btn-outline-secondary active" id="filter-all"   onclick="filterModels('all')">Todos</button>
+                  <button type="button" class="btn btn-outline-secondary"        id="filter-pro"   onclick="filterModels('pro')">Pro/Opus</button>
+                  <button type="button" class="btn btn-outline-secondary"        id="filter-flash" onclick="filterModels('mid')">Flash/Sonnet</button>
+                  <button type="button" class="btn btn-outline-secondary"        id="filter-lite"  onclick="filterModels('lite')">Lite/Haiku</button>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" onclick="reloadModels()" title="Recargar modelos">
+                  <i class="bi bi-arrow-clockwise"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- Grid de tarjetas de modelos -->
+            <div id="model-grid" class="row g-2 mb-3"
+              style="max-height:240px;overflow-y:auto;padding:2px;scrollbar-width:thin;scrollbar-color:#2d3148 transparent">
+              <div class="col-12 text-center text-secondary py-4" id="model-grid-placeholder">
+                <i class="bi bi-arrow-up-circle me-1"></i>Selecciona un proveedor para ver los modelos disponibles
+              </div>
+            </div>
+
+            <!-- Modelo seleccionado + aviso de rate limits -->
+            <div class="d-flex align-items-center gap-2 p-2 rounded" style="background:#0a0c14;border:1px solid #2d3148;min-height:42px">
+              <span class="text-secondary small me-1">Modelo seleccionado:</span>
+              <span id="selected-model-chip" class="text-secondary small fst-italic">ninguno</span>
+            </div>
+
+            <!-- Rate limit info (solo para Gemini) -->
+            <div id="rate-limit-box" class="mt-2 p-2 rounded" style="display:none;font-size:.8rem">
+            </div>
+          </div>
+        </div>
+
+        <!-- Generation config -->
+        <div class="row g-3 mb-4">
+          <div class="col-md-3">
+            <label class="form-label small text-secondary">Temperature</label>
+            <input type="number" id="arb-temp" class="form-control" value="0.1" min="0" max="2" step="0.05">
+            <div class="form-text text-secondary">0 = determinista · 1 = creativo</div>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small text-secondary">Max output tokens</label>
+            <input type="number" id="arb-tokens" class="form-control" value="600" min="100" max="8192">
+          </div>
+        </div>
+
+        <!-- System prompt -->
+        <div class="mb-2">
+          <label class="form-label small text-secondary">System prompt <span class="text-danger">*</span></label>
+          <textarea id="arb-system-prompt" class="form-control" rows="9"
+            placeholder="Describe la personalidad, experiencia y enfoque de este arbitro..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer border-0">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="saveArbiter()">
+          <i class="bi bi-floppy me-1"></i>Guardar
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== MODAL ELIMINAR ===================== -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content" style="background:#1a1d27;border:1px solid #2d3148;color:#e2e8f0">
+      <div class="modal-body text-center py-4">
+        <i class="bi bi-trash3 text-danger fs-1 mb-3 d-block"></i>
+        <p>¿Eliminar <strong id="delete-arb-name"></strong>?</p>
+        <div class="d-flex gap-2 justify-content-center mt-3">
+          <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+          <button class="btn btn-danger btn-sm" onclick="confirmDelete()">Eliminar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.provider-tab {
+  background: #12141e; border: 1px solid #2d3148; color: #94a3b8;
+  border-radius: .4rem; padding: .35rem .8rem; font-size: .82rem;
+  transition: all .15s;
+}
+.provider-tab:hover  { background: rgba(var(--tone-cyan), .1); border-color: rgba(var(--tone-cyan), .34); color: #e2e8f0; }
+.provider-tab.active { background: rgba(var(--tone-cyan), .14); border-color: rgb(var(--tone-cyan)); color: rgb(var(--tone-cyan)); }
+
+.model-card {
+  background: #12141e; border: 1px solid #2d3148; border-radius: .5rem;
+  padding: .55rem .7rem; cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.model-card:hover   { border-color: rgb(var(--tone-cyan)); background: rgba(var(--tone-cyan), .08); }
+.model-card.selected { border-color: rgb(var(--tone-cyan)); background: rgba(var(--tone-cyan), .12);
+  box-shadow: 0 0 0 1px rgb(var(--tone-cyan)); }
+.model-card .mname  { font-size: .78rem; font-weight: 600; color: #e2e8f0; }
+.model-card .mdesc  { font-size: .7rem; color: #64748b; line-height: 1.3; margin-top: .1rem; }
+.model-card .mcheck { position:absolute; top:.35rem; right:.5rem;
+  color:rgb(var(--tone-cyan)); font-size:.75rem; display:none; }
+.model-card.selected .mcheck { display:block; }
+
+.tier-badge {
+  display:inline-block; font-size:.6rem; font-weight:700; text-transform:uppercase;
+  letter-spacing:.04em; padding:.1rem .4rem; border-radius:999px; margin-right:.35rem;
+}
+.tier-pro   { background:#2d1f5e; color:#a89af9; }
+.tier-mid   { background:#1a2e1a; color:#4ade80; }
+.tier-lite  { background:#1e2a2a; color:#67e8f9; }
+.tier-other { background:#2a2a1e; color:#fbbf24; }
+
+.sel-chip-model {
+  display:inline-flex; align-items:center; gap:.4rem;
+  background:rgba(var(--tone-cyan), .12); border:1px solid rgb(var(--tone-cyan));
+  border-radius:999px; padding:.25rem .75rem;
+  font-size:.8rem; color:rgb(var(--tone-cyan)); font-weight:600;
+}
+</style>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ---------------------------------------------------------------------------
+// Estado
+// ---------------------------------------------------------------------------
+// Tier labels como variable para evitar conflictos con Jinja2
+const TIER_LABELS = {};
+TIER_LABELS['pro']   = 'Pro';
+TIER_LABELS['mid']   = 'Flash';
+TIER_LABELS['lite']  = 'Lite';
+TIER_LABELS['other'] = 'Otro';
+let arbiters       = [];
+let geminiModels   = [];
+let currentModels  = [];   // modelos cargados para el proveedor actual
+let selectedModel  = "";
+let activeProvider = "gemini";
+let activeFilter   = "all";
+let pendingDeleteId = null;
+
+// Env vars por defecto por proveedor
+const DEFAULT_ENV = {
+  gemini:        "GEMINI_API_KEY",
+  vertex_gemini: "",
+  anthropic:     "ANTHROPIC_API_KEY",
+  openai:        "OPENAI_API_KEY",
+  openai_compat: "OPENAI_API_KEY",
+  ollama:        "",
+};
+
+// ---------------------------------------------------------------------------
+// Proveedor
+// ---------------------------------------------------------------------------
+function selectProvider(p) {
+  activeProvider = p;
+  document.querySelectorAll('.provider-tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.provider === p);
+  });
+
+  // Mostrar/ocultar secciones
+  const needKey  = !["ollama", "vertex_gemini"].includes(p);
+  const needUrl  = ["ollama","openai_compat"].includes(p);
+  const needVertex = p === "vertex_gemini";
+  document.getElementById('apikey-section').style.setProperty('display', needKey  ? '' : 'none', 'important');
+  document.getElementById('baseurl-section').style.setProperty('display', needUrl ? '' : 'none', 'important');
+  document.getElementById('vertex-section').style.setProperty('display', needVertex ? '' : 'none', 'important');
+
+  // Default env var
+  const envInp = document.getElementById('arb-api-key-env');
+  if (!envInp.value || Object.values(DEFAULT_ENV).includes(envInp.value)) {
+    envInp.value = DEFAULT_ENV[p] || "";
+  }
+
+  // Reset modelo seleccionado y cargar modelos
+  selectedModel = "";
+  renderSelectedChip();
+  hideRateLimitInfo();
+  loadModels();
+}
+
+// ---------------------------------------------------------------------------
+// Cargar modelos del proveedor actual
+// ---------------------------------------------------------------------------
+async function loadModels() {
+  const grid = document.getElementById('model-grid');
+  grid.innerHTML = `<div class="col-12 text-center text-secondary py-4">
+    <div class="spinner-border spinner-border-sm me-2"></div>Cargando modelos...
+  </div>`;
+
+  const apiKey  = document.getElementById('arb-api-key-override').value.trim();
+  const baseUrl = document.getElementById('arb-base-url').value.trim();
+  const project = document.getElementById('arb-vertex-project').value.trim();
+  const location = document.getElementById('arb-vertex-location').value.trim();
+
+  let url = `/api/models?provider=${activeProvider}`;
+  if (apiKey)  url += `&api_key=${encodeURIComponent(apiKey)}`;
+  if (baseUrl) url += `&base_url=${encodeURIComponent(baseUrl)}`;
+  if (project) url += `&project=${encodeURIComponent(project)}`;
+  if (location) url += `&location=${encodeURIComponent(location)}`;
+
+  try {
+    const res  = await fetch(url);
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || "Error desconocido");
+    currentModels = data;
+    activeFilter  = 'all';
+    ['all','pro','mid','lite'].forEach(f =>
+      document.getElementById('filter-'+f)?.classList.toggle('active', f === 'all')
+    );
+    renderModelGrid();
+  } catch(e) {
+    grid.innerHTML = `<div class="col-12 py-3">
+      <div class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>${e.message}</div>
+      <div class="text-secondary small mt-1">Verifica tu API key o la URL del servidor local.</div>
+    </div>`;
+    currentModels = [];
+  }
+}
+
+async function reloadModels() {
+  // Invalida el cache del lado servidor para este proveedor
+  await loadModels();
+}
+
+// ---------------------------------------------------------------------------
+// Render grid
+// ---------------------------------------------------------------------------
+function getTier(id) {
+  const l = id.toLowerCase();
+  if (l.includes('lite') || l.includes('haiku') || l.includes('mini')) return 'lite';
+  if (l.includes('opus') || (l.includes('pro') && !l.includes('lite'))) return 'pro';
+  if (l.includes('flash') || l.includes('sonnet') || l.includes('gpt-')) return 'mid';
+  return 'other';
+}
+
+function renderModelGrid() {
+  const grid = document.getElementById('model-grid');
+  const f    = activeFilter;
+  const list = currentModels.filter(m => {
+    if (f === 'all') return true;
+    return getTier(m.id) === f;
+  });
+
+  if (!list.length) {
+    grid.innerHTML = '<div class="col-12 text-secondary small py-3">Sin modelos para este filtro.</div>';
+    return;
+  }
+
+  grid.innerHTML = list.map(m => {
+    const tier = getTier(m.id);
+    const sel  = m.id === selectedModel;
+    return `<div class="col-xl-3 col-lg-4 col-md-6">
+      <div class="model-card ${sel?'selected':''}" onclick="selectModel('${m.id}')" style="position:relative">
+        <i class="bi bi-check2 mcheck"></i>
+        <div class="mname">
+          <span class="tier-badge tier-${tier}">${TIER_LABELS[tier]||tier}</span>${m.display_name}
+        </div>
+        <div class="mdesc">${m.task_description}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function filterModels(f) {
+  activeFilter = f;
+  ['all','pro','mid','lite'].forEach(k =>
+    document.getElementById('filter-'+k)?.classList.toggle('active', k === f)
+  );
+  renderModelGrid();
+}
+
+function selectModel(id) {
+  selectedModel = id;
+  renderModelGrid();
+  renderSelectedChip();
+  loadRateLimitInfo();
+}
+
+function renderSelectedChip() {
+  const el = document.getElementById('selected-model-chip');
+  if (!selectedModel) {
+    el.innerHTML = '<span class="text-secondary small fst-italic">ninguno</span>';
+    hideRateLimitInfo();
+  } else {
+    const tier = getTier(selectedModel);
+    el.innerHTML = `<span class="sel-chip-model">
+      <span class="tier-badge tier-${tier}" style="margin:0">${TIER_LABELS[tier]||''}</span>
+      ${selectedModel}
+    </span>`;
+  }
+}
+
+function hideRateLimitInfo() {
+  const box = document.getElementById('rate-limit-box');
+  if (!box) return;
+  box.style.display = 'none';
+  box.innerHTML = '';
+}
+
+async function loadRateLimitInfo() {
+  const box = document.getElementById('rate-limit-box');
+  if (!box) return;
+  if (!["gemini", "vertex_gemini"].includes(activeProvider) || !selectedModel) {
+    hideRateLimitInfo();
+    return;
+  }
+
+  const nArbiters = Math.max(arbiters.length || 1, 1);
+  const url = `/api/rate-limits?model=${encodeURIComponent(selectedModel)}&tier=free&arbiters=${nArbiters}`;
+  try {
+    const data = await fetch(url).then(r => r.json());
+    const tone = data.alert_level === 'danger' ? 'danger' : (data.alert_level === 'warning' ? 'warning' : 'info');
+    const rpd = data.rpd === null ? 'sin limite diario' : `${data.rpd} RPD`;
+    box.className = `mt-2 p-2 rounded border border-${tone} text-${tone}`;
+    box.style.display = '';
+    box.style.fontSize = '.8rem';
+    box.innerHTML = `
+      <div class="fw-semibold mb-1"><i class="bi bi-speedometer2 me-1"></i>Limites Gemini orientativos</div>
+      <div>${data.rpm} RPM · ${Number(data.tpm).toLocaleString('es-ES')} TPM · ${rpd}</div>
+      <div class="mt-1">Delay minimo recomendado con ${data.n_arbiters} arbitro(s): <strong>${data.min_delay_s}s</strong></div>
+      <div class="mt-1 text-secondary">${data.alert_msg}</div>
+    `;
+  } catch(e) {
+    box.className = 'mt-2 p-2 rounded border border-warning text-warning';
+    box.style.display = '';
+    box.style.fontSize = '.8rem';
+    box.innerHTML = 'No se pudieron cargar los limites de rate para este modelo.';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Lista de arbitros
+// ---------------------------------------------------------------------------
+async function loadArbiters() {
+  arbiters = await fetch('/api/arbiters').then(r => r.json());
+  renderList();
+}
+
+const PROVIDER_ICONS = {
+  gemini:'bi-google', vertex_gemini:'bi-cloud-check', anthropic:'bi-stars', openai:'bi-robot',
+  ollama:'bi-hdd-rack', openai_compat:'bi-plug'
+};
+const PROVIDER_LABELS = {
+  gemini:'Gemini AI Studio', vertex_gemini:'Gemini Vertex AI', anthropic:'Claude', openai:'ChatGPT',
+  ollama:'Ollama', openai_compat:'OAI-compat'
+};
+
+function renderList() {
+  const el = document.getElementById('arbiters-list');
+  if (!arbiters.length) {
+    el.innerHTML = '<div class="text-secondary text-center py-5">No hay arbitros configurados.</div>';
+    return;
+  }
+  const tones = ['accent-cyan', 'accent-violet', 'accent-emerald', 'accent-amber', 'accent-rose'];
+  el.innerHTML = arbiters.map((a, idx) => {
+    const tone = tones[idx % tones.length];
+    const p    = a.provider || {};
+    const tier = getTier(p.model || '');
+    const modelBadge = p.model
+      ? `<span class="tier-badge tier-${tier}" style="font-size:.65rem">${TIER_LABELS[tier]||''}</span>
+         <span style="font-size:.8rem">${p.model}</span>`
+      : `<span class="text-warning small"><i class="bi bi-exclamation-triangle me-1"></i>Sin modelo</span>`;
+
+    return `<div class="card-dark accent-card ${tone} arbiter-card mb-3">
+      <div class="d-flex justify-content-between align-items-start">
+        <div class="d-flex align-items-start gap-3" style="flex:1">
+          <div class="text-center" style="min-width:48px">
+            <div class="rounded-circle d-flex align-items-center justify-content-center mx-auto mb-1"
+              style="width:40px;height:40px;background:rgba(var(--accent-rgb), .13);border:1px solid rgba(var(--accent-rgb), .3);font-weight:700;color:rgb(var(--accent-rgb))">${idx+1}</div>
+            <span class="soft-chip" style="font-size:.62rem;margin-right:0">${a.id}</span>
+          </div>
+          <div style="flex:1">
+            <div class="fw-semibold mb-1">${a.name}
+              ${a.persona ? `<span class="text-secondary fw-normal" style="font-size:.82rem"> · ${a.persona}</span>` : ''}
+            </div>
+            <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+              <span class="soft-chip" style="font-size:.72rem">
+                <i class="bi ${PROVIDER_ICONS[p.type]||'bi-cloud'} me-1"></i>${PROVIDER_LABELS[p.type]||p.type||'?'}
+              </span>
+              ${modelBadge}
+              ${p.base_url ? `<span class="text-secondary" style="font-size:.72rem"><i class="bi bi-link-45deg me-1"></i>${p.base_url}</span>` : ''}
+            </div>
+            <div class="text-secondary" style="font-size:.78rem;max-height:52px;overflow:hidden;
+              display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical">${a.system_prompt}</div>
+          </div>
+        </div>
+        <div class="d-flex gap-2 ms-3 flex-shrink-0">
+          <button class="btn btn-sm btn-outline-secondary" onclick="openModal('${a.id}')"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-sm btn-danger-soft"       onclick="askDelete('${a.id}','${a.name}')"><i class="bi bi-trash3"></i></button>
+        </div>
+      </div>
+      <div class="d-flex gap-3 mt-3 pt-2 border-top border-dark">
+        <span class="text-secondary small"><i class="bi bi-thermometer me-1"></i>temp: ${a.generation_config?.temperature ?? 0.1}</span>
+        <span class="text-secondary small"><i class="bi bi-hash me-1"></i>max tokens: ${a.generation_config?.max_output_tokens ?? 600}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ---------------------------------------------------------------------------
+// Modal
+// ---------------------------------------------------------------------------
+function openModal(arbId = null) {
+  selectedModel  = "";
+  activeFilter   = "all";
+  currentModels  = [];
+
+  document.getElementById('arb-editing-id').value = arbId || '';
+  document.getElementById('arb-id').disabled = !!arbId;
+  document.getElementById('model-grid').innerHTML =
+    `<div class="col-12 text-center text-secondary py-4" id="model-grid-placeholder">
+      <i class="bi bi-arrow-up-circle me-1"></i>Selecciona un proveedor para ver los modelos disponibles
+     </div>`;
+  renderSelectedChip();
+  hideRateLimitInfo();
+
+  if (arbId) {
+    const a = arbiters.find(x => x.id === arbId);
+    document.getElementById('modalTitle').textContent        = `Editar: ${a.name}`;
+    document.getElementById('arb-id').value                  = a.id;
+    document.getElementById('arb-name').value                = a.name;
+    document.getElementById('arb-persona').value             = a.persona || '';
+    document.getElementById('arb-temp').value                = a.generation_config?.temperature ?? 0.1;
+    document.getElementById('arb-tokens').value              = a.generation_config?.max_output_tokens ?? 600;
+    document.getElementById('arb-system-prompt').value       = a.system_prompt;
+    document.getElementById('arb-api-key-env').value         = a.provider?.api_key_env || '';
+    document.getElementById('arb-api-key-override').value    = a.provider?.api_key_override || '';
+    document.getElementById('arb-base-url').value            = a.provider?.base_url || '';
+    document.getElementById('arb-vertex-project').value      = a.provider?.vertex_project || '';
+    document.getElementById('arb-vertex-location').value     = a.provider?.vertex_location || 'us-central1';
+    selectedModel  = a.provider?.model || '';
+    activeProvider = a.provider?.type || 'gemini';
+    // Activar tab correcto sin recargar modelos aun
+    document.querySelectorAll('.provider-tab').forEach(b =>
+      b.classList.toggle('active', b.dataset.provider === activeProvider)
+    );
+    const needKey = !["ollama", "vertex_gemini"].includes(activeProvider);
+    const needUrl = ["ollama","openai_compat"].includes(activeProvider);
+    const needVertex = activeProvider === "vertex_gemini";
+    document.getElementById('apikey-section').style.setProperty('display', needKey ? '' : 'none', 'important');
+    document.getElementById('baseurl-section').style.setProperty('display', needUrl ? '' : 'none', 'important');
+    document.getElementById('vertex-section').style.setProperty('display', needVertex ? '' : 'none', 'important');
+    // Cargar modelos y mostrar el seleccionado
+    loadModels().then(() => {
+      renderSelectedChip();
+      loadRateLimitInfo();
+    });
+  } else {
+    document.getElementById('modalTitle').textContent        = 'Nuevo arbitro';
+    document.getElementById('arb-id').value                  = '';
+    document.getElementById('arb-name').value                = '';
+    document.getElementById('arb-persona').value             = '';
+    document.getElementById('arb-temp').value                = '0.1';
+    document.getElementById('arb-tokens').value              = '600';
+    document.getElementById('arb-system-prompt').value       = '';
+    document.getElementById('arb-api-key-env').value         = DEFAULT_ENV['gemini'];
+    document.getElementById('arb-api-key-override').value    = '';
+    document.getElementById('arb-base-url').value            = '';
+    document.getElementById('arb-vertex-project').value      = '';
+    document.getElementById('arb-vertex-location').value     = 'us-central1';
+    activeProvider = 'gemini';
+    document.querySelectorAll('.provider-tab').forEach(b =>
+      b.classList.toggle('active', b.dataset.provider === 'gemini')
+    );
+    document.getElementById('apikey-section').style.removeProperty('display');
+    document.getElementById('baseurl-section').style.setProperty('display','none','important');
+    document.getElementById('vertex-section').style.setProperty('display','none','important');
+    hideRateLimitInfo();
+  }
+
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('arbModal')).show();
+}
+
+// ---------------------------------------------------------------------------
+// Guardar
+// ---------------------------------------------------------------------------
+async function saveArbiter() {
+  const editingId = document.getElementById('arb-editing-id').value;
+  const payload = {
+    id:            document.getElementById('arb-id').value.trim(),
+    name:          document.getElementById('arb-name').value.trim(),
+    persona:       document.getElementById('arb-persona').value.trim(),
+    system_prompt: document.getElementById('arb-system-prompt').value.trim(),
+    provider: {
+      type:             activeProvider,
+      model:            selectedModel,
+      api_key_env:      document.getElementById('arb-api-key-env').value.trim(),
+      api_key_override: document.getElementById('arb-api-key-override').value.trim(),
+      base_url:         document.getElementById('arb-base-url').value.trim(),
+      vertex_project:   document.getElementById('arb-vertex-project').value.trim(),
+      vertex_location:  document.getElementById('arb-vertex-location').value.trim() || 'us-central1',
+    },
+    generation_config: {
+      temperature:       parseFloat(document.getElementById('arb-temp').value),
+      max_output_tokens: parseInt(document.getElementById('arb-tokens').value),
+    },
+  };
+
+  if (!payload.name || !payload.system_prompt) {
+    showToast('Completa nombre y system prompt', 'error'); return;
+  }
+  if (!selectedModel) {
+    showToast('Selecciona un modelo', 'error'); return;
+  }
+  if (!editingId && !payload.id) {
+    showToast('El ID es requerido', 'error'); return;
+  }
+
+  const url    = editingId ? `/api/arbiters/${editingId}` : '/api/arbiters';
+  const method = editingId ? 'PUT' : 'POST';
+  const res    = await fetch(url, {method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+  const data   = await res.json();
+  if (!res.ok) { showToast(data.error || 'Error al guardar', 'error'); return; }
+
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('arbModal')).hide();
+  showToast(`Arbitro ${editingId ? 'actualizado' : 'creado'} correctamente`);
+  await loadArbiters();
+}
+
+// ---------------------------------------------------------------------------
+// Eliminar
+// ---------------------------------------------------------------------------
+function askDelete(id, name) {
+  pendingDeleteId = id;
+  document.getElementById('delete-arb-name').textContent = name;
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('deleteModal')).show();
+}
+async function confirmDelete() {
+  const res  = await fetch(`/api/arbiters/${pendingDeleteId}`, {method:'DELETE'});
+  const data = await res.json();
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('deleteModal')).hide();
+  if (!res.ok) { showToast(data.error || 'Error', 'error'); return; }
+  showToast('Arbitro eliminado');
+  await loadArbiters();
+}
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+loadArbiters();
+</script>
+{% endblock %}

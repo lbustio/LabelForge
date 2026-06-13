@@ -1,0 +1,96 @@
+{
+  "task": {
+    "description": "Analyze a news claim and determine whether each of the five persuasion principles from Ana Ferreira's taxonomy is present (1) or absent (0).",
+    "principles": {
+      "AUTH": "Authority: The message invokes authority figures, institutions, experts, executives, government agencies, banks, IT departments, or official policies to increase compliance. It relies on the tendency of people to obey or trust perceived authority without critically questioning the request.",
+      "SP": "Social Proof: The message suggests that many people, customers, employees, users, or members of a group have already performed the requested action. It exploits the human tendency to follow the behavior of the majority in situations of uncertainty and to diffuse personal responsibility.",
+      "LSD": "Liking, Similarity & Deception: The message attempts to create trust through familiarity, affinity, similarity, friendliness, shared identity, personal connection, or deceptive impersonation. It exploits the tendency to trust people, organizations, or situations that appear familiar, attractive, relatable, or legitimate.",
+      "CRC": "Commitment, Reciprocation & Consistency: The message creates a sense of obligation, indebtedness, reciprocity, prior commitment, trust relationship, or behavioral consistency. It pressures the recipient to act because they previously agreed, benefited from something, received a favor, or are expected to remain consistent with past actions or responsibilities.",
+      "DIS": "Distraction: The message uses urgency, scarcity, fear, excitement, panic, rewards, deadlines, emotional pressure, or cognitive overload to reduce careful reasoning. It aims to trigger fast, impulsive decisions while distracting the recipient from rational evaluation of the request."
+  },
+    "include_justifications": false,
+    "user_prompt_template": "Label explicit persuasion cues in CLAIM only. No fact-checking, outside context, or inferred intent. 1 if cue appears, else 0. AUTH=authority proof/pressure; SP=popularity/majority; LSD=affinity/flattery/impersonation/loaded framing; CRC=commitment/obligation/reciprocity/consistency; DIS=urgency/scarcity/fear/sensational overload.\n\nCLAIM: {claim}\n\n{output_instruction}"
+  },
+  "arbiters": [
+    {
+      "id": "arb1",
+      "name": "Psicologo Clinico",
+      "persona": "Dr. Viviana Inés Fuentes",
+      "provider": {
+        "type": "vertex_gemini",
+        "model": "gemini-2.5-pro",
+        "api_key_env": "GEMINI_API_KEY",
+        "api_key_override": "",
+        "base_url": "",
+        "vertex_project": "cloud-computing-cybersec-inaoe",
+        "vertex_location": "us-central1"
+      },
+      "generation_config": {
+        "temperature": 0.1,
+        "max_output_tokens": 8192
+      },
+      "system_prompt": "Clinical psychology arbiter. Label explicit cues only. Return JSON only."
+    },
+    {
+      "id": "arb2",
+      "name": "Especialista Ciberseguridad",
+      "persona": "MSc. Carlos Doce",
+      "provider": {
+        "type": "vertex_gemini",
+        "model": "gemini-2.5-flash",
+        "api_key_env": "GEMINI_API_KEY",
+        "api_key_override": "",
+        "base_url": "",
+        "vertex_project": "cloud-computing-cybersec-inaoe",
+        "vertex_location": "us-central1"
+      },
+      "generation_config": {
+        "temperature": 0.1,
+        "max_output_tokens": 8192
+      },
+      "system_prompt": "Cybersecurity social-engineering arbiter. Label explicit cues only. Return JSON only."
+    },
+    {
+      "id": "arb3",
+      "name": "Investigador Forense",
+      "persona": "Detective Inspector Rodrigo Santana",
+      "provider": {
+        "type": "vertex_gemini",
+        "model": "gemini-2.5-pro",
+        "api_key_env": "GEMINI_API_KEY",
+        "api_key_override": "",
+        "base_url": "",
+        "vertex_project": "cloud-computing-cybersec-inaoe",
+        "vertex_location": "us-central1"
+      },
+      "generation_config": {
+        "temperature": 0.1,
+        "max_output_tokens": 8192
+      },
+      "system_prompt": "Forensic linguistic arbiter. Label explicit cues only. Return JSON only."
+    }
+  ],
+  "processing": {
+    "checkpoint_every": 10,
+    "claim_max_chars": 3000,
+    "base_delay_seconds": 1.5,
+    "min_delay_seconds": 0.5,
+    "max_delay_seconds": 120.0,
+    "rate_limit_backoff_multiplier": 2.0,
+    "server_error_backoff_multiplier": 1.5,
+    "recovery_threshold_successes": 5,
+    "recovery_delay_multiplier": 0.8
+  },
+  "safety": {
+    "free_only_mode": true,
+    "allowed_provider_types": [
+      "gemini",
+      "ollama",
+      "openai_compat"
+    ],
+    "allow_remote_openai_compat": false,
+    "max_total_tokens": 0,
+    "pause_on_quota_error": true,
+    "pause_on_network_error": true
+  }
+}

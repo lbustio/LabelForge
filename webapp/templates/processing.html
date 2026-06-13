@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+{% block title %}Procesamiento — LabelForge{% endblock %}
+{% block content %}
+<style>
+  .field-label-row {
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+    margin-bottom: .35rem;
+  }
+  .field-label-row .form-label {
+    margin-bottom: 0;
+  }
+  .field-help-btn {
+    width: 1.25rem;
+    height: 1.25rem;
+    padding: 0;
+    border-color: #2d3148;
+    color: #8aa0bc;
+    border-radius: 50%;
+    font-size: .78rem;
+    line-height: 1;
+  }
+  .field-help-btn:hover,
+  .field-help-btn:focus {
+    border-color: rgb(var(--tone-amber));
+    color: #e2e8f0;
+    background: rgba(var(--tone-amber), .12);
+  }
+  .processing-popover {
+    background: #1a1d27;
+    border: 1px solid rgba(var(--tone-amber), .34);
+  }
+  .processing-popover .popover-header {
+    background: rgba(var(--tone-amber), .12);
+    border-bottom: 1px solid rgba(var(--tone-amber), .28);
+    color: #fbbf24;
+    font-size: .82rem;
+  }
+  .processing-popover .popover-body {
+    color: #94a3b8;
+    font-size: .82rem;
+  }
+</style>
+
+<div class="page-title">Parametros de procesamiento</div>
+
+<div class="card-dark accent-panel accent-amber">
+  <div class="card-header-label">Configuracion del proceso</div>
+  <form id="proc-form" onsubmit="saveProcessing(event)">
+    <div class="row g-4">
+
+      <div class="col-md-6">
+        <div class="mb-3">
+          <div class="field-label-row">
+            <label class="form-label small text-secondary" for="checkpoint_every">Checkpoint cada N claims</label>
+            <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
+                    data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="right"
+                    data-bs-title="Checkpoint cada N claims"
+                    data-bs-content="El estado recuperable se guarda por claim. Este valor define cada cuantos claims se reporta avance en logs y UI."
+                    aria-label="Ayuda: checkpoint cada N claims">
+              <i class="bi bi-question-circle"></i>
+            </button>
+          </div>
+          <input type="number" class="form-control" id="checkpoint_every" min="1" step="1">
+          <div class="form-text text-secondary">El estado durable se guarda por claim; este valor controla el reporte de progreso cada N claims.</div>
+        </div>
+        <div class="mb-3">
+          <div class="field-label-row">
+            <label class="form-label small text-secondary" for="claim_max_chars">Longitud maxima del claim (chars)</label>
+            <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
+                    data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="right"
+                    data-bs-title="Longitud maxima del claim"
+                    data-bs-content="Limite de caracteres que se envian al LLM. Ayuda a controlar tokens y tiempo; si es muy bajo puede cortar contexto util."
+                    aria-label="Ayuda: longitud maxima del claim">
+              <i class="bi bi-question-circle"></i>
+            </button>
+          </div>
+          <input type="number" class="form-control" id="claim_max_chars" min="100" step="100">
+          <div class="form-text text-secondary">Claims mas largos se truncan a este limite antes de enviarlos.</div>
+        </div>
+        <div class="mb-3">
+          <div class="field-label-row">
+            <label class="form-label small text-secondary" for="recovery_threshold_successes">Umbral de recovery (exitos consecutivos)</label>
+            <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
+                    data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="right"
+                    data-bs-title="Umbral de recovery"
+                    data-bs-content="Numero de llamadas exitosas seguidas necesarias para empezar a reducir el delay despues de una falla o rate limit."
+                    aria-label="Ayuda: umbral de recovery">
+              <i class="bi bi-question-circle"></i>
+            </button>
+          </div>
+          <input type="number" class="form-control" id="recovery_threshold_successes" min="1" step="1">
+          <div class="form-text text-secondary">Numero de exitos consecutivos para reducir el delay.</div>
+        </div>
+      </div>
+
+      <div class="col-md-6">
+        <div class="mb-3">
+          <div class="field-label-row">
+            <label class="form-label small text-secondary" for="base_delay_seconds">Delay base entre requests (segundos)</label>
+            <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
+                    data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="left"
+                    data-bs-title="Delay base entre requests"
+                    data-bs-content="Espera inicial entre llamadas. Debe respetar el proveedor mas restrictivo; para cuotas free conviene usar el delay seguro."
+                    aria-label="Ayuda: delay base entre requests">
+              <i class="bi bi-question-circle"></i>
+            </button>
+          </div>
+          <input type="number" class="form-control" id="base_delay_seconds" min="0" step="0.1" oninput="validateDelayInput()">
+          <div id="rate-limit-summary" class="form-text text-secondary mt-2">Cargando limites de rate...</div>
+        </div>
+        <div class="mb-3">
+          <div class="field-label-row">
+            <label class="form-label small text-secondary" for="min_delay_seconds">Delay minimo (segundos)</label>
+            <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
+                    data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="left"
+                    data-bs-title="Delay minimo"
+                    data-bs-content="Piso al que puede bajar el delay cuando el run se recupera. Evita acelerar demasiado y volver a chocar con limites."
+                    aria-label="Ayuda: delay minimo">
+              <i class="bi bi-question-circle"></i>
+            </button>
+          </div>
+          <input type="number" class="form-control" id="min_delay_seconds" min="0" step="0.1">
+        </div>
+        <div class="mb-3">
+          <div class="field-label-row">
+            <label class="form-label small text-secondary" for="max_delay_seconds">Delay maximo (segundos)</label>
+            <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
+                    data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="left"
+                    data-bs-title="Delay maximo"
+                    data-bs-content="Techo de espera despues de aplicar backoff. Evita que fallas temporales generen esperas cada vez mas largas."
+                    aria-label="Ayuda: delay maximo">
+              <i class="bi bi-question-circle"></i>
+            </button>
+          </div>
+          <input type="number" class="form-control" id="max_delay_seconds" min="1" step="1">
+        </div>
+      </div>
+
+      <div class="col-md-6">
+        <div class="mb-3">
+          <div class="field-label-row">
+            <label class="form-label small text-secondary" for="rate_limit_backoff_multiplier">Multiplicador backoff rate limit (429)</label>
+            <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
+                    data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="right"
+                    data-bs-title="Backoff rate limit (429)"
+                    data-bs-content="Factor por el que se multiplica el delay cuando el proveedor responde 429 o cuota temporal. Mas alto significa mas espera y menos choques."
+                    aria-label="Ayuda: backoff rate limit">
+              <i class="bi bi-question-circle"></i>
+            </button>
+          </div>
+          <input type="number" class="form-control" id="rate_limit_backoff_multiplier" min="1" step="0.1">
+          <div class="form-text text-secondary">Cuando se recibe un 429, el delay se multiplica por este factor.</div>
+        </div>
+      </div>
+
+      <div class="col-md-6">
+        <div class="mb-3">
+          <div class="field-label-row">
+            <label class="form-label small text-secondary" for="server_error_backoff_multiplier">Multiplicador backoff error de servidor</label>
+            <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
+                    data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="left"
+                    data-bs-title="Backoff error de servidor"
+                    data-bs-content="Factor por el que se multiplica el delay ante timeouts o errores 5xx. Da margen cuando el proveedor o la red estan inestables."
+                    aria-label="Ayuda: backoff error de servidor">
+              <i class="bi bi-question-circle"></i>
+            </button>
+          </div>
+          <input type="number" class="form-control" id="server_error_backoff_multiplier" min="1" step="0.1">
+          <div class="form-text text-secondary">Cuando hay un 5xx o timeout, el delay se multiplica por este factor.</div>
+        </div>
+        <div class="mb-3">
+          <div class="field-label-row">
+            <label class="form-label small text-secondary" for="recovery_delay_multiplier">Multiplicador de recovery del delay</label>
+            <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
+                    data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="left"
+                    data-bs-title="Recovery del delay"
+                    data-bs-content="Factor para reducir el delay cuando ya hubo suficientes exitos. Debe ser menor que 1; 0.8 reduce el delay 20%."
+                    aria-label="Ayuda: recovery del delay">
+              <i class="bi bi-question-circle"></i>
+            </button>
+          </div>
+          <input type="number" class="form-control" id="recovery_delay_multiplier" min="0.1" max="1" step="0.05">
+          <div class="form-text text-secondary">Factor por el que se reduce el delay al alcanzar el umbral de recovery. Debe ser &lt; 1.</div>
+        </div>
+      </div>
+
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm mt-2">
+      <i class="bi bi-floppy me-1"></i>Guardar parametros
+    </button>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const FIELDS = [
+  'checkpoint_every', 'claim_max_chars', 'base_delay_seconds',
+  'min_delay_seconds', 'max_delay_seconds', 'rate_limit_backoff_multiplier',
+  'server_error_backoff_multiplier', 'recovery_threshold_successes', 'recovery_delay_multiplier',
+];
+let rateLimitSummary = null;
+
+function initProcessingHelpPopovers() {
+  document.querySelectorAll('[data-bs-toggle="popover"]').forEach(el => {
+    bootstrap.Popover.getOrCreateInstance(el, {
+      container: 'body',
+      customClass: 'processing-popover',
+      html: false,
+    });
+  });
+}
+
+async function loadProcessing() {
+  const [data, limits] = await Promise.all([
+    fetch('/api/processing').then(r => r.json()),
+    fetch('/api/rate-limits/summary?tier=free').then(r => r.json()).catch(() => null),
+  ]);
+  FIELDS.forEach(f => {
+    const el = document.getElementById(f);
+    if (el) el.value = data[f] ?? '';
+  });
+  rateLimitSummary = limits;
+  renderRateLimitSummary();
+  validateDelayInput();
+}
+
+function renderRateLimitSummary() {
+  const el = document.getElementById('rate-limit-summary');
+  if (!el) return;
+  if (!rateLimitSummary || rateLimitSummary.error) {
+    el.className = 'form-text text-warning mt-2';
+    el.textContent = 'No se pudieron cargar los limites de rate. Revisa la configuracion de arbitros.';
+    return;
+  }
+  const tone = rateLimitSummary.global_alert === 'danger' ? 'text-danger' : (rateLimitSummary.global_alert === 'warning' ? 'text-warning' : 'text-info');
+  el.className = `form-text ${tone} mt-2`;
+  el.innerHTML = `${rateLimitSummary.global_msg} <button type="button" class="btn btn-link btn-sm p-0 align-baseline" onclick="useSafeDelay()">Usar delay seguro</button>`;
+}
+
+function useSafeDelay() {
+  if (!rateLimitSummary) return;
+  document.getElementById('base_delay_seconds').value = rateLimitSummary.global_safe_delay;
+  validateDelayInput();
+}
+
+function validateDelayInput() {
+  const input = document.getElementById('base_delay_seconds');
+  if (!input || !rateLimitSummary || rateLimitSummary.global_min_delay == null) return true;
+  const value = parseFloat(input.value || '0');
+  const isValid = value >= rateLimitSummary.global_min_delay;
+  input.classList.toggle('is-invalid', !isValid);
+  input.classList.toggle('is-valid', isValid);
+  return isValid;
+}
+
+async function saveProcessing(e) {
+  e.preventDefault();
+  if (!validateDelayInput()) {
+    showToast(`Delay base demasiado bajo. Minimo recomendado: ${rateLimitSummary.global_min_delay}s`, 'error');
+    return;
+  }
+  const payload = {};
+  FIELDS.forEach(f => {
+    const el = document.getElementById(f);
+    if (el) payload[f] = el.value;
+  });
+  const res = await fetch('/api/processing', {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) { showToast(data.error || 'Error al guardar', 'error'); return; }
+  showToast('Parametros guardados');
+}
+
+initProcessingHelpPopovers();
+loadProcessing();
+</script>
+{% endblock %}
