@@ -1124,5 +1124,26 @@ webapp.
 - `bitacora.md`
 
 
+### 2026-06-13 20:02 - Configuración de repositorio de origen remoto y subida a GitHub
+
+**Autor/agente:** Antigravity (Medium).
+
+**Objetivo:** configurar la URL del repositorio remoto de origen y subir el proyecto completo a GitHub.
+
+**Decision tomada:**
+
+1. **Configuración de origen remoto**: Se vinculó el repositorio local con la URL remota del servidor [`https://github.com/lbustio/LabelForge.git`](https://github.com/lbustio/LabelForge.git).
+2. **Publicación**: Se subió la rama local `main` al servidor remoto (`git push -u origin main`).
+
+**Verificacion realizada:**
+
+- Subida completada con éxito y rama `main` configurada para rastrear `origin/main`.
+
+**Archivos tocados:**
+
+- `bitacora.md`
+
+
+
 
 
