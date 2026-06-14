@@ -70,6 +70,11 @@
       "system_prompt": "Forensic linguistic arbiter. Label explicit cues only. Return JSON only."
     }
   ],
+  "dataset": {
+    "input_file": "data/all_datasets_en_es/all_datasets_en_es.csv",
+    "sheet": "",
+    "text_column": "claim"
+  },
   "processing": {
     "checkpoint_every": 10,
     "claim_max_chars": 3000,

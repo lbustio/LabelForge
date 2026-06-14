@@ -734,6 +734,105 @@ def page_run():
 
 
 # ---------------------------------------------------------------------------
+# API: Dataset de entrada (archivo, sheet, columna)
+# ---------------------------------------------------------------------------
+@app.route("/api/dataset/config", methods=["GET"])
+def api_get_dataset_config():
+    """Devuelve la configuracion actual del dataset de entrada."""
+    cfg = read_config()
+    return jsonify(cfg.get("dataset", {
+        "input_file": "",
+        "sheet": "",
+        "text_column": "claim",
+    }))
+
+
+@app.route("/api/dataset/config", methods=["PUT"])
+def api_update_dataset_config():
+    """Guarda la configuracion del dataset (input_file, sheet, text_column)."""
+    cfg  = read_config()
+    data = request.get_json() or {}
+
+    allowed = {"input_file": str, "sheet": str, "text_column": str}
+    errors, updated = [], {}
+    for key, cast in allowed.items():
+        if key in data:
+            try:
+                updated[key] = cast(data[key])
+            except Exception:
+                errors.append(f"Valor invalido para '{key}'")
+    if errors:
+        return jsonify({"error": "; ".join(errors)}), 400
+
+    if not updated.get("input_file", cfg.get("dataset", {}).get("input_file", "")):
+        return jsonify({"error": "input_file es obligatorio"}), 400
+
+    if "dataset" not in cfg:
+        cfg["dataset"] = {}
+    cfg["dataset"].update(updated)
+    write_config(cfg)
+    return jsonify(cfg["dataset"])
+
+
+@app.route("/api/dataset/inspect", methods=["POST"])
+def api_dataset_inspect():
+    """
+    Inspecciona un archivo CSV o Excel y devuelve sus sheets y columnas.
+    Body: {"file": "ruta/relativa/o/absoluta"}
+    Respuesta: {"sheets": [...], "columns": [...], "is_excel": bool}
+    """
+    data = request.get_json() or {}
+    raw_path = data.get("file", "").strip()
+    if not raw_path:
+        return jsonify({"error": "El campo 'file' es obligatorio"}), 400
+
+    path = Path(raw_path)
+    if not path.is_absolute():
+        path = BASE_DIR / path
+
+    if not path.exists():
+        return jsonify({"error": f"Archivo no encontrado: {raw_path}"}), 404
+
+    suffix = path.suffix.lower()
+
+    if suffix in (".xlsx", ".xls"):
+        try:
+            import openpyxl  # noqa: PLC0415
+        except ImportError:
+            return jsonify({"error": "openpyxl no instalado. Ejecuta: pip install openpyxl"}), 500
+
+        wb = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
+        sheets = wb.sheetnames
+
+        # Columnas de la primera hoja (o la indicada)
+        requested_sheet = data.get("sheet", "")
+        ws = wb[requested_sheet] if requested_sheet in sheets else wb.active
+        rows = list(ws.iter_rows(values_only=True))
+        wb.close()
+
+        columns = []
+        if rows:
+            columns = [str(h) for h in rows[0] if h is not None]
+
+        return jsonify({"is_excel": True, "sheets": sheets, "columns": columns})
+
+    elif suffix == ".csv":
+        try:
+            import csv as _csv  # noqa: PLC0415
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                reader = _csv.DictReader(f)
+                columns = list(reader.fieldnames or [])
+        except Exception as exc:
+            return jsonify({"error": f"Error al leer CSV: {exc}"}), 500
+        return jsonify({"is_excel": False, "sheets": [], "columns": columns})
+
+    else:
+        return jsonify({
+            "error": f"Formato no soportado: '{suffix}'. Use .csv, .xlsx o .xls."
+        }), 400
+
+
+# ---------------------------------------------------------------------------
 # API: Config completa
 # ---------------------------------------------------------------------------
 @app.route("/api/config", methods=["GET"])
@@ -937,7 +1036,20 @@ def api_run_start():
     data  = request.get_json() or {}
     limit = data.get("limit")
 
+    # Leer configuracion de dataset desde el config central
+    cfg_data    = read_config()
+    dataset_cfg = cfg_data.get("dataset", {})
+    input_file  = dataset_cfg.get("input_file", "")
+    sheet       = dataset_cfg.get("sheet", "")
+    text_column = dataset_cfg.get("text_column", "claim")
+
     cmd = [sys.executable, str(SCRIPTS_DIR / "label_persuasion.py")]
+    if input_file:
+        cmd += ["--input", input_file]
+    if sheet:
+        cmd += ["--sheet", sheet]
+    if text_column:
+        cmd += ["--column", text_column]
     if limit:
         cmd += ["--limit", str(int(limit))]
 

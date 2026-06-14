@@ -1,7 +1,7 @@
 """
 label_persuasion.py
 -------------------
-Etiqueta un dataset CSV con los principios de persuasion de Ana Ferreira
+Etiqueta un dataset CSV o Excel con los principios de persuasion de Ana Ferreira
 usando N arbitros configurables, cada uno con su propio proveedor de LLM.
 
 Proveedores soportados:
@@ -11,6 +11,10 @@ Proveedores soportados:
   - openai       : OpenAI ChatGPT (openai)
   - openai_compat: Cualquier API compatible con OpenAI (Ollama, LM Studio, vLLM...)
   - ollama       : Ollama local (via openai-compatible endpoint)
+
+Formatos de entrada soportados:
+  - CSV  (.csv)  : cualquier CSV con cabeceras
+  - Excel (.xlsx, .xls): requiere openpyxl; soporta seleccion de sheet
 
 Toda la configuracion se lee desde arbiters_config.json.
 Nada esta hardcodeado en este script.
@@ -119,6 +123,95 @@ def append_jsonl_durable(path: Path, item: dict):
         f.write(json.dumps(item, ensure_ascii=False) + "\n")
         f.flush()
         os.fsync(f.fileno())
+
+
+# ---------------------------------------------------------------------------
+# Carga de dataset (CSV y Excel)
+# ---------------------------------------------------------------------------
+def load_dataset(input_path: Path, sheet: str = "", text_column: str = "claim") -> tuple[list, list]:
+    """
+    Carga un dataset desde un archivo CSV o Excel.
+
+    Args:
+        input_path: ruta al archivo (.csv, .xlsx, .xls).
+        sheet: nombre o indice (str) de la hoja de calculo. Solo aplica a Excel.
+               Si es cadena vacia o None, se usa la primera hoja.
+        text_column: nombre de la columna que contiene el texto a etiquetar.
+                     Solo se valida existencia; no se filtra aqui.
+
+    Returns:
+        (rows, fieldnames) donde rows es lista de dicts y fieldnames es lista de str.
+
+    Raises:
+        SystemExit: si el archivo no existe, el formato no es soportado,
+                    el sheet no existe o la columna no existe.
+    """
+    suffix = input_path.suffix.lower()
+
+    if suffix in (".xlsx", ".xls"):
+        try:
+            import openpyxl  # noqa: PLC0415
+        except ImportError:
+            log.error("openpyxl no esta instalado. Ejecuta: pip install openpyxl")
+            raise SystemExit(1)
+
+        wb = openpyxl.load_workbook(str(input_path), read_only=True, data_only=True)
+        sheet_names = wb.sheetnames
+
+        # Resolver sheet
+        if sheet in ("", None):
+            ws = wb.active
+            resolved_sheet = ws.title
+        elif sheet in sheet_names:
+            ws = wb[sheet]
+            resolved_sheet = sheet
+        else:
+            # Intentar como indice numerico
+            try:
+                idx = int(sheet)
+                resolved_sheet = sheet_names[idx]
+                ws = wb[resolved_sheet]
+            except (ValueError, IndexError):
+                log.error(
+                    f"Sheet '{sheet}' no encontrado. Sheets disponibles: {sheet_names}"
+                )
+                raise SystemExit(1)
+
+        log.info(f"Leyendo Excel: sheet='{resolved_sheet}'")
+        rows_raw = list(ws.iter_rows(values_only=True))
+        wb.close()
+
+        if not rows_raw:
+            log.error("El archivo Excel esta vacio.")
+            raise SystemExit(1)
+
+        headers = [str(h) if h is not None else "" for h in rows_raw[0]]
+        rows = []
+        for row_vals in rows_raw[1:]:
+            row_dict = {}
+            for col_name, val in zip(headers, row_vals):
+                row_dict[col_name] = "" if val is None else str(val)
+            rows.append(row_dict)
+        fieldnames = headers
+
+    elif suffix == ".csv":
+        with open(input_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            fieldnames = list(reader.fieldnames or [])
+            rows = list(reader)
+    else:
+        log.error(f"Formato de archivo no soportado: '{suffix}'. Use .csv, .xlsx o .xls.")
+        raise SystemExit(1)
+
+    if text_column not in fieldnames:
+        log.error(
+            f"La columna '{text_column}' no existe en el dataset. "
+            f"Columnas disponibles: {fieldnames}"
+        )
+        raise SystemExit(1)
+
+    log.info(f"Dataset cargado: {len(rows)} filas, columna de texto='{text_column}'")
+    return rows, fieldnames
 
 
 def load_jsonl_latest(path: Path, key_fields: tuple) -> dict:
@@ -981,8 +1074,12 @@ def main():
     )
     parser.add_argument("--config", default=str(SCRIPTS_DIR / "arbiters_config.json"),
                         help="Ruta al JSON de configuracion")
-    parser.add_argument("--input",  default=str(BASE_DIR / "data" / "all_datasets_en_es" / "all_datasets_en_es.csv"),
-                        help="Ruta al CSV de entrada")
+    parser.add_argument("--input",  default=None,
+                        help="Ruta al archivo de entrada (CSV o Excel). Si no se indica, se usa el valor del config.")
+    parser.add_argument("--sheet",  default=None,
+                        help="Nombre o indice del worksheet (solo para Excel). Vacio = primera hoja.")
+    parser.add_argument("--column", default=None,
+                        help="Nombre de la columna con el texto a etiquetar. Si no se indica, se usa el valor del config.")
     parser.add_argument("--limit",  type=int, default=None,
                         help="Limitar el numero de entradas (para pruebas)")
     args = parser.parse_args()
@@ -992,12 +1089,17 @@ def main():
     arbiters   = cfg["arbiters"]
     principles = list(cfg["task"]["principles"].keys())
     proc_cfg   = cfg["processing"]
+    dataset_cfg = cfg.get("dataset", {})
+
+    # Jerarquia: CLI args > config > defaults
+    input_file  = args.input  or dataset_cfg.get("input_file") or str(
+        BASE_DIR / "data" / "all_datasets_en_es" / "all_datasets_en_es.csv"
+    )
+    sheet       = args.sheet  if args.sheet is not None else dataset_cfg.get("sheet", "")
+    text_column = args.column or dataset_cfg.get("text_column") or "claim"
 
     log.info("Leyendo dataset...")
-    with open(args.input, "r", encoding="utf-8") as f:
-        reader              = csv.DictReader(f)
-        original_fieldnames = list(reader.fieldnames)
-        rows                = list(reader)
+    rows, original_fieldnames = load_dataset(Path(input_file), sheet=sheet, text_column=text_column)
 
     total = len(rows) if args.limit is None else min(args.limit, len(rows))
     log.info(f"Total de entradas a procesar: {total}")
@@ -1007,6 +1109,8 @@ def main():
         run_id = previous_state.get("run_id", RUN_ID)
         output_path = Path(previous_state.get("output_path", OUTPUT_DIR / f"labeled_{run_id}.csv"))
         state = previous_state
+        # Recuperar text_column del estado anterior para garantizar coherencia en reanudacion
+        text_column = previous_state.get("text_column", text_column)
         log.info(f"Reanudando run incompleto: {run_id}")
     else:
         run_id = RUN_ID
@@ -1016,7 +1120,9 @@ def main():
             "status": "running",
             "created_at": now_iso(),
             "updated_at": now_iso(),
-            "input_file": str(args.input),
+            "input_file": str(input_file),
+            "sheet": sheet,
+            "text_column": text_column,
             "config_file": str(args.config),
             "total_rows": total,
             "output_file": output_path.name,
@@ -1037,7 +1143,9 @@ def main():
 
     log.info(f"=== RUN_ID={run_id} ===")
     log.info(f"Config    : {args.config}")
-    log.info(f"Input     : {args.input}")
+    log.info(f"Input     : {input_file}")
+    log.info(f"Sheet     : {sheet or '(primera hoja / N/A)'}")
+    log.info(f"Columna   : {text_column}")
     log.info(f"Output    : {output_path}")
     for arb in arbiters:
         p = arb["provider"]
@@ -1063,7 +1171,9 @@ def main():
         total_rows=total,
         output_file=output_path.name,
         output_path=str(output_path),
-        input_file=str(args.input),
+        input_file=str(input_file),
+        sheet=sheet,
+        text_column=text_column,
         config_file=str(args.config),
         completed_before_start=initial_summary["processed_rows"],
         principles=principles,
@@ -1092,7 +1202,7 @@ def main():
             continue
 
         row   = rows[i]
-        claim = row.get("claim", "").strip()
+        claim = row.get(text_column, "").strip()
 
         if not claim:
             log.warning(f"[entrada {i}] Vacia — saltando")
@@ -1117,7 +1227,7 @@ def main():
                 reason=pause_reason,
                 queued=True,
                 definitive=False,
-                claim=row.get("claim", ""),
+                claim=row.get(text_column, ""),
                 claim_es=row.get("claim_es", ""),
             )
             save_checkpoint(max_persisted_index(results), results)
@@ -1169,7 +1279,7 @@ def main():
             if existing and is_record_final(existing, principles):
                 log.info(f"[entrada {idx}] Ya tiene resultado final — saltando cola de fallidos")
                 continue
-            claim  = item["row"].get("claim", "").strip()
+            claim  = item["row"].get(text_column, "").strip()
             cfg.pop("_pause_requested", None)
             record = process_claim(idx, claim, cfg, rate_limiters, partial_arbiter_results)
             if record is None:
@@ -1183,7 +1293,7 @@ def main():
                     reason=reason,
                     queued=False,
                     definitive=not cfg.get("_last_failure_retryable", True),
-                    claim=item["row"].get("claim", ""),
+                    claim=item["row"].get(text_column, ""),
                     claim_es=item["row"].get("claim_es", ""),
                 )
                 if cfg.get("_pause_requested", True):

@@ -43,7 +43,67 @@
   }
 </style>
 
-<div class="page-title">Parametros de procesamiento</div>
+<div class="page-title">Procesamiento &amp; Dataset</div>
+
+<!-- =====================================================================
+     PANEL: Dataset de Entrada
+====================================================================== -->
+<div class="card-dark accent-panel accent-cyan mb-4">
+  <div class="card-header-label">
+    <i class="bi bi-database me-2"></i>Dataset de Entrada
+  </div>
+
+  <div class="row g-3 align-items-end" id="dataset-form">
+
+    <!-- Archivo -->
+    <div class="col-12">
+      <label class="form-label small text-secondary" for="ds-input-file">
+        Archivo de entrada <span class="text-secondary">(ruta relativa al proyecto o absoluta)</span>
+      </label>
+      <div class="input-group">
+        <input type="text" class="form-control" id="ds-input-file"
+               placeholder="data/mi_dataset.csv  o  /ruta/absoluta/archivo.xlsx"
+               oninput="onDatasetFileChange()">
+        <button class="btn btn-outline-info btn-sm" type="button" id="btn-inspect"
+                onclick="inspectDataset()">
+          <i class="bi bi-search me-1"></i>Inspeccionar
+        </button>
+      </div>
+      <div id="ds-file-feedback" class="form-text text-secondary mt-1"></div>
+    </div>
+
+    <!-- Sheet (solo Excel, oculto por defecto) -->
+    <div class="col-md-5" id="ds-sheet-group" style="display:none">
+      <label class="form-label small text-secondary" for="ds-sheet">Hoja de cálculo (worksheet)</label>
+      <select class="form-select" id="ds-sheet" onchange="onSheetChange()">
+        <option value="">(primera hoja)</option>
+      </select>
+      <div class="form-text text-secondary">Solo aplicable a archivos Excel.</div>
+    </div>
+
+    <!-- Columna -->
+    <div class="col-md-5" id="ds-column-group">
+      <label class="form-label small text-secondary" for="ds-column">Columna de texto a etiquetar</label>
+      <select class="form-select" id="ds-column">
+        <option value="">(inspecciona el archivo primero)</option>
+      </select>
+    </div>
+
+    <!-- Boton guardar -->
+    <div class="col-md-2 d-flex align-items-end">
+      <button class="btn btn-primary btn-sm w-100" onclick="saveDatasetConfig()">
+        <i class="bi bi-floppy me-1"></i>Guardar
+      </button>
+    </div>
+
+  </div>
+
+  <!-- Banner de estado del dataset actual -->
+  <div id="ds-current-banner" class="mt-3 p-2 rounded small" style="background:rgba(var(--tone-cyan),.08);border:1px solid rgba(var(--tone-cyan),.25);display:none">
+    <i class="bi bi-info-circle me-1 text-info"></i>
+    <span id="ds-current-text" class="text-secondary"></span>
+  </div>
+</div>
 
 <div class="card-dark accent-panel accent-amber">
   <div class="card-header-label">Configuracion del proceso</div>
@@ -278,5 +338,159 @@ async function saveProcessing(e) {
 
 initProcessingHelpPopovers();
 loadProcessing();
+loadDatasetConfig();
+
+/* -----------------------------------------------------------------------
+   Dataset helpers
+----------------------------------------------------------------------- */
+let _datasetInspected = null;
+
+function onDatasetFileChange() {
+  // Reset inspected state when user edits the path
+  _datasetInspected = null;
+  document.getElementById('ds-sheet-group').style.display = 'none';
+  const colSel = document.getElementById('ds-column');
+  colSel.innerHTML = '<option value="">(inspecciona el archivo primero)</option>';
+  document.getElementById('ds-file-feedback').textContent = '';
+}
+
+async function inspectDataset() {
+  const filePath = document.getElementById('ds-input-file').value.trim();
+  if (!filePath) { showToast('Escribe la ruta del archivo primero', 'error'); return; }
+
+  const btn = document.getElementById('btn-inspect');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Inspeccionando...';
+
+  try {
+    const res = await fetch('/api/dataset/inspect', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({file: filePath}),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      document.getElementById('ds-file-feedback').innerHTML =
+        `<span class="text-danger"><i class="bi bi-exclamation-circle me-1"></i>${data.error}</span>`;
+      return;
+    }
+
+    _datasetInspected = data;
+    document.getElementById('ds-file-feedback').innerHTML =
+      `<span class="text-success"><i class="bi bi-check-circle me-1"></i>` +
+      `${data.columns.length} columnas detectadas${data.is_excel ? ` &mdash; ${data.sheets.length} sheet(s)` : ''}</span>`;
+
+    // Sheet dropdown
+    const sheetGroup = document.getElementById('ds-sheet-group');
+    const sheetSel   = document.getElementById('ds-sheet');
+    if (data.is_excel && data.sheets.length > 0) {
+      sheetSel.innerHTML = '<option value="">(primera hoja)</option>' +
+        data.sheets.map(s => `<option value="${s}">${s}</option>`).join('');
+      sheetGroup.style.display = '';
+    } else {
+      sheetSel.innerHTML = '<option value="">(primera hoja)</option>';
+      sheetGroup.style.display = 'none';
+    }
+
+    // Column dropdown
+    populateColumnDropdown(data.columns, document.getElementById('ds-column').value);
+
+  } catch (e) {
+    document.getElementById('ds-file-feedback').innerHTML =
+      `<span class="text-danger">Error de red: ${e.message}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-search me-1"></i>Inspeccionar';
+  }
+}
+
+async function onSheetChange() {
+  // Re-inspect with the new sheet to get correct columns
+  const filePath = document.getElementById('ds-input-file').value.trim();
+  const sheet    = document.getElementById('ds-sheet').value;
+  if (!filePath) return;
+
+  const res = await fetch('/api/dataset/inspect', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({file: filePath, sheet}),
+  });
+  const data = await res.json();
+  if (res.ok) {
+    populateColumnDropdown(data.columns, document.getElementById('ds-column').value);
+  }
+}
+
+function populateColumnDropdown(columns, currentValue) {
+  const sel = document.getElementById('ds-column');
+  sel.innerHTML = columns
+    .map(c => `<option value="${c}" ${c === currentValue ? 'selected' : ''}>${c}</option>`)
+    .join('');
+}
+
+async function saveDatasetConfig() {
+  const inputFile  = document.getElementById('ds-input-file').value.trim();
+  const sheet      = document.getElementById('ds-sheet').value;
+  const textColumn = document.getElementById('ds-column').value;
+
+  if (!inputFile) { showToast('La ruta del archivo es obligatoria', 'error'); return; }
+  if (!textColumn) { showToast('Selecciona la columna de texto', 'error'); return; }
+
+  const res = await fetch('/api/dataset/config', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({input_file: inputFile, sheet, text_column: textColumn}),
+  });
+  const data = await res.json();
+  if (!res.ok) { showToast(data.error || 'Error al guardar', 'error'); return; }
+  showToast('Configuración de dataset guardada');
+  renderDatasetBanner(data);
+}
+
+async function loadDatasetConfig() {
+  try {
+    const res = await fetch('/api/dataset/config');
+    const data = await res.json();
+    if (!res.ok) return;
+
+    document.getElementById('ds-input-file').value = data.input_file || '';
+
+    // Si hay archivo configurado, inspeccionar para llenar dropdowns
+    if (data.input_file) {
+      const res2 = await fetch('/api/dataset/inspect', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({file: data.input_file, sheet: data.sheet || ''}),
+      });
+      if (res2.ok) {
+        const info = await res2.json();
+        _datasetInspected = info;
+
+        if (info.is_excel && info.sheets.length > 0) {
+          const sheetSel = document.getElementById('ds-sheet');
+          sheetSel.innerHTML = '<option value="">(primera hoja)</option>' +
+            info.sheets.map(s => `<option value="${s}" ${s === data.sheet ? 'selected' : ''}>${s}</option>`).join('');
+          document.getElementById('ds-sheet-group').style.display = '';
+        }
+
+        populateColumnDropdown(info.columns, data.text_column || '');
+        document.getElementById('ds-file-feedback').innerHTML =
+          `<span class="text-success"><i class="bi bi-check-circle me-1"></i>` +
+          `${info.columns.length} columnas${info.is_excel ? ` &mdash; ${info.sheets.length} sheet(s)` : ''}</span>`;
+      }
+    }
+    renderDatasetBanner(data);
+  } catch (_) {}
+}
+
+function renderDatasetBanner(data) {
+  const banner = document.getElementById('ds-current-banner');
+  const text   = document.getElementById('ds-current-text');
+  if (!data.input_file) { banner.style.display = 'none'; return; }
+  const sheet  = data.sheet ? ` &mdash; sheet: <strong>${data.sheet}</strong>` : '';
+  const col    = data.text_column ? ` &mdash; columna: <strong>${data.text_column}</strong>` : '';
+  text.innerHTML = `<strong>${data.input_file}</strong>${sheet}${col}`;
+  banner.style.display = '';
+}
 </script>
 {% endblock %}
