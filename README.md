@@ -37,7 +37,7 @@ flowchart TD
     end
 
     subgraph Data [Datos]
-        InputCSV[data/all_datasets_en_es.csv]
+        InputCSV[data/all_datasets_en_es/all_datasets_en_es.csv]
         OutputCSV[output/labeled_TIMESTAMP.csv]
         LogFile[logs/run_TIMESTAMP.log]
     end
@@ -79,8 +79,10 @@ El sistema analiza y evalúa la presencia (1) o ausencia (0) de cinco tácticas 
 *   **Resiliencia (Checkpoints y Cola de Reintentos)**:
     *   **Puntos de control**: Guarda el progreso cada $N$ entradas. Si la ejecución se detiene, se reanuda desde la última entrada procesada sin perder el trabajo completado.
     *   **Manejo de errores**: Si una entrada falla con un árbitro, se encola en `failed_queue.jsonl`. Al final de la corrida, el sistema reduce la velocidad del rate limiter e intenta procesar de nuevo únicamente las entradas fallidas antes de generar el reporte final.
+*   **Métricas de Acuerdo Inter-Árbitros**: Al finalizar cada run, el módulo [`scripts/agreement_metrics.py`](scripts/agreement_metrics.py) calcula automáticamente estadísticas de fiabilidad entre evaluadores: acuerdo observado por pares, **Fleiss Kappa** (multi-árbitro), **Cohen's Kappa** (promedio por pares) y **Krippendorff's Alpha** nominal, tanto de forma global como desglosada por principio. Estas métricas son estándar para reportar en estudios con múltiples codificadores.
 *   **Contabilidad Exhaustiva de Tokens**: Cada llamada al LLM registra los tokens de entrada (prompt), salida (completion) y total, tanto por llamada individual (en el CSV) como acumulados por árbitro y globalmente en el reporte final (log y webapp).
 *   **Contabilidad Exhaustiva de Latencia**: El tiempo exacto de cada petición al LLM se mide con `time.perf_counter()` y se almacena en el CSV. El reporte final incluye latencia promedio, mínima, máxima y total acumulada por árbitro.
+*   **Política de Seguridad (`free_only_mode`)**: Bloquea proveedores con riesgo de cargo (Vertex AI, Anthropic, OpenAI) cuando el modo seguro está activo, evitando consumo accidental de tokens de pago durante pruebas.
 *   **Soporte Multimodelo y Multiproveedor**: Integra los SDKs oficiales de Google GenAI (`google-genai`), Vertex AI (`google-cloud-aiplatform`), Anthropic (`anthropic`) y OpenAI (`openai`), además de APIs locales u open-source compatibles con el protocolo de OpenAI (Ollama, LM Studio, vLLM).
 *   **Logs Interactivos en la WebApp**: Utiliza Server-Sent Events (SSE) para transmitir la salida de consola de Python directamente a la pantalla de ejecución web en tiempo real (incluyendo el reporte de tokens y latencia al final).
 
@@ -104,9 +106,9 @@ El sistema analiza y evalúa la presencia (1) o ausencia (0) de cinco tácticas 
         *   [`principles.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/principles.html): Visualización y edición de los principios de persuasión y la plantilla del prompt del usuario.
         *   [`processing.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/processing.html): Panel de configuración de parámetros de red, checkpoints y cálculos de tiempos/delays recomendados.
         *   [`run.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/run.html): Interfaz interactiva de lanzamiento y monitorización del proceso de etiquetado con streaming de logs por SSE y **panel de métricas de tokens y latencia** post-run.
-*   **`data/`**: Contiene los archivos de datos de entrada (`all_datasets_en_es.csv`).
+*   **`data/`**: Directorio para los archivos de datos de entrada. El dataset principal (`data/all_datasets_en_es/all_datasets_en_es.csv`) es **privado** (investigación en curso) y está excluido del repositorio mediante `.gitignore`. Se publicará al concluir el estudio.
 *   **`output/`**: Carpeta de destino para los datasets etiquetados resultantes (`labeled_YYYYMMDD_HHMMSS.csv`).
-*   **`checkpoints/`**: Almacena de forma temporal los archivos `checkpoint.json` y `failed_queue.jsonl`.
+*   **`checkpoints/`**: Almacena el estado intermedio de ejecuciones: `checkpoint.json`, `failed_queue.jsonl`, `run_state.json`, `claim_results.jsonl` y `arbiter_results.jsonl`. **Excluido del repositorio** (datos de estado local privados).
 *   **`logs/`**: Almacena los registros detallados de cada ejecución del pipeline (`run_YYYYMMDD_HHMMSS.log`), incluyendo el reporte completo de tokens y latencia al final.
 *   **`tests/`**: Contiene la suite de pruebas unitarias automáticas ([`test_pipeline.py`](file:///e:/Code/python/OpenCode/LabelForge/tests/test_pipeline.py)) para auditar el correcto funcionamiento de utilidades, métricas y seguridad.
 
@@ -301,24 +303,67 @@ Si una entrada falla permanentemente después de la cola de reintentos, el conse
 
 ## 🔌 API Endpoints de la WebApp
 
+### Páginas
+
 | Método | Endpoint | Descripción |
 |---|---|---|
 | `GET` | `/` | Panel de inicio (dashboard) |
-| `GET` | `/run` | Página de ejecución y monitoreo |
 | `GET` | `/arbiters` | Gestión de árbitros |
 | `GET` | `/principles` | Principios y plantilla del prompt |
 | `GET` | `/processing` | Parámetros de procesamiento |
+| `GET` | `/run` | Interfaz de ejecución y monitoreo |
+
+### Ejecución y monitoreo
+
+| Método | Endpoint | Descripción |
+|---|---|---|
 | `POST` | `/api/run/start` | Inicia el pipeline de etiquetado |
 | `POST` | `/api/run/stop` | Detiene el proceso en curso |
 | `GET` | `/api/run/status` | Estado actual del proceso (running / idle) |
+| `GET` | `/api/run/current-stats` | Métricas en vivo del run activo (tokens, latencia, progreso) |
 | `GET` | `/api/run/logs` | Stream SSE de logs en tiempo real |
-| `GET` | `/api/run/stats` | Estadísticas de tokens y latencia del último CSV generado |
-| `GET` | `/api/outputs` | Lista de CSVs generados en `output/` |
-| `GET` | `/api/checkpoint/status` | Estado del checkpoint actual |
-| `POST` | `/api/checkpoint/clear` | Limpia el checkpoint activo |
-| `GET` | `/api/failed-queue` | Cola de entradas fallidas pendientes |
-| `GET` | `/api/config` | Configuración completa (árbitros + principios) |
-| `POST` | `/api/config/save` | Guarda la configuración actual |
+| `GET` | `/api/run/stats` | Estadísticas de tokens, latencia y métricas de acuerdo del último CSV |
+
+### Árbitros
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| `GET` | `/api/arbiters` | Lista todos los árbitros configurados |
+| `POST` | `/api/arbiters` | Crea un nuevo árbitro |
+| `GET` | `/api/arbiters/<arb_id>` | Obtiene un árbitro por ID |
+| `PUT` | `/api/arbiters/<arb_id>` | Actualiza un árbitro existente |
+| `DELETE` | `/api/arbiters/<arb_id>` | Elimina un árbitro |
+
+### Principios y configuración
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| `GET` | `/api/principles` | Lista los principios configurados |
+| `PUT` | `/api/principles` | Actualiza la lista de principios |
+| `GET` | `/api/prompt-template` | Obtiene la plantilla de prompt y configuración de justificaciones |
+| `PUT` | `/api/prompt-template` | Actualiza la plantilla de prompt |
+| `GET` | `/api/processing` | Obtiene los parámetros de procesamiento |
+| `PUT` | `/api/processing` | Actualiza los parámetros de procesamiento |
+| `GET` | `/api/config` | Configuración completa (árbitros + principios + parámetros) |
+
+### Modelos y rate limits
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| `GET` | `/api/models` | Lista modelos disponibles para un proveedor (`?provider=gemini\|anthropic\|openai\|ollama`) |
+| `GET` | `/api/rate-limits` | Límites de velocidad y delay mínimo recomendado para un modelo |
+| `GET` | `/api/rate-limits/summary` | Resumen de rate limits y delay global para todos los árbitros configurados |
+
+### Outputs y checkpoint
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| `GET` | `/api/outputs` | Lista los CSVs generados en `output/` con metadata |
+| `GET` | `/outputs/<name>` | Descarga un CSV de salida por nombre |
+| `DELETE` | `/api/outputs/<name>` | Elimina un CSV de salida |
+| `GET` | `/api/checkpoint/status` | Estado del checkpoint actual y del run pausado |
+| `POST` | `/api/checkpoint/clear` | Limpia el checkpoint y todos los archivos de estado |
+| `GET` | `/api/failed-queue` | Cola de entradas fallidas pendientes de reintento |
 
 ---
 
@@ -329,6 +374,48 @@ Si una entrada falla permanentemente después de la cola de reintentos, el conse
 Los modelos de razonamiento como `gemini-2.5-pro` generan tokens de "pensamiento" (thinking tokens) que **se descuentan del límite de `max_output_tokens`**. Por esta razón, la configuración usa un valor de `8192` tokens en lugar del valor por defecto de `600`. Si se reduce este valor en modelos de razonamiento, las respuestas JSON se truncan parcialmente, causando errores de parseo.
 
 La configuración de generación se pasa como **diccionario plano** (no como objeto `GenerationConfig`) para evitar un bug del SDK de Vertex AI con versiones recientes de Gemini que causaba truncamiento silencioso de respuestas.
+
+### Política de Seguridad (`free_only_mode`)
+
+Cuando `safety.free_only_mode = true` en `scripts/arbiters_config.json`, el pipeline bloquea en el arranque cualquier árbitro que use un proveedor con riesgo de costo:
+
+| Permitidos por defecto | Bloqueados por defecto |
+|---|---|
+| `gemini` (AI Studio) | `vertex_gemini` |
+| `ollama` | `anthropic` |
+| `openai_compat` local (`127.0.0.1`, `localhost`) | `openai` |
+| | `openai_compat` remoto |
+
+Para desactivarlo, cambia `free_only_mode` a `false` o añade el proveedor a `allowed_provider_types` en la configuración.
+
+### Módulo de Utilidades Compartidas (`scripts/utils.py`)
+
+Contiene las funciones de conversión numérica segura usadas por todos los módulos del proyecto:
+- `safe_int(v)`: convierte a entero, devuelve `0` si no es posible.
+- `safe_float(v)`: convierte a float, devuelve `0.0` si no es posible.
+- `safe_binary_int(v)`: convierte a `0` o `1` (útil para etiquetas binarias leídas de CSV como strings).
+- `number(v, default)`: conversión numérica genérica con fallback configurable.
+
+### Módulo de Acuerdo Inter-Árbitros (`scripts/agreement_metrics.py`)
+
+Módulo compartido entre el pipeline CLI y la WebApp que centraliza el cálculo de métricas de fiabilidad:
+- **Fleiss Kappa**: acuerdo multi-árbitro con múltiples categorías.
+- **Cohen's Kappa (promedio por pares)**: comparación entre cada par de árbitros.
+- **Krippendorff's Alpha nominal**: tolera datos faltantes.
+- **Acuerdo observado promedio** y **tasa positiva** por principio.
+
+Las métricas se calculan tanto de forma global como desglosadas por principio y se exponen en `/api/run/stats`.
+
+### Configuración del Servidor Web
+
+Jerarquía de precedencia para host y puerto del servidor Flask:
+
+```
+--host / --port (CLI)  >  LABELFORGE_HOST / LABELFORGE_PORT (env)  >  127.0.0.1:7860 (default)
+```
+
+- **Puerto por defecto `7860`**: libre en macOS (donde el `5000` está ocupado por AirPlay Receiver desde Monterey), Windows y Linux.
+- **Las variables de entorno** pueden definirse en `secrets.env` sin necesidad de tocar el código fuente.
 
 ### Logging Dual (Consola + Fichero)
 
