@@ -83,6 +83,7 @@ El sistema analiza y evalúa la presencia (1) o ausencia (0) de cinco tácticas 
 *   **Contabilidad Exhaustiva de Tokens**: Cada llamada al LLM registra los tokens de entrada (prompt), salida (completion) y total, tanto por llamada individual (en el CSV) como acumulados por árbitro y globalmente en el reporte final (log y webapp).
 *   **Contabilidad Exhaustiva de Latencia**: El tiempo exacto de cada petición al LLM se mide con `time.perf_counter()` y se almacena en el CSV. El reporte final incluye latencia promedio, mínima, máxima y total acumulada por árbitro.
 *   **Política de Seguridad (`free_only_mode`)**: Bloquea proveedores con riesgo de cargo (Vertex AI, Anthropic, OpenAI) cuando el modo seguro está activo, evitando consumo accidental de tokens de pago durante pruebas.
+*   **Dataset Configurable (CSV y Excel)**: El archivo de entrada, la hoja de cálculo (solo Excel) y la columna de texto son configurables desde la webapp o la CLI sin tocar código. Soporta `.csv`, `.xlsx` y `.xls`.
 *   **Soporte Multimodelo y Multiproveedor**: Integra los SDKs oficiales de Google GenAI (`google-genai`), Vertex AI (`google-cloud-aiplatform`), Anthropic (`anthropic`) y OpenAI (`openai`), además de APIs locales u open-source compatibles con el protocolo de OpenAI (Ollama, LM Studio, vLLM).
 *   **Logs Interactivos en la WebApp**: Utiliza Server-Sent Events (SSE) para transmitir la salida de consola de Python directamente a la pantalla de ejecución web en tiempo real (incluyendo el reporte de tokens y latencia al final).
 
@@ -229,8 +230,10 @@ python main_label.py --input data/otro_dataset.csv
 ```
 
 #### Argumentos soportados en CLI:
-*   `--config`: Ruta absoluta o relativa al JSON de configuración (default: `scripts/arbiters_config.json`).
-*   `--input`: Ruta al archivo CSV con las entradas a etiquetar (default: `data/all_datasets_en_es/all_datasets_en_es.csv`). Por compatibilidad con datasets previos, el CSV de entrada debe contener una columna llamada `claim`; en la UI y documentación nueva esa columna se interpreta como el texto de la entrada.
+*   `--config`: Ruta al JSON de configuración (default: `scripts/arbiters_config.json`).
+*   `--input`: Ruta al archivo de entrada — CSV (`.csv`) o Excel (`.xlsx`/`.xls`). Si se omite, se usa el valor de `dataset.input_file` en el config.
+*   `--sheet`: Nombre o índice de la hoja de cálculo (solo para Excel). Si se omite, se usa la primera hoja.
+*   `--column`: Nombre de la columna que contiene el texto a etiquetar. Si se omite, se usa `dataset.text_column` del config.
 *   `--limit`: Limita la cantidad de filas a procesar (entero). Si se omite, se procesará todo el archivo.
 
 ---
@@ -354,6 +357,10 @@ Si una entrada falla permanentemente después de la cola de reintentos, el conse
 | `GET` | `/api/rate-limits` | Límites de velocidad y delay mínimo recomendado para un modelo |
 | `GET` | `/api/rate-limits/summary` | Resumen de rate limits y delay global para todos los árbitros configurados |
 
+| `GET` | `/api/dataset/config` | Devuelve la configuración actual del dataset (archivo, sheet, columna) |
+| `PUT` | `/api/dataset/config` | Guarda la configuración del dataset en `arbiters_config.json` |
+| `POST` | `/api/dataset/inspect` | Inspecciona un CSV o Excel y devuelve sheets y columnas disponibles |
+
 ### Outputs y checkpoint
 
 | Método | Endpoint | Descripción |
@@ -416,6 +423,26 @@ Jerarquía de precedencia para host y puerto del servidor Flask:
 
 - **Puerto por defecto `7860`**: libre en macOS (donde el `5000` está ocupado por AirPlay Receiver desde Monterey), Windows y Linux.
 - **Las variables de entorno** pueden definirse en `secrets.env` sin necesidad de tocar el código fuente.
+
+### Configuración del Dataset de Entrada
+
+El archivo de entrada y la columna de texto son configurables desde el config o la webapp sin necesidad de tocar código:
+
+```json
+"dataset": {
+  "input_file": "data/mi_dataset.csv",
+  "sheet": "Hoja1",
+  "text_column": "texto"
+}
+```
+
+| Campo | Descripción |
+|---|---|
+| `input_file` | Ruta relativa al root del proyecto o absoluta. Soporta `.csv`, `.xlsx`, `.xls`. |
+| `sheet` | Nombre o índice (0-based) de la hoja Excel. Vacío = primera hoja. Ignorado en CSV. |
+| `text_column` | Nombre de la columna que contiene el texto a etiquetar. Debe existir en el archivo. |
+
+Jerarquía de configuración: `CLI args > config > defaults`.
 
 ### Logging Dual (Consola + Fichero)
 

@@ -1245,3 +1245,69 @@ comportamiento sin tocar código fuente, alineándolo con la convención
 - `README.md`
 - `bitacora.md`
 
+
+### 2026-06-13 20:50 - Dataset configurable: soporte CSV y Excel con sheet y columna seleccionables
+
+**Autor/agente:** Antigravity (Medium).
+
+**Objetivo:** eliminar el hardcoding del archivo de entrada (`all_datasets_en_es.csv`)
+y la columna de texto (`claim`), permitiendo etiquetar cualquier dataset CSV o Excel
+con cualquier columna, sin tocar código fuente.
+
+**Contexto observado:**
+
+- El pipeline asumía siempre `data/all_datasets_en_es/all_datasets_en_es.csv` como
+  entrada y `claim` como la columna de texto. Ambos estaban hardcodeados en
+  `label_persuasion.py` y en el comando que lanza la webapp.
+- No había forma de etiquetar otro dataset sin modificar código.
+
+**Decision tomada:**
+
+1. **`scripts/arbiters_config.json`**: nueva sección `dataset` con tres campos:
+   - `input_file`: ruta al archivo de entrada (relativa al root del proyecto o absoluta).
+   - `sheet`: nombre o índice de la hoja (solo Excel; cadena vacía = primera hoja).
+   - `text_column`: nombre de la columna que contiene el texto a etiquetar.
+
+2. **`scripts/label_persuasion.py`**:
+   - Nueva función `load_dataset(path, sheet, text_column)` que soporta `.csv`,
+     `.xlsx` y `.xls`, valida que la columna exista, y lanza error descriptivo si no.
+   - Nuevos argumentos CLI `--sheet` y `--column`.
+   - Jerarquía de configuración: `CLI args > config > defaults`.
+   - Todos los `row.get("claim", "")` reemplazados por `row.get(text_column, "")`.
+   - `text_column` y `sheet` se guardan en `run_state.json` para reanudaciones coherentes.
+
+3. **`requirements.txt`**: añadido `openpyxl>=3.1.0` para lectura de Excel.
+
+4. **`webapp/app.py`**:
+   - `GET  /api/dataset/config` — devuelve la config actual del dataset.
+   - `PUT  /api/dataset/config` — guarda la config en `arbiters_config.json`.
+   - `POST /api/dataset/inspect` — inspecciona un archivo y devuelve sheets y columnas.
+   - `/api/run/start` pasa `--input`, `--sheet` y `--column` al subproceso.
+
+5. **`webapp/templates/processing.html`**: nuevo panel "Dataset de Entrada" (acento cyan)
+   con campo de ruta + botón Inspeccionar, dropdown de sheet (solo si es Excel),
+   dropdown de columna y botón Guardar. Al cargar la página, pre-inspecciona el archivo
+   configurado y muestra un banner con la configuración activa.
+
+**Razon practica:**
+
+La investigación puede requerir etiquetar datasets distintos al original
+(diferentes fuentes, idiomas, subconjuntos). Con este cambio, basta con apuntar
+la webapp al nuevo archivo y seleccionar la columna correcta — sin tocar código.
+
+**Verificacion realizada:**
+
+- `conda run -n fakenewsds python -m py_compile scripts/label_persuasion.py webapp/app.py` — limpio.
+- `conda run -n fakenewsds python -m unittest tests/test_pipeline.py` — 9/9 OK.
+- Push exitoso: commit `b093799`.
+
+**Archivos tocados:**
+
+- `scripts/arbiters_config.json`
+- `scripts/label_persuasion.py`
+- `requirements.txt`
+- `webapp/app.py`
+- `webapp/templates/processing.html`
+- `bitacora.md`
+- `README.md`
+- `context.md`

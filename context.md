@@ -73,7 +73,7 @@ LabelForge/
 ├── logs/                      → Logs de ejecuciones (excluidos del repo)
 ├── secrets.env                → Variables de entorno locales (NUNCA subir a repo)
 ├── secrets.env.example        → Plantilla pública de variables de entorno
-├── requirements.txt           → 6 dependencias directas
+├── requirements.txt           → 7 dependencias directas (incluye openpyxl)
 ├── environment.yml            → Entorno Conda
 ├── README.md                  → Documentación pública del proyecto
 ├── bitacora.md                → Historial detallado de decisiones de desarrollo
@@ -87,9 +87,11 @@ LabelForge/
 ### Flujo completo de una ejecución
 
 ```
-CSV de entrada (columna "claim")
+Archivo de entrada (CSV o Excel) + columna configurable
     ↓
-load_config() → lee arbiters_config.json
+load_dataset(path, sheet, text_column) → lista de dicts + fieldnames
+    ↓
+load_config() → lee arbiters_config.json (sección dataset: input_file, sheet, text_column)
     ↓
 validate_safety_policy() → bloquea si free_only_mode viola restricciones
     ↓
@@ -214,8 +216,9 @@ originales del dataset y agrega:
 | `{P}_consensus_fleiss_kappa` | `AUTH_consensus_fleiss_kappa` | Fleiss Kappa por principio |
 | _(más métricas de acuerdo)_ | — | Cohen, Krippendorff, observed_agreement, positive_rate |
 
-**Columna de entrada esperada**: `claim` (texto a etiquetar). Es el nombre legacy
-del campo; en la UI se muestra como "entrada" pero el CSV debe tener esa columna.
+**Columna de texto configurable**: la columna que se envía al LLM se define en
+`dataset.text_column` del config o con `--column` en CLI. Por defecto es `claim`
+(nombre legacy del dataset original). Se puede usar cualquier nombre de columna.
 
 ---
 
@@ -250,6 +253,20 @@ del campo; en la UI se muestra como "entrada" pero el CSV debe tener esa columna
   "system_prompt": "..."
 }
 ```
+
+### Sección `dataset`
+```json
+{
+  "input_file": "data/all_datasets_en_es/all_datasets_en_es.csv",
+  "sheet": "",
+  "text_column": "claim"
+}
+```
+
+Jerarquía: `CLI args (--input/--sheet/--column) > config > defaults`.
+Formatos soportados: `.csv`, `.xlsx`, `.xls`.
+Si `sheet` está vacío, se usa la primera hoja del Excel.
+Si `text_column` no existe en el archivo, el pipeline termina con error descriptivo.
 
 ### Sección `processing`
 | Parámetro | Default | Descripción |
@@ -428,6 +445,14 @@ safe_binary_int(value)              # → 0, 1, o None
 number(value, default=0)            # → type(default)(value), o default si falla
 ```
 
+### `scripts/label_persuasion.py` — funciones clave
+```python
+load_dataset(input_path, sheet="", text_column="claim") -> (rows, fieldnames)
+# Carga un CSV o Excel. Valida que text_column exista.
+# Excel: usa openpyxl; sheet puede ser nombre o índice entero.
+# Raises SystemExit con mensaje descriptivo si el archivo o columna no existen.
+```
+
 ### `scripts/agreement_metrics.py`
 ```python
 compute_agreement_metrics(rows, principles, arbiter_ids) → dict
@@ -473,9 +498,11 @@ positive_rate              → tasa de etiquetas positivas (1)
 Las métricas de acuerdo están implementadas en Python puro para mantener el entorno
 de dependencias mínimo. El único dato de entrada es el CSV final ya escrito en disco.
 
-### Por qué `claim` como nombre de columna
-Es el nombre legacy del campo. Cambiar el nombre rompería compatibilidad con datasets
-y checkpoints existentes. La UI lo muestra como "entrada" pero internamente todo usa `claim`.
+### El dataset y la columna de texto son configurables
+Desde la version actual, el archivo de entrada (CSV o Excel), la hoja de calculo
+y la columna de texto a etiquetar son configurables desde la webapp o la CLI
+sin tocar codigo. La columna `claim` es el valor por defecto (dataset original),
+pero puede usarse cualquier nombre de columna existente en el archivo.
 
 ### Por qué `vertex_gemini` en vez de `gemini`
 Los árbitros actuales usan Vertex AI (proyecto GCP `cloud-computing-cybersec-inaoe`)
@@ -513,12 +540,13 @@ respuestas en versiones recientes de Gemini.
 
 ### ✅ Completado y funcionando
 - Pipeline CLI completo con rate limiter, checkpoints, cola de fallos y métricas
-- Webapp Flask con 35 endpoints, 5 páginas y streaming SSE
+- Soporte de entrada CSV y Excel con sheet y columna configurables (webapp + CLI)
+- Webapp Flask con 38 endpoints, 5 páginas y streaming SSE
 - 3 árbitros configurados con Vertex AI (gemini-2.5-pro y gemini-2.5-flash)
 - Métricas de acuerdo inter-árbitros (Fleiss/Cohen/Krippendorff) en CLI y webapp
 - Sistema de colores semántico en la webapp
 - Suite de 9 pruebas unitarias
-- README completo y bitácora actualizada
+- README completo, bitácora actualizada y context.md de transferencia
 - Repositorio público en GitHub: https://github.com/lbustio/LabelForge
 
 ### ⚠️ Datos privados (investigación en curso)
