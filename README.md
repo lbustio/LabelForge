@@ -37,7 +37,7 @@ flowchart TD
     end
 
     subgraph Data [Datos]
-        InputCSV[data/all_datasets_en_es/all_datasets_en_es.csv]
+        InputCSV["data/ (CSV o Excel configurable)"]
         OutputCSV[output/labeled_TIMESTAMP.csv]
         LogFile[logs/run_TIMESTAMP.log]
     end
@@ -205,9 +205,10 @@ Puedes especificar argumentos adicionales en consola:
 #### Flujo de trabajo en la Webapp:
 1.  **Panel de Inicio**: Observa el estado actual del dataset, los árbitros activos y el último checkpoint.
 2.  **Gestionar Árbitros**: Ve a la pestaña **Arbitros** para agregar nuevos perfiles o modificar los modelos de lenguaje utilizados por cada uno (p. ej., cambiar de `gemini-2.5-pro` a `gemini-2.5-flash`).
-3.  **Configurar Parámetros**: En **Procesamiento**, selecciona tu nivel de facturación (Free o Paid) para recibir recomendaciones automáticas de delay seguro. Ajusta los límites según el rendimiento observado.
-4.  **Ejecutar**: En la pestaña **Ejecutar**, define una cantidad límite de entradas para probar (ej. `10` o `50`) y presiona **Iniciar Etiquetado**. Verás el progreso detallado y los reportes directamente en el visor de logs.
-5.  **Panel de Métricas**: Al finalizar el run, el panel **"Tokens y Latencia del último run"** se actualiza automáticamente mostrando las estadísticas completas de consumo (ver sección siguiente).
+3.  **Configurar Dataset**: En **Procesamiento**, usa el panel “Dataset de Entrada” para seleccionar el archivo de datos (CSV o Excel), la hoja de cálculo (si aplica) y la columna de texto. El botón **Inspeccionar** rellena automáticamente los dropdowns de sheets y columnas.
+4.  **Configurar Parámetros**: En la misma pestaña **Procesamiento**, selecciona tu nivel de facturación (Free o Paid) para recibir recomendaciones automáticas de delay seguro.
+5.  **Ejecutar**: En la pestaña **Ejecutar**, define una cantidad límite de entradas para probar (ej. `10` o `50`) y presiona **Iniciar Etiquetado**. Verás el progreso detallado y los reportes directamente en el visor de logs.
+6.  **Panel de Métricas**: Al finalizar el run, el panel **"Tokens y Latencia del último run"** se actualiza automáticamente mostrando las estadísticas completas de consumo.
 
 ---
 
@@ -225,8 +226,11 @@ python main_label.py
 # Utilizar un archivo de configuración JSON personalizado y procesar 50 entradas
 python main_label.py --config scripts/mi_configuracion.json --limit 50
 
-# Especificar un dataset de entrada diferente
-python main_label.py --input data/otro_dataset.csv
+# Especificar un archivo CSV diferente y la columna de texto
+python main_label.py --input data/otro_dataset.csv --column texto
+
+# Archivo Excel: indicar sheet y columna
+python main_label.py --input data/dataset.xlsx --sheet "Datos" --column "Noticia"
 ```
 
 #### Argumentos soportados en CLI:
@@ -357,6 +361,10 @@ Si una entrada falla permanentemente después de la cola de reintentos, el conse
 | `GET` | `/api/rate-limits` | Límites de velocidad y delay mínimo recomendado para un modelo |
 | `GET` | `/api/rate-limits/summary` | Resumen de rate limits y delay global para todos los árbitros configurados |
 
+### Dataset de entrada
+
+| Método | Endpoint | Descripción |
+|---|---|---|
 | `GET` | `/api/dataset/config` | Devuelve la configuración actual del dataset (archivo, sheet, columna) |
 | `PUT` | `/api/dataset/config` | Guarda la configuración del dataset en `arbiters_config.json` |
 | `POST` | `/api/dataset/inspect` | Inspecciona un CSV o Excel y devuelve sheets y columnas disponibles |
