@@ -336,9 +336,12 @@ async function saveProcessing(e) {
   showToast('Parametros guardados');
 }
 
-initProcessingHelpPopovers();
-loadProcessing();
-loadDatasetConfig();
+/* Inicializar cuando el DOM esté listo */
+document.addEventListener('DOMContentLoaded', function() {
+  try { initProcessingHelpPopovers(); } catch(e) { console.warn('Popovers no disponibles:', e); }
+  loadProcessing();
+  loadDatasetConfig();
+});
 
 /* -----------------------------------------------------------------------
    Dataset helpers
@@ -359,6 +362,7 @@ async function inspectDataset() {
   if (!filePath) { showToast('Escribe la ruta del archivo primero', 'error'); return; }
 
   const btn = document.getElementById('btn-inspect');
+  const originalLabel = '<i class="bi bi-search me-1"></i>Inspeccionar';
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Inspeccionando...';
 
@@ -400,7 +404,7 @@ async function inspectDataset() {
       `<span class="text-danger">Error de red: ${e.message}</span>`;
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<i class="bi bi-search me-1"></i>Inspeccionar';
+    btn.innerHTML = originalLabel;
   }
 }
 
