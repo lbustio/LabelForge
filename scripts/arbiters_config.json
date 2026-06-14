@@ -7,7 +7,7 @@
       "LSD": "Liking, Similarity & Deception: creates trust through familiarity, affinity, flattery, shared identity, impersonation, or legitimate-looking identity.",
       "CRC": "Commitment, Reciprocation & Consistency: pressures through obligation, duty, reciprocity, prior agreement, relationship, commitment, or expected consistency.",
       "DIS": "Distraction: uses urgency, scarcity, fear, panic, reward, deadline, sensationalism, or cognitive/emotional overload to rush judgment."
-  },
+    },
     "include_justifications": false,
     "user_prompt_template": "Task: label explicit persuasion cues in TEXT only, using the definitions below. Do not fact-check, use outside context, or infer hidden intent. Return 1 only when the cue is explicit; otherwise 0.\n\n{principles_catalog}\n\nTEXT: {claim}\n\n{output_instruction}"
   },
@@ -27,7 +27,7 @@
       },
       "generation_config": {
         "temperature": 0.1,
-        "max_output_tokens": 256
+        "max_output_tokens": 2048
       },
       "system_prompt": "Clinical psychology arbiter. Label explicit cues only. Return JSON only."
     },
@@ -46,7 +46,7 @@
       },
       "generation_config": {
         "temperature": 0.1,
-        "max_output_tokens": 256
+        "max_output_tokens": 2048
       },
       "system_prompt": "Cybersecurity social-engineering arbiter. Label explicit cues only. Return JSON only."
     },
@@ -65,13 +65,13 @@
       },
       "generation_config": {
         "temperature": 0.1,
-        "max_output_tokens": 256
+        "max_output_tokens": 2048
       },
       "system_prompt": "Forensic linguistic arbiter. Label explicit cues only. Return JSON only."
     }
   ],
   "dataset": {
-    "input_file": "data/all_datasets_en_es/all_datasets_en_es.csv",
+    "input_file": "data/uploads/all_datasets_en_es.csv",
     "sheet": "",
     "text_column": "claim"
   },

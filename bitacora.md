@@ -1311,3 +1311,440 @@ la webapp al nuevo archivo y seleccionar la columna correcta — sin tocar códi
 - `bitacora.md`
 - `README.md`
 - `context.md`
+
+### 2026-06-13 21:30 - Corrección de carga de archivos en la webapp (drag & drop + click)
+
+**Autor/agente:** Antigravity (Medium).
+
+**Objetivo:** arreglar el botón "Inspeccionar" / "Seleccionar archivo" en la pantalla `Procesamiento` para que abra el explorador del SO al hacer click en la zona de drop o en el botón, y que el drag-and-drop funcione correctamente.
+
+**Contexto observado:**
+
+- El `onclick` inline en el `<div class="ds-dropzone">` competía con el `onclick` del botón "Seleccionar archivo", causando que al hacer click en el botón se abrieran dos veces el selector o no funcionara.
+- El drag-and-drop estaba implementado con handlers inline (`ondragover`, `ondragleave`, `ondrop`) pero el click en la zona no estaba bien gestionado.
+
+**Decision tomada:**
+
+1. Se eliminó el `onclick` inline del `ds-dropzone` que llamaba a `document.getElementById('ds-file-input').click()`.
+2. Se agregó un event listener `click` en `DOMContentLoaded` que:
+   - Verifica `e.target.closest('button')` para no disparar si se hace click en el botón o sus hijos.
+   - Solo entonces llama a `ds-file-input.click()`.
+3. Los handlers de drag-and-drop (`onDragOver`, `onDragLeave`, `onDrop`) se mantuvieron igual y funcionan correctamente.
+
+**Razon practica:**
+
+Separar la lógica de click en JS evita conflictos de propagación de eventos entre el contenedor y el botón interno. El patrón `e.target.closest('button')` es robusto y evita doble trigger.
+
+**Verificacion realizada:**
+
+- Click en la zona de drop (fuera del botón) → abre selector de archivos del SO.
+- Click en "Seleccionar archivo" → abre selector de archivos del SO.
+- Drag & drop de archivo CSV/Excel → sube y muestra sheets/columnas.
+
+**Archivos tocados:**
+
+- `webapp/templates/processing.html`
+- `bitacora.md`
+
+### 2026-06-13 21:45 - Corrección de JSONDecodeError por truncamiento de respuesta en Vertex AI (gemini-2.5)
+
+**Autor/agente:** Antigravity (Medium).
+
+**Objetivo:** resolver el error `JSONDecodeError: Unterminated string` / `Expecting property name enclosed in double quotes` que ocurría al etiquetar con los árbitros Vertex AI (gemini-2.5-pro y gemini-2.5-flash).
+
+**Contexto observado:**
+
+- Los errores indicaban que la respuesta JSON del LLM llegaba truncada a mitad de string.
+- La configuración tenía `max_output_tokens: 256` para los tres árbitros.
+- Gemini 2.5 en Vertex AI tiene "thinking mode" activado por defecto, que consume tokens de salida para razonamiento interno antes de emitir el JSON final. Con 256 tokens, el JSON binario `{"AUTH":0,"SP":0,"LSD":0,"CRC":0,"DIS":0}` se cortaba antes de completarse.
+
+**Decision tomada:**
+
+1. **`scripts/arbiters_config.json`**: subido `max_output_tokens` de 256 → **2048** para los tres árbitros.
+2. **`scripts/label_persuasion.py`**: actualizado el default de `max_output_tokens` de 600 → 2048 en todos los proveedores (Gemini AI Studio, Vertex AI, Anthropic, OpenAI-compat).
+3. **Vertex AI (`_call_vertex_gemini`)**: agregado desactivación de thinking solo para `gemini-2.5-flash`:
+   ```python
+   if "gemini-2.5-flash" in provider["model"]:
+       generation_config["thinking_config"] = {"thinking_budget": 0}
+   ```
+   Nota: `gemini-2.5-pro` en Vertex AI **no soporta** `thinking_budget=0` (error 400), por eso la condición es específica para flash.
+
+**Razon practica:**
+
+El JSON de salida binario es muy corto (~35 chars). El problema no era el tamaño de la respuesta esperada, sino que el modelo gastaba tokens en "thinking" interno. Desactivar thinking en flash y dar margen amplio (2048) en ambos modelos elimina el truncamiento. El valor 256 era insuficiente incluso sin thinking si el modelo añadía cualquier token extra.
+
+**Verificacion realizada:**
+
+- `conda run -n fakenewsds python main_label.py --limit 1` → procesa 1 entrada completa sin JSONDecodeError.
+- Logs muestran tokens de salida ~80-100 por arbitro (bien dentro de 2048).
+- Latencias: arb1 (pro) ~12-22s, arb2 (flash) ~0.8-1s, arb3 (pro) ~11-17s.
+
+**Archivos tocados:**
+
+- `scripts/arbiters_config.json`
+- `scripts/label_persuasion.py`
+- `bitacora.md`
+
+### 2026-06-13 22:18 - Corrección de JavaScript visible como texto en Procesamiento
+
+**Autor/agente:** Codex.
+
+**Objetivo:** corregir la pestaña `Procesamiento`, donde se estaba mostrando
+código JavaScript literal en la página a partir de:
+`// Reset inspected state when user edits the path`.
+
+**Contexto observado:**
+
+- `webapp/templates/processing.html` tenía dos versiones de los helpers de dataset:
+  una versión nueva para drag & drop/upload y una versión anterior basada en
+  `ds-input-file` + botón `Inspeccionar`.
+- La versión anterior quedó pegada después de un cierre `</script>`, así que el
+  navegador interpretaba ese bloque como HTML visible en vez de JavaScript.
+- El HTML actual ya no define `ds-input-file`, por lo que esa segunda versión
+  además apuntaba a elementos inexistentes.
+
+**Decision tomada:**
+
+1. Se eliminó el bloque duplicado y obsoleto que estaba fuera del `<script>`.
+2. Se dejó como única implementación activa el flujo actual de:
+   - input file oculto `ds-file-input`,
+   - zona drag-and-drop,
+   - endpoint `/api/dataset/upload`,
+   - selección de sheet/columna,
+   - guardado en `/api/dataset/config`.
+3. Se verificó que el template ya no contenga referencias a `ds-input-file`,
+   `inspectDataset`, `_datasetInspected` ni al texto `Reset inspected state`.
+
+**Razon practica:**
+
+El error no estaba en Flask ni en Bootstrap; era un cierre prematuro del bloque
+`<script>` combinado con código legacy duplicado. Retirar el bloque viejo evita
+que el navegador muestre JS como texto y elimina handlers que ya no correspondían
+al HTML actual.
+
+**Verificacion realizada:**
+
+- `conda run -n fakenewsds python -m py_compile webapp\app.py main_webapp.py scripts\label_persuasion.py` — limpio.
+- `conda run -n fakenewsds python -m unittest tests\test_pipeline.py` — 9/9 OK.
+- Render con Flask test client de `/processing` — HTTP 200.
+- En el HTML renderizado:
+  - `Reset inspected state` → no aparece.
+  - `ds-input-file` → no aparece.
+  - conteo de scripts renderizados: 3 `<script>` y 3 `</script>`.
+
+**Archivos tocados:**
+
+- `webapp/templates/processing.html`
+- `bitacora.md`
+- `context.md`
+
+### 2026-06-13 22:55 - Métricas por entrada y frontera backend/frontend
+
+**Autor/agente:** Codex.
+
+**Objetivo:** asegurar que el consenso, el diagnóstico por entrada y las estadísticas
+de tokens/latencia se calculen en backend, de forma común para CLI y webapp, y que
+la interfaz solo presente datos ya calculados.
+
+**Contexto observado:**
+
+- El log de ejecución mostraba líneas como:
+  `[entrada 15] OK — AUTH=0 SP=1 LSD=0 CRC=0 DIS=0`.
+- Ese valor correspondía al consenso final de la entrada, pero no incluía señales
+  de auditoría sobre cuánta coincidencia hubo entre árbitros en esa entrada.
+- La webapp todavía sumaba tokens/tiempos por fila en algunos puntos y calculaba
+  promedios simples para mostrar “tokens por entrada”.
+- También quedaban pequeñas interpretaciones visuales de métricas en JavaScript,
+  como el tono del kappa o la conversión de acuerdo a porcentaje.
+
+**Decisión tomada:**
+
+1. **`scripts/label_persuasion.py`**:
+   - Se añadieron campos de diagnóstico de consenso por entrada:
+     `entry_consensus_observed_agreement`,
+     `entry_consensus_observed_agreement_percent`,
+     `entry_consensus_mean_support_ratio`,
+     `entry_consensus_mean_support_percent`,
+     `entry_consensus_unanimous_principles`,
+     `entry_consensus_split_principles` y campos por principio con apoyo/votos.
+   - Se añadieron métricas de uso por entrada:
+     `entry_prompt_tokens`, `entry_completion_tokens`, `entry_total_tokens`,
+     `entry_latency_s`, `entry_latency_avg_s`, `entry_arbiter_calls`,
+     `entry_tokens_per_call`.
+   - `process_claim`, `build_claim_metric`, `summarize_records`,
+     `make_failed_record` y `write_output_csv` usan estas métricas del backend.
+   - El log de cada entrada OK ahora incluye diagnóstico operativo del consenso:
+     `acuerdo`, `unanimidad`, `divididos` y `apoyo`.
+   - Se filtraron checkpoints y resultados parciales al `--limit` activo para evitar
+     reportes incoherentes como `Exitosos: 21/1` al hacer pruebas cortas.
+
+2. **`scripts/agreement_metrics.py`**:
+   - El módulo compartido ahora entrega también porcentajes y metadatos de
+     presentación para kappa (`fleiss_kappa_tone`,
+     `fleiss_kappa_interpretation`), de modo que la UI no interprete la métrica.
+
+3. **`webapp/app.py`**:
+   - `/api/run/stats` y `/api/run/current-stats` exponen métricas ya calculadas:
+     `tokens_per_row`, `tokens_per_successful_row`,
+     `tokens_per_processed_row`, `tokens_per_successful_row`,
+     `usage_metrics` por fila y `consensus_metrics` por fila.
+   - Los adaptadores de CSV mantienen compatibilidad con outputs antiguos: si un
+     CSV no trae columnas `entry_*`, el backend calcula el respaldo antes de
+     entregar JSON a la interfaz.
+   - `/api/run/start` ejecuta `main_label.py` para evitar el error
+     `ModuleNotFoundError: No module named 'scripts'`.
+
+4. **`webapp/templates/run.html`**:
+   - Se retiraron cálculos de “tokens por entrada” y la interpretación visual del
+     kappa.
+   - La plantilla solo renderiza datos recibidos, formatea valores y maneja
+     interacción visual.
+
+**Aclaracion metodologica:**
+
+Los campos `entry_consensus_*` son diagnósticos por entrada para auditoría,
+depuración y trazabilidad. No deben presentarse como las métricas principales de
+confiabilidad del paper. Para metodología/reportes académicos, usar las métricas
+agregadas inter-árbitros del módulo `scripts/agreement_metrics.py`: acuerdo
+observado agregado, kappa de Fleiss, kappa de Cohen promedio por pares,
+Krippendorff alpha nominal y tasa positiva por principio/global.
+
+**Razon practica:**
+
+Las métricas deben tener una sola fuente de verdad para que CLI, webapp, CSV,
+logs y futuras evaluaciones académicas coincidan. El frontend no debe contener
+lógica de negocio porque eso crea divergencias silenciosas entre la versión CLI y
+la versión web.
+
+**Verificacion realizada:**
+
+- `conda run -n fakenewsds python -m py_compile scripts\agreement_metrics.py scripts\label_persuasion.py webapp\app.py main_webapp.py` — limpio.
+- `conda run -n fakenewsds python -m unittest tests\test_pipeline.py` — 9/9 OK.
+- `conda run -n fakenewsds python main_label.py --limit 1` — completó con
+  `Exitosos : 1/1`.
+- CSV generado `output/labeled_20260613_225238.csv` contiene:
+  `entry_prompt_tokens=832`, `entry_completion_tokens=90`,
+  `entry_total_tokens=922`, `entry_latency_s=34.035`,
+  `entry_latency_avg_s=11.345`, `entry_arbiter_calls=3`,
+  `entry_tokens_per_call=307.33`.
+- `GET /api/run/stats?limit=1` con Flask test client devolvió HTTP 200 e incluyó
+  `tokens_per_row=922`, `tokens_per_successful_row=922`,
+  `observed_agreement_percent=100.0`,
+  `fleiss_kappa_tone=success` e
+  `fleiss_kappa_interpretation=casi perfecto`.
+- Búsqueda dirigida confirmó que los cálculos de métricas quedan en Python; en
+  plantillas quedan solo formato y renderizado.
+
+**Archivos tocados:**
+
+- `scripts/label_persuasion.py`
+- `scripts/agreement_metrics.py`
+- `webapp/app.py`
+- `webapp/templates/run.html`
+- `bitacora.md`
+- `context.md`
+- `README.md`
+
+### 2026-06-13 21:30 - Corrección de carga de archivos en la webapp (drag & drop + click)
+
+**Autor/agente:** Antigravity (Medium).
+
+**Objetivo:** arreglar el botón "Inspeccionar" / "Seleccionar archivo" en la pantalla
+`Procesamiento` para que abra el explorador del SO al hacer click en la zona de drop
+o en el botón, y que el drag-and-drop funcione correctamente.
+
+**Contexto observado:**
+
+- El `onclick` inline en el `<div class="ds-dropzone">` competía con el `onclick`
+  del botón "Seleccionar archivo", causando que al hacer click en el botón se
+  abrieran dos veces el selector o no funcionara.
+- El drag-and-drop estaba implementado con handlers inline (`ondragover`,
+  `ondragleave`, `ondrop`) pero el click en la zona no estaba bien gestionado.
+
+**Decision tomada:**
+
+1. Se eliminó el `onclick` inline del `ds-dropzone` que llamaba a
+   `document.getElementById('ds-file-input').click()`.
+2. Se agregó un event listener `click` en `DOMContentLoaded` que:
+   - Verifica `e.target.closest('button')` para no disparar si se hace click en
+     el botón o sus hijos.
+   - Solo entonces llama a `ds-file-input.click()`.
+3. Los handlers de drag-and-drop (`onDragOver`, `onDragLeave`, `onDrop`) se
+   mantuvieron igual y funcionan correctamente.
+
+**Razon practica:**
+
+Separar la lógica de click en JS evita conflictos de propagación de eventos entre
+el contenedor y el botón interno. El patrón `e.target.closest('button')` es
+robusto y evita doble trigger.
+
+**Verificacion realizada:**
+
+- Click en la zona de drop (fuera del botón) → abre selector de archivos del SO.
+- Click en "Seleccionar archivo" → abre selector de archivos del SO.
+- Drag & drop de archivo CSV/Excel → sube y muestra sheets/columnas.
+
+**Archivos tocados:**
+
+- `webapp/templates/processing.html`
+- `bitacora.md`
+
+### 2026-06-13 21:45 - Corrección de JSONDecodeError por truncamiento de respuesta en Vertex AI (gemini-2.5)
+
+**Autor/agente:** Antigravity (Medium).
+
+**Objetivo:** resolver el error `JSONDecodeError: Unterminated string` que ocurría
+al etiquetar con los árbitros Vertex AI (gemini-2.5-pro y gemini-2.5-flash).
+
+**Contexto observado:**
+
+- Los errores indicaban que la respuesta JSON del LLM llegaba truncada a mitad
+  de string.
+- La configuración tenía `max_output_tokens: 256` para los tres árbitros.
+- Gemini 2.5 en Vertex AI tiene "thinking mode" activado por defecto, que consume
+  tokens de salida para razonamiento interno antes de emitir el JSON final. Con
+  256 tokens, el JSON binario se cortaba antes de completarse.
+
+**Decision tomada:**
+
+1. **`scripts/arbiters_config.json`**: subido `max_output_tokens` de 256 → 2048
+   para los tres árbitros.
+2. **`scripts/label_persuasion.py`**: actualizado el default de `max_output_tokens`
+   de 600 → 2048 en todos los proveedores (Gemini AI Studio, Vertex AI, Anthropic,
+   OpenAI-compat).
+3. **Vertex AI (`_call_vertex_gemini`)**: agregado desactivación de thinking solo
+   para `gemini-2.5-flash`:
+   ```python
+   if "gemini-2.5-flash" in provider["model"]:
+       generation_config["thinking_config"] = {"thinking_budget": 0}
+   ```
+   Nota: `gemini-2.5-pro` en Vertex AI **no soporta** `thinking_budget=0` (error
+   400), por eso la condición es específica para flash.
+
+**Razon practica:**
+
+El JSON de salida binario es muy corto (~35 chars). El problema no era el tamaño
+de la respuesta esperada, sino que el modelo gastaba tokens en "thinking" interno.
+Desactivar thinking en flash y dar margen amplio (2048) en ambos modelos elimina
+el truncamiento.
+
+**Verificacion realizada:**
+
+- `conda run -n fakenewsds python main_label.py --limit 1` → procesa 1 entrada
+  completa sin JSONDecodeError.
+- Logs muestran tokens de salida ~80-100 por arbitro (bien dentro de 2048).
+
+**Archivos tocados:**
+
+- `scripts/arbiters_config.json`
+- `scripts/label_persuasion.py`
+- `bitacora.md`
+
+### 2026-06-13 21:55 - Bloqueo de controles durante ejecución en la webapp
+
+**Autor/agente:** Antigravity (Medium).
+
+**Objetivo:** evitar que el usuario modifique parámetros mientras el proceso de
+etiquetado está corriendo desde la pestaña "Ejecutar".
+
+**Contexto observado:**
+
+- El botón "Iniciar" ya se deshabilitaba con `setRunning(true)`, pero el campo
+  "Límite de entradas" y el botón "Limpiar checkpoint" seguían editables.
+- Si el usuario cambiaba el límite durante la ejecución, generaba confusión
+  (no afectaba el run activo pero parecía que sí).
+
+**Decision tomada:**
+
+Se extendió `setRunning(running)` para deshabilitar/habilitar:
+- Campo `limit-input` (número de entradas)
+- Botón "Limpiar checkpoint" (buscado dinámicamente dentro de `#checkpoint-area`)
+
+**Razon practica:**
+
+Congelar los controles evita la falsa impresión de que se pueden cambiar
+parámetros durante un run activo. Al finalizar o cancelar, todo vuelve a
+habilitarse automáticamente.
+
+**Archivos tocados:**
+
+- `webapp/templates/run.html`
+- `bitacora.md`
+
+### 2026-06-13 22:10 - Sistema de colores semántico para métricas de acuerdo
+
+**Autor/agente:** Antigravity (Medium).
+
+**Objetivo:** aplicar colores consistentes a todas las métricas de acuerdo
+inter-árbitros (Fleiss Kappa, Cohen Kappa, Krippendorff Alpha, acuerdo
+observado, tasa positiva) usando una escala unificada de 4 niveles.
+
+**Contexto observado:**
+
+- Solo Fleiss Kappa tenía color (`fleiss_kappa_tone`), el resto se mostraban como
+  texto plano sin indicación visual.
+- El badge global usaba la interpretación del Fleiss Kappa (ej: "bajo") aunque el
+  acuerdo observado fuera 92.3%, generando contradicción visual.
+
+**Decision tomada:**
+
+1. **Backend (`scripts/agreement_metrics.py`)**:
+   - Nueva función `_percent_tone()` para valores porcentuales.
+   - `_with_display_fields()` ahora genera `*_tone` para todas las métricas:
+     `observed_agreement_tone`, `pairwise_cohen_kappa_avg_tone`,
+     `krippendorff_alpha_nominal_tone`, `positive_rate_tone`.
+
+2. **Frontend (`webapp/templates/run.html`)**:
+   - Funciones helper `consensusTone()`, `consensusBg()`, `consensusBorder()`
+     con la misma escala 4 niveles.
+   - Las tarjetas resumen globales ahora muestran badges coloreados para cada
+     métrica.
+   - La tabla por principio tiene todas las columnas como badges coloreados.
+   - El badge global ahora muestra **acuerdo observado** (con su color) en vez
+     de solo Fleiss Kappa. Se agregó un badge separado para Fleiss Kappa.
+
+3. **Escala unificada (4 niveles)**:
+   | Nivel | Kappa | Porcentaje | Color |
+   |---|---|---|---|
+   | Alto | ≥ 0.8 | ≥ 80% | `success` (verde) |
+   | Medio-alto | ≥ 0.6 | ≥ 60% | `info` (azul) |
+   | Bajo | ≥ 0.4 | ≥ 40% | `warning` (amarillo) |
+   | Muy bajo | < 0.4 | < 40% | `danger` (rojo) |
+
+4. **Aplicación en toda la página "Ejecutar"**:
+   - Tarjeta "Última entrada procesada": borde y fondo según acuerdo.
+   - Diagnóstico por entrada: fondo y texto coloreados.
+   - Tabla de resultados: borde izquierdo coloreado en cada fila.
+   - Panel "Acuerdo entre árbitros": badges en todas las métricas.
+
+**Verificacion realizada:**
+
+- `python -c "from scripts.agreement_metrics import compute_agreement_metrics"`
+  → todos los campos `*_tone` presentes con valores correctos.
+
+**Archivos tocados:**
+
+- `scripts/agreement_metrics.py`
+- `webapp/templates/run.html`
+- `bitacora.md`
+
+### 2026-06-13 22:15 - scripts/__init__.py para corrección de importación
+
+**Objetivo:** resolver ModuleNotFoundError: No module named 'scripts' al ejecutar
+el pipeline como subproceso desde la webapp.
+
+**Contexto observado:**
+
+- El directorio `scripts/` no tenía `__init__.py`, por lo que no era un paquete
+  Python reconocible.
+- Al ejecutar `label_persuasion.py` como subproceso con `cwd=BASE_DIR`, el
+  import `from scripts.agreement_metrics import ...` fallaba.
+
+**Decision tomada:**
+
+Crear `scripts/__init__.py` vacío para que Python trate `scripts/` como paquete.
+
+**Archivos tocados:**
+
+- `scripts/__init__.py` (nuevo)
+- `bitacora.md`

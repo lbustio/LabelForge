@@ -468,7 +468,7 @@ def _call_gemini(arbiter: dict, prompt_user: str) -> tuple:
         config   = types.GenerateContentConfig(
             system_instruction = arbiter["system_prompt"],
             temperature        = float(gen_cfg.get("temperature", 0.1)),
-            max_output_tokens  = int(gen_cfg.get("max_output_tokens", 600)),
+            max_output_tokens  = int(gen_cfg.get("max_output_tokens", 2048)),
         ),
     )
     usage = getattr(response, "usage_metadata", None)
@@ -499,12 +499,17 @@ def _call_vertex_gemini(arbiter: dict, prompt_user: str) -> tuple:
         system_instruction=arbiter["system_prompt"],
     )
 
+    generation_config = {
+        "temperature": float(gen_cfg.get("temperature", 0.1)),
+        "max_output_tokens": int(gen_cfg.get("max_output_tokens", 2048)),
+    }
+    # Disable thinking for gemini-2.5-flash models (pro doesn't support thinking_budget=0)
+    if "gemini-2.5-flash" in provider["model"]:
+        generation_config["thinking_config"] = {"thinking_budget": 0}
+
     response = model.generate_content(
         prompt_user,
-        generation_config={
-            "temperature": float(gen_cfg.get("temperature", 0.1)),
-            "max_output_tokens": int(gen_cfg.get("max_output_tokens", 600)),
-        },
+        generation_config=generation_config,
     )
     usage = getattr(response, "usage_metadata", None)
     usage_dict = {
@@ -527,7 +532,7 @@ def _call_anthropic(arbiter: dict, prompt_user: str) -> tuple:
 
     message = client.messages.create(
         model      = provider["model"],
-        max_tokens = int(gen_cfg.get("max_output_tokens", 600)),
+        max_tokens = int(gen_cfg.get("max_output_tokens", 2048)),
         system     = arbiter["system_prompt"],
         messages   = [{"role": "user", "content": prompt_user}],
         temperature= float(gen_cfg.get("temperature", 0.1)),
@@ -561,7 +566,7 @@ def _call_openai_compat(arbiter: dict, prompt_user: str) -> tuple:
             {"role": "user",    "content": prompt_user},
         ],
         temperature = float(gen_cfg.get("temperature", 0.1)),
-        max_tokens  = int(gen_cfg.get("max_output_tokens", 600)),
+        max_tokens  = int(gen_cfg.get("max_output_tokens", 2048)),
     )
     usage = getattr(response, "usage", None)
     usage_dict = {
@@ -715,6 +720,194 @@ def compute_consensus(arb_results: list, principles: list) -> dict:
     }
 
 
+def compute_entry_consensus_metrics(record: dict, arbiters: list, principles: list) -> dict:
+    """Metricas de solidez del consenso para una sola entrada."""
+    per_principle = {}
+    total_pairs = 0
+    agreed_pairs = 0
+    support_ratios = []
+    unanimous = 0
+    split = 0
+
+    for principle in principles:
+        values = []
+        for arb in arbiters:
+            value = record.get(f"{principle}_{arb['id']}")
+            if value in (0, 1):
+                values.append(value)
+        if not values:
+            continue
+
+        ones = sum(1 for value in values if value == 1)
+        zeros = len(values) - ones
+        consensus_value = record.get(f"{principle}_consensus")
+        support = ones if consensus_value == 1 else zeros
+        support_ratio = support / len(values)
+        support_ratios.append(support_ratio)
+
+        pairs = len(values) * (len(values) - 1) // 2
+        principle_agreed_pairs = 0
+        for i in range(len(values)):
+            for j in range(i + 1, len(values)):
+                if values[i] == values[j]:
+                    principle_agreed_pairs += 1
+        total_pairs += pairs
+        agreed_pairs += principle_agreed_pairs
+
+        is_unanimous = support == len(values)
+        if is_unanimous:
+            unanimous += 1
+        elif len(values) == len(arbiters):
+            split += 1
+
+        per_principle[principle] = {
+            "consensus": consensus_value,
+            "support": support,
+            "raters": len(values),
+            "support_ratio": round(support_ratio, 4),
+            "votes_0": zeros,
+            "votes_1": ones,
+            "unanimous": is_unanimous,
+        }
+
+    observed_agreement = agreed_pairs / total_pairs if total_pairs else None
+    mean_support_ratio = sum(support_ratios) / len(support_ratios) if support_ratios else None
+    return {
+        "observed_agreement": round(observed_agreement, 4) if observed_agreement is not None else None,
+        "observed_agreement_percent": round(observed_agreement * 100, 1) if observed_agreement is not None else None,
+        "mean_support_ratio": round(mean_support_ratio, 4) if mean_support_ratio is not None else None,
+        "mean_support_percent": round(mean_support_ratio * 100, 1) if mean_support_ratio is not None else None,
+        "unanimous_principles": unanimous,
+        "split_principles": split,
+        "principle_count": len(per_principle),
+        "per_principle": per_principle,
+    }
+
+
+def format_entry_consensus_metrics(metrics: dict, principles: list) -> str:
+    agreement = metrics.get("observed_agreement")
+    agreement_text = f"{agreement * 100:.1f}%" if agreement is not None else "N/A"
+    principle_count = metrics.get("principle_count", 0)
+    support_parts = []
+    per_principle = metrics.get("per_principle", {})
+    for principle in principles:
+        item = per_principle.get(principle)
+        if item:
+            support_parts.append(f"{principle}:{item['support']}/{item['raters']}")
+    return (
+        f"acuerdo={agreement_text} "
+        f"unanimidad={metrics.get('unanimous_principles', 0)}/{principle_count} "
+        f"divididos={metrics.get('split_principles', 0)}/{principle_count} "
+        f"apoyo=" + ",".join(support_parts)
+    )
+
+
+def flatten_entry_consensus_metrics(metrics: dict, principles: list) -> dict:
+    flat = {
+        "entry_consensus_observed_agreement": metrics.get("observed_agreement"),
+        "entry_consensus_observed_agreement_percent": metrics.get("observed_agreement_percent"),
+        "entry_consensus_mean_support_ratio": metrics.get("mean_support_ratio"),
+        "entry_consensus_mean_support_percent": metrics.get("mean_support_percent"),
+        "entry_consensus_unanimous_principles": metrics.get("unanimous_principles"),
+        "entry_consensus_split_principles": metrics.get("split_principles"),
+        "entry_consensus_principle_count": metrics.get("principle_count"),
+    }
+    per_principle = metrics.get("per_principle", {})
+    for principle in principles:
+        item = per_principle.get(principle, {})
+        flat[f"{principle}_entry_consensus_support"] = item.get("support")
+        flat[f"{principle}_entry_consensus_raters"] = item.get("raters")
+        flat[f"{principle}_entry_consensus_support_ratio"] = item.get("support_ratio")
+        flat[f"{principle}_entry_consensus_votes_0"] = item.get("votes_0")
+        flat[f"{principle}_entry_consensus_votes_1"] = item.get("votes_1")
+        flat[f"{principle}_entry_consensus_unanimous"] = item.get("unanimous")
+    return flat
+
+
+def build_entry_consensus_metric_fieldnames(principles: list) -> list:
+    fields = [
+        "entry_consensus_observed_agreement",
+        "entry_consensus_observed_agreement_percent",
+        "entry_consensus_mean_support_ratio",
+        "entry_consensus_mean_support_percent",
+        "entry_consensus_unanimous_principles",
+        "entry_consensus_split_principles",
+        "entry_consensus_principle_count",
+    ]
+    for principle in principles:
+        fields.extend([
+            f"{principle}_entry_consensus_support",
+            f"{principle}_entry_consensus_raters",
+            f"{principle}_entry_consensus_support_ratio",
+            f"{principle}_entry_consensus_votes_0",
+            f"{principle}_entry_consensus_votes_1",
+            f"{principle}_entry_consensus_unanimous",
+        ])
+    return fields
+
+
+def add_entry_consensus_metrics(record: dict, arbiters: list, principles: list) -> dict:
+    metrics = compute_entry_consensus_metrics(record, arbiters, principles)
+    record.update(flatten_entry_consensus_metrics(metrics, principles))
+    return metrics
+
+
+def compute_entry_usage_metrics(record: dict, arbiters: list) -> dict:
+    prompt_tokens = 0
+    completion_tokens = 0
+    total_tokens = 0
+    total_latency = 0.0
+    latency_calls = 0
+    arbiter_calls = 0
+
+    for arb in arbiters:
+        arb_id = arb["id"]
+        p_tok = _number(record.get(f"prompt_tokens_{arb_id}"), 0)
+        c_tok = _number(record.get(f"completion_tokens_{arb_id}"), 0)
+        t_tok = _number(record.get(f"total_tokens_{arb_id}"), p_tok + c_tok)
+        lat = _number(record.get(f"latency_s_{arb_id}"), -1.0)
+
+        if p_tok > 0:
+            prompt_tokens += p_tok
+        if c_tok > 0:
+            completion_tokens += c_tok
+        if t_tok > 0:
+            total_tokens += t_tok
+        if t_tok >= 0 or lat >= 0:
+            arbiter_calls += 1
+        if lat >= 0:
+            total_latency += lat
+            latency_calls += 1
+
+    return {
+        "entry_prompt_tokens": prompt_tokens,
+        "entry_completion_tokens": completion_tokens,
+        "entry_total_tokens": total_tokens,
+        "entry_latency_s": round(total_latency, 3) if latency_calls else None,
+        "entry_latency_avg_s": round(total_latency / latency_calls, 3) if latency_calls else None,
+        "entry_arbiter_calls": arbiter_calls,
+        "entry_tokens_per_call": round(total_tokens / arbiter_calls, 2) if arbiter_calls else None,
+    }
+
+
+def build_entry_usage_metric_fieldnames() -> list:
+    return [
+        "entry_prompt_tokens",
+        "entry_completion_tokens",
+        "entry_total_tokens",
+        "entry_latency_s",
+        "entry_latency_avg_s",
+        "entry_arbiter_calls",
+        "entry_tokens_per_call",
+    ]
+
+
+def add_entry_usage_metrics(record: dict, arbiters: list) -> dict:
+    metrics = compute_entry_usage_metrics(record, arbiters)
+    record.update(metrics)
+    return metrics
+
+
 # ---------------------------------------------------------------------------
 # Checkpoint
 # ---------------------------------------------------------------------------
@@ -784,6 +977,10 @@ def make_failed_record(arbiters: list, principles: list) -> dict:
         record[f"latency_s_{arb['id']}"] = -1
     for p in principles:
         record[f"{p}_consensus"] = -1
+    for field in build_entry_consensus_metric_fieldnames(principles):
+        record[field] = -1
+    for field in build_entry_usage_metric_fieldnames():
+        record[field] = -1
     return record
 
 
@@ -798,6 +995,8 @@ def build_extra_fieldnames(arbiters: list, principles: list) -> list:
         extra.append(f"{p}_consensus")
     for arb in arbiters:
         extra += [f"prompt_tokens_{arb['id']}", f"completion_tokens_{arb['id']}", f"total_tokens_{arb['id']}", f"latency_s_{arb['id']}"]
+    extra.extend(build_entry_usage_metric_fieldnames())
+    extra.extend(build_entry_consensus_metric_fieldnames(principles))
     return extra
 
 
@@ -843,6 +1042,12 @@ def summarize_records(records: dict, arbiters: list, principles: list) -> dict:
         else:
             summary["skipped_rows"] += 1
 
+        entry_usage = add_entry_usage_metrics(record, arbiters)
+        if entry_usage["entry_total_tokens"] > 0:
+            summary["total_tokens_global"] += entry_usage["entry_total_tokens"]
+        if entry_usage["entry_latency_s"] is not None and entry_usage["entry_latency_s"] >= 0:
+            summary["total_latency_s"] += entry_usage["entry_latency_s"]
+
         for arb in arbiters:
             arb_id = arb["id"]
             arb_stats = summary["arbiters"][arb_id]
@@ -856,11 +1061,9 @@ def summarize_records(records: dict, arbiters: list, principles: list) -> dict:
                 arb_stats["completion_tokens"] += c_tok
             if t_tok > 0:
                 arb_stats["total_tokens"] += t_tok
-                summary["total_tokens_global"] += t_tok
             if lat >= 0:
                 arb_stats["calls"] += 1
                 arb_stats["latency_total_s"] += lat
-                summary["total_latency_s"] += lat
                 arb_stats["latency_min_s"] = lat if arb_stats["latency_min_s"] is None else min(arb_stats["latency_min_s"], lat)
                 arb_stats["latency_max_s"] = lat if arb_stats["latency_max_s"] is None else max(arb_stats["latency_max_s"], lat)
 
@@ -879,9 +1082,7 @@ def summarize_records(records: dict, arbiters: list, principles: list) -> dict:
 
 def build_claim_metric(row_index: int, row: dict, record: dict, arbiters: list, principles: list, stage: str) -> dict:
     arbiter_metrics = []
-    total_tokens = 0
-    total_latency = 0.0
-    has_latency = False
+    usage_metrics = add_entry_usage_metrics(record, arbiters)
 
     for arb in arbiters:
         arb_id = arb["id"]
@@ -889,11 +1090,6 @@ def build_claim_metric(row_index: int, row: dict, record: dict, arbiters: list, 
         c_tok = _number(record.get(f"completion_tokens_{arb_id}"), 0)
         t_tok = _number(record.get(f"total_tokens_{arb_id}"), p_tok + c_tok)
         lat = _number(record.get(f"latency_s_{arb_id}"), -1.0)
-        if t_tok > 0:
-            total_tokens += t_tok
-        if lat >= 0:
-            total_latency += lat
-            has_latency = True
 
         arbiter_metrics.append({
             "id": arb_id,
@@ -913,8 +1109,12 @@ def build_claim_metric(row_index: int, row: dict, record: dict, arbiters: list, 
         "dataset": row.get("dataset", ""),
         "class": row.get("class", ""),
         "consensus": {p: record.get(f"{p}_consensus") for p in principles},
-        "total_tokens": total_tokens,
-        "total_latency_s": round(total_latency, 3) if has_latency else None,
+        "consensus_metrics": add_entry_consensus_metrics(record, arbiters, principles),
+        "usage_metrics": usage_metrics,
+        "total_tokens": usage_metrics["entry_total_tokens"],
+        "total_latency_s": usage_metrics["entry_latency_s"],
+        "latency_avg_s": usage_metrics["entry_latency_avg_s"],
+        "arbiter_calls": usage_metrics["entry_arbiter_calls"],
         "arbiters": arbiter_metrics,
     }
 
@@ -1031,7 +1231,14 @@ def process_claim(
         record[f"total_tokens_{arb['id']}"]      = p_tok + c_tok
         record[f"latency_s_{arb['id']}"]         = latency
 
-    log.info(f"[entrada {row_index}] OK — " + " ".join(f"{p}={consensus[p]}" for p in principles))
+    add_entry_usage_metrics(record, arbiters)
+    entry_consensus_metrics = add_entry_consensus_metrics(record, arbiters, principles)
+    log.info(
+        f"[entrada {row_index}] OK — "
+        + " ".join(f"{p}={consensus[p]}" for p in principles)
+        + " — "
+        + format_entry_consensus_metrics(entry_consensus_metrics, principles)
+    )
     return record
 
 
@@ -1060,6 +1267,10 @@ def write_output_csv(
         writer.writeheader()
         for i, row in enumerate(rows):
             record = results.get(str(i), empty_record.copy())
+            if record:
+                add_entry_usage_metrics(record, arbiters)
+            if record and _record_status(record, principles) == "ok":
+                add_entry_consensus_metrics(record, arbiters, principles)
             writer.writerow({**row, **record, **consensus_metrics})
 
     log.info(f"CSV final: {output_path}")
@@ -1157,6 +1368,17 @@ def main():
     last_done  = checkpoint["last_index"]
     results    = checkpoint["results"]
     partial_arbiter_results = load_arbiter_results()
+    results = {
+        str(k): v
+        for k, v in results.items()
+        if str(k).isdigit() and int(k) < total
+    }
+    partial_arbiter_results = {
+        str(k): v
+        for k, v in partial_arbiter_results.items()
+        if str(k).isdigit() and int(k) < total
+    }
+    last_done = max_persisted_index(results)
     if results:
         log.info(f"Reanudacion: {len(results)} entradas con resultado final persistido")
     if partial_arbiter_results:

@@ -26,6 +26,63 @@ CONSENSUS_METRIC_KEYS = [
 ]
 
 
+def _percent(value: Optional[float]) -> Optional[float]:
+    return round(value * 100, 1) if value is not None else None
+
+
+def _kappa_tone(kappa: Optional[float]) -> str:
+    if kappa is None:
+        return "secondary"
+    if kappa >= 0.8:
+        return "success"
+    if kappa >= 0.6:
+        return "info"
+    if kappa >= 0.4:
+        return "warning"
+    return "danger"
+
+
+def _kappa_interpretation(kappa: Optional[float]) -> str:
+    if kappa is None:
+        return "sin datos"
+    if kappa >= 0.8:
+        return "casi perfecto"
+    if kappa >= 0.6:
+        return "sustancial"
+    if kappa >= 0.4:
+        return "moderado"
+    if kappa >= 0.2:
+        return "bajo"
+    if kappa >= 0:
+        return "leve"
+    return "menor que azar"
+
+
+def _percent_tone(value: Optional[float]) -> str:
+    if value is None:
+        return "secondary"
+    if value >= 80:
+        return "success"
+    if value >= 60:
+        return "info"
+    if value >= 40:
+        return "warning"
+    return "danger"
+
+
+def _with_display_fields(metrics: dict) -> dict:
+    metrics = dict(metrics)
+    metrics["observed_agreement_percent"] = _percent(metrics.get("observed_agreement"))
+    metrics["positive_rate_percent"] = _percent(metrics.get("positive_rate"))
+    metrics["fleiss_kappa_tone"] = _kappa_tone(metrics.get("fleiss_kappa"))
+    metrics["fleiss_kappa_interpretation"] = _kappa_interpretation(metrics.get("fleiss_kappa"))
+    metrics["pairwise_cohen_kappa_avg_tone"] = _kappa_tone(metrics.get("pairwise_cohen_kappa_avg"))
+    metrics["krippendorff_alpha_nominal_tone"] = _kappa_tone(metrics.get("krippendorff_alpha_nominal"))
+    metrics["observed_agreement_tone"] = _percent_tone(metrics.get("observed_agreement_percent"))
+    metrics["positive_rate_tone"] = _percent_tone(metrics.get("positive_rate_percent"))
+    return metrics
+
+
 def _cohen_kappa(values_a: list, values_b: list) -> Optional[float]:
     pairs = [
         (a, b) for a, b in zip(values_a, values_b)
@@ -49,10 +106,10 @@ def _agreement_for_items(items: list, arbiter_ids: list) -> dict:
     """
     valid_items = [item for item in items if len(item) >= 2]
     if not valid_items:
-        return dict.fromkeys(CONSENSUS_METRIC_KEYS, None) | {
+        return _with_display_fields(dict.fromkeys(CONSENSUS_METRIC_KEYS, None) | {
             "items": 0,
             "raters": len(arbiter_ids),
-        }
+        })
 
     observed_values = []
     for item in valid_items:
@@ -126,7 +183,7 @@ def _agreement_for_items(items: list, arbiter_ids: list) -> dict:
 
     positives = sum(value for item in valid_items for _, value in item)
     total = sum(len(item) for item in valid_items)
-    return {
+    return _with_display_fields({
         "items": len(valid_items),
         "raters": len(arbiter_ids),
         "observed_agreement": round(observed_agreement, 4),
@@ -134,7 +191,7 @@ def _agreement_for_items(items: list, arbiter_ids: list) -> dict:
         "pairwise_cohen_kappa_avg": round(sum(pairwise_kappas) / len(pairwise_kappas), 4) if pairwise_kappas else None,
         "krippendorff_alpha_nominal": round(alpha, 4) if alpha is not None else None,
         "positive_rate": round(positives / total, 4) if total else None,
-    }
+    })
 
 
 def compute_agreement_metrics(rows: list, principles: list, arbiter_ids: list) -> dict:

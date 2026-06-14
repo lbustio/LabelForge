@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, Response, jsonify, render_template, request, stream_with_context
+from flask import Flask, Response, jsonify, render_template, request, send_from_directory, stream_with_context
 
 # ---------------------------------------------------------------------------
 # Módulo compartido de métricas de acuerdo y utilidades
@@ -180,17 +180,17 @@ def compute_min_delay(model_id: str, tier: str, n_arbiters: int = 1) -> dict:
     # Nivel de alerta
     if rpm <= 5:
         alert_level = "danger"
-        alert_msg   = (f"Modelo muy restrictivo en tier gratuito ({rpm} RPM). "
+        alert_msg   = (f"Modelo muy restrictivo en nivel gratuito ({rpm} RPM). "
                        f"Con {n_arbiters} arbitros necesitas al menos {delay_min:.1f}s entre entradas. "
                        f"Considera activar facturacion o usar un modelo Flash.")
     elif rpm <= 15:
         alert_level = "warning"
         alert_msg   = (f"Limite moderado ({rpm} RPM). "
-                       f"Delay minimo recomendado: {delay_min:.1f}s con {n_arbiters} arbitros.")
+                       f"Espera minima recomendada: {delay_min:.1f}s con {n_arbiters} arbitros.")
     else:
         alert_level = "info"
         alert_msg   = (f"Limite adecuado ({rpm} RPM). "
-                       f"Delay minimo recomendado: {delay_min:.1f}s con {n_arbiters} arbitros.")
+                       f"Espera minima recomendada: {delay_min:.1f}s con {n_arbiters} arbitros.")
 
     return {
         "model":           model_id,
@@ -256,6 +256,9 @@ _process_state = {
 def _public_current_stats(stats: dict = None) -> dict:
     stats = stats or _process_state["current_stats"]
     public = {k: v for k, v in stats.items() if not k.startswith("_")}
+    processed_rows = int(public.get("processed_rows", 0) or 0)
+    successful_rows = int(public.get("successful_rows", 0) or 0)
+    total_tokens = int(public.get("total_tokens_global", 0) or 0)
     public["arbiters"] = {
         arb_id: {
             **arb_stats,
@@ -271,10 +274,12 @@ def _public_current_stats(stats: dict = None) -> dict:
     }
     public["pending_rows"] = max(
         0,
-        int(public.get("total_rows", 0) or 0) - int(public.get("processed_rows", 0) or 0),
+        int(public.get("total_rows", 0) or 0) - processed_rows,
     )
     public["queued_rows"] = len(stats.get("_queued_indices", set()))
     public["total_latency_s"] = round(public.get("total_latency_s", 0) or 0, 3)
+    public["tokens_per_processed_row"] = round(total_tokens / processed_rows) if processed_rows else 0
+    public["tokens_per_successful_row"] = round(total_tokens / successful_rows) if successful_rows else 0
     return public
 
 
@@ -451,7 +456,7 @@ def api_models():
     Devuelve los modelos disponibles para un proveedor dado.
     Query params:
       - provider : gemini | vertex_gemini | anthropic | openai | ollama | openai_compat
-      - api_key  : opcional, override de la key del secrets.env
+      - api_key  : opcional, reemplazo directo de la clave en secrets.env
       - base_url : para ollama / openai_compat
       - project  : Google Cloud project para vertex_gemini
       - location : region Vertex AI para vertex_gemini
@@ -689,14 +694,14 @@ def api_rate_limits_summary():
         global_safe_delay = max(r["safe_delay_s"] for r in gemini_results)
         worst             = max(gemini_results, key=lambda r: r["min_delay_s"])
         global_alert      = worst["alert_level"]
-        global_msg        = (f"Delay minimo global: {global_min_delay}s "
+        global_msg        = (f"Espera minima global: {global_min_delay}s "
                              f"(limitado por {worst['model']} a {worst['rpm']} RPM). "
-                             f"Delay seguro para produccion: {global_safe_delay}s.")
+                             f"Espera segura para produccion: {global_safe_delay}s.")
     else:
         global_min_delay  = 1.5
         global_safe_delay = 3.0
         global_alert      = "info"
-        global_msg        = "Sin arbitros Gemini configurados. Usando valores por defecto."
+        global_msg        = "Sin arbitros Gemini configurados. Se usan valores por defecto."
 
     return jsonify({
         "tier":              tier,
@@ -765,7 +770,7 @@ def api_update_dataset_config():
         return jsonify({"error": "; ".join(errors)}), 400
 
     if not updated.get("input_file", cfg.get("dataset", {}).get("input_file", "")):
-        return jsonify({"error": "input_file es obligatorio"}), 400
+        return jsonify({"error": "El archivo de entrada es obligatorio"}), 400
 
     if "dataset" not in cfg:
         cfg["dataset"] = {}
@@ -784,7 +789,7 @@ def api_dataset_inspect():
     data = request.get_json() or {}
     raw_path = data.get("file", "").strip()
     if not raw_path:
-        return jsonify({"error": "El campo 'file' es obligatorio"}), 400
+        return jsonify({"error": "El campo de archivo es obligatorio"}), 400
 
     path = Path(raw_path)
     if not path.is_absolute():
@@ -799,7 +804,7 @@ def api_dataset_inspect():
         try:
             import openpyxl  # noqa: PLC0415
         except ImportError:
-            return jsonify({"error": "openpyxl no instalado. Ejecuta: pip install openpyxl"}), 500
+            return jsonify({"error": "openpyxl no esta instalado. Ejecuta: pip install openpyxl"}), 500
 
         wb = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
         sheets = wb.sheetnames
@@ -828,8 +833,55 @@ def api_dataset_inspect():
 
     else:
         return jsonify({
-            "error": f"Formato no soportado: '{suffix}'. Use .csv, .xlsx o .xls."
+            "error": f"Formato no soportado: '{suffix}'. Usa .csv, .xlsx o .xls."
         }), 400
+
+
+@app.route("/api/dataset/upload", methods=["POST"])
+def api_dataset_upload():
+    """
+    Recibe un archivo (CSV o Excel) via multipart/form-data,
+    lo guarda en data/uploads/ y devuelve su ruta relativa + sheets + columnas.
+    """
+    if "file" not in request.files:
+        return jsonify({"error": "No se recibio ningun archivo"}), 400
+
+    f = request.files["file"]
+    if not f.filename:
+        return jsonify({"error": "Nombre de archivo vacio"}), 400
+
+    suffix = Path(f.filename).suffix.lower()
+    if suffix not in (".csv", ".xlsx", ".xls"):
+        return jsonify({"error": f"Formato '{suffix}' no soportado. Usa .csv, .xlsx o .xls."}), 400
+
+    upload_dir = BASE_DIR / "data" / "uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    save_path = upload_dir / f.filename
+    f.save(str(save_path))
+
+    # Reutilizar logica de inspect
+    rel_path = str(save_path.relative_to(BASE_DIR)).replace("\\", "/")
+
+    # Inspeccionar el archivo recien guardado
+    if suffix in (".xlsx", ".xls"):
+        try:
+            import openpyxl  # noqa
+        except ImportError:
+            return jsonify({"error": "openpyxl no instalado"}), 500
+        wb = openpyxl.load_workbook(str(save_path), read_only=True, data_only=True)
+        sheets = wb.sheetnames
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+        wb.close()
+        columns = [str(h) for h in rows[0] if h is not None] if rows else []
+        return jsonify({"is_excel": True, "sheets": sheets, "columns": columns, "path": rel_path})
+    else:
+        import csv as _csv  # noqa
+        with open(save_path, "r", encoding="utf-8", errors="replace") as fp:
+            reader = _csv.DictReader(fp)
+            columns = list(reader.fieldnames or [])
+        return jsonify({"is_excel": False, "sheets": [], "columns": columns, "path": rel_path})
 
 
 # ---------------------------------------------------------------------------
@@ -1013,7 +1065,7 @@ def api_update_processing():
             if updated["base_delay_seconds"] < min_delay:
                 worst = max(gemini_delays, key=lambda r: r["min_delay_s"])
                 return jsonify({
-                    "error": (f"Delay base demasiado bajo para Gemini free tier. "
+                    "error": (f"La espera base es demasiado baja para el nivel gratuito de Gemini. "
                               f"Minimo recomendado: {min_delay}s "
                               f"(limitado por {worst['model']} a {worst['rpm']} RPM)."),
                     "min_delay_seconds": min_delay,
@@ -1043,7 +1095,7 @@ def api_run_start():
     sheet       = dataset_cfg.get("sheet", "")
     text_column = dataset_cfg.get("text_column", "claim")
 
-    cmd = [sys.executable, str(SCRIPTS_DIR / "label_persuasion.py")]
+    cmd = [sys.executable, str(BASE_DIR / "main_label.py")]
     if input_file:
         cmd += ["--input", input_file]
     if sheet:
@@ -1192,17 +1244,14 @@ def _describe_output_csv(path: Path) -> dict:
                 total_tokens = 0
                 for row in rows:
                     status_counts[_row_processing_status(row, principles)] += 1
-                    for arb_id in arbiters:
-                        token_value = _safe_int(row.get(f"total_tokens_{arb_id}"), 0) or 0
-                        if token_value > 0:
-                            total_tokens += token_value
+                    total_tokens += _entry_usage_metrics_from_row(row, arbiters)["total_tokens"]
                 info["successful_rows"] = status_counts["ok"]
                 info["failed_rows"] = status_counts["failed"]
                 info["total_tokens_global"] = total_tokens
     except Exception:
         return info
 
-    run_label = f"Ejecucion del {info['run_timestamp']}" if info["run_timestamp"] else "Output etiquetado"
+    run_label = f"Ejecucion del {info['run_timestamp']}" if info["run_timestamp"] else "Resultado etiquetado"
     parts = [run_label]
     if info["row_count"] is not None:
         parts.append(f"{info['row_count']} entradas")
@@ -1214,9 +1263,9 @@ def _describe_output_csv(path: Path) -> dict:
         parts.append(f"{len(info['arbiters'])} arbitros")
     parts.append("con votos, columnas de justificacion y consenso")
     if info["has_tokens"] and info["has_latency"]:
-        parts.append("incluye tokens y latencia")
+        parts.append("incluye tokens y tiempos de respuesta")
     elif info["has_tokens"]:
-        parts.append("incluye tokens; no trae latencia por ser una ejecucion anterior")
+        parts.append("incluye tokens; no trae tiempos por ser una ejecucion anterior")
     info["description"] = "; ".join(parts) + "."
     return info
 
@@ -1274,12 +1323,91 @@ def _row_processing_status(row: dict, principles: list) -> str:
     return "ok"
 
 
+def _entry_consensus_metrics_from_row(row: dict, principles: list) -> dict:
+    per_principle = {}
+    for principle in principles:
+        per_principle[principle] = {
+            "support": _safe_int(row.get(f"{principle}_entry_consensus_support")),
+            "raters": _safe_int(row.get(f"{principle}_entry_consensus_raters")),
+            "support_ratio": _safe_float(row.get(f"{principle}_entry_consensus_support_ratio")),
+            "votes_0": _safe_int(row.get(f"{principle}_entry_consensus_votes_0")),
+            "votes_1": _safe_int(row.get(f"{principle}_entry_consensus_votes_1")),
+            "unanimous": str(row.get(f"{principle}_entry_consensus_unanimous", "")).lower() in {"true", "1"},
+        }
+    observed_agreement = _safe_float(row.get("entry_consensus_observed_agreement"))
+    mean_support_ratio = _safe_float(row.get("entry_consensus_mean_support_ratio"))
+    observed_agreement_percent = _safe_float(row.get("entry_consensus_observed_agreement_percent"))
+    mean_support_percent = _safe_float(row.get("entry_consensus_mean_support_percent"))
+    if observed_agreement_percent is None and observed_agreement is not None:
+        observed_agreement_percent = round(observed_agreement * 100, 1)
+    if mean_support_percent is None and mean_support_ratio is not None:
+        mean_support_percent = round(mean_support_ratio * 100, 1)
+    return {
+        "observed_agreement": observed_agreement,
+        "observed_agreement_percent": observed_agreement_percent,
+        "mean_support_ratio": mean_support_ratio,
+        "mean_support_percent": mean_support_percent,
+        "unanimous_principles": _safe_int(row.get("entry_consensus_unanimous_principles"), 0),
+        "split_principles": _safe_int(row.get("entry_consensus_split_principles"), 0),
+        "principle_count": _safe_int(row.get("entry_consensus_principle_count"), len(principles)),
+        "per_principle": per_principle,
+    }
+
+
+def _entry_usage_metrics_from_row(row: dict, arbiter_ids: list) -> dict:
+    prompt_tokens = _safe_int(row.get("entry_prompt_tokens"))
+    completion_tokens = _safe_int(row.get("entry_completion_tokens"))
+    total_tokens = _safe_int(row.get("entry_total_tokens"))
+    latency_s = _safe_float(row.get("entry_latency_s"))
+    latency_avg_s = _safe_float(row.get("entry_latency_avg_s"))
+    arbiter_calls = _safe_int(row.get("entry_arbiter_calls"))
+    tokens_per_call = _safe_float(row.get("entry_tokens_per_call"))
+
+    if total_tokens is None:
+        prompt_tokens = 0
+        completion_tokens = 0
+        total_tokens = 0
+        latency_total = 0.0
+        latency_count = 0
+        arbiter_calls = 0
+
+        for arb_id in arbiter_ids:
+            p_tok = _safe_int(row.get(f"prompt_tokens_{arb_id}"), 0) or 0
+            c_tok = _safe_int(row.get(f"completion_tokens_{arb_id}"), 0) or 0
+            t_tok = _safe_int(row.get(f"total_tokens_{arb_id}"), p_tok + c_tok) or 0
+            lat = _safe_float(row.get(f"latency_s_{arb_id}"))
+
+            if p_tok > 0:
+                prompt_tokens += p_tok
+            if c_tok > 0:
+                completion_tokens += c_tok
+            if t_tok > 0:
+                total_tokens += t_tok
+            if t_tok >= 0 or (lat is not None and lat >= 0):
+                arbiter_calls += 1
+            if lat is not None and lat >= 0:
+                latency_total += lat
+                latency_count += 1
+
+        latency_s = round(latency_total, 3) if latency_count else None
+        latency_avg_s = round(latency_total / latency_count, 3) if latency_count else None
+        tokens_per_call = round(total_tokens / arbiter_calls, 2) if arbiter_calls else None
+
+    return {
+        "prompt_tokens": prompt_tokens or 0,
+        "completion_tokens": completion_tokens or 0,
+        "total_tokens": total_tokens or 0,
+        "latency_s": round(latency_s, 3) if latency_s is not None and latency_s >= 0 else None,
+        "latency_avg_s": round(latency_avg_s, 3) if latency_avg_s is not None and latency_avg_s >= 0 else None,
+        "arbiter_calls": arbiter_calls or 0,
+        "tokens_per_call": tokens_per_call,
+    }
+
+
 def _build_result_rows(rows: list, principles: list, arbiter_ids: list, limit: int) -> list:
     result_rows = []
     for idx, row in enumerate(rows[:limit]):
-        row_total_tokens = 0
-        row_total_latency = 0.0
-        has_latency = False
+        usage_metrics = _entry_usage_metrics_from_row(row, arbiter_ids)
         arbiter_results = []
 
         for arb_id in arbiter_ids:
@@ -1287,12 +1415,6 @@ def _build_result_rows(rows: list, principles: list, arbiter_ids: list, limit: i
             completion_tokens = _safe_int(row.get(f"completion_tokens_{arb_id}"), 0) or 0
             total_tokens = _safe_int(row.get(f"total_tokens_{arb_id}"), 0) or 0
             latency_s = _safe_float(row.get(f"latency_s_{arb_id}"))
-
-            if total_tokens > 0:
-                row_total_tokens += total_tokens
-            if latency_s is not None and latency_s >= 0:
-                row_total_latency += latency_s
-                has_latency = True
 
             labels = {}
             for p in principles:
@@ -1321,8 +1443,12 @@ def _build_result_rows(rows: list, principles: list, arbiter_ids: list, limit: i
                 p: _safe_int(row.get(f"{p}_consensus"))
                 for p in principles
             },
-            "total_tokens": row_total_tokens,
-            "total_latency_s": round(row_total_latency, 3) if has_latency else None,
+            "consensus_metrics": _entry_consensus_metrics_from_row(row, principles),
+            "usage_metrics": usage_metrics,
+            "total_tokens": usage_metrics["total_tokens"],
+            "total_latency_s": usage_metrics["latency_s"],
+            "latency_avg_s": usage_metrics["latency_avg_s"],
+            "arbiter_calls": usage_metrics["arbiter_calls"],
             "arbiters": arbiter_results,
         })
 
@@ -1371,8 +1497,6 @@ def api_run_stats():
     principles = _detect_principles(fieldnames)
 
     stats = {}
-    total_tokens_global = 0
-    total_latency_global = 0.0
     for arb_id in arbiter_ids:
         prompt_sum, completion_sum, total_sum = 0, 0, 0
         latencies = []
@@ -1392,8 +1516,6 @@ def api_run_stats():
                     latencies.append(lat)
             except (ValueError, TypeError):
                 pass
-        total_tokens_global += total_sum
-        total_latency_global += sum(latencies)
         stats[arb_id] = {
             "prompt_tokens":     prompt_sum,
             "completion_tokens": completion_sum,
@@ -1406,8 +1528,14 @@ def api_run_stats():
         }
 
     status_counts = {"ok": 0, "failed": 0, "pending": 0}
+    total_tokens_global = 0
+    total_latency_global = 0.0
     for row in rows:
         status_counts[_row_processing_status(row, principles)] += 1
+        usage_metrics = _entry_usage_metrics_from_row(row, arbiter_ids)
+        total_tokens_global += usage_metrics["total_tokens"]
+        if usage_metrics["latency_s"] is not None:
+            total_latency_global += usage_metrics["latency_s"]
 
     return jsonify({
         "source_file":         latest.name,
@@ -1416,6 +1544,8 @@ def api_run_stats():
         "failed_rows":         status_counts["failed"],
         "pending_rows":        status_counts["pending"],
         "total_tokens_global": total_tokens_global,
+        "tokens_per_row":      round(total_tokens_global / len(rows)) if rows else 0,
+        "tokens_per_successful_row": round(total_tokens_global / status_counts["ok"]) if status_counts["ok"] else 0,
         "total_latency_s":     round(total_latency_global, 3),
         "arbiters":            stats,
         "principles":          principles,

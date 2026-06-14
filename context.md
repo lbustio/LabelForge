@@ -57,7 +57,7 @@ LabelForge/
 │   ├── agreement_metrics.py   → Métricas de acuerdo inter-árbitros (compartido CLI + webapp)
 │   └── utils.py               → Helpers numéricos compartidos (safe_int, safe_float, etc.)
 ├── webapp/
-│   ├── app.py                 → Backend Flask: 35 endpoints REST + SSE
+│   ├── app.py                 → Backend Flask: endpoints REST + SSE
 │   └── templates/
 │       ├── base.html          → Layout global con sistema de colores semántico
 │       ├── index.html         → Dashboard (árbitros, outputs, estado)
@@ -104,6 +104,7 @@ Para cada claim:
     │   ├── Registrar tokens y latencia
     │   └── Guardar en arbiter_results.jsonl (durable)
     ├── Calcular consenso por mayoría
+    ├── Calcular diagnóstico por entrada: coincidencia de árbitros, tokens y latencia
     ├── Guardar en claim_results.jsonl (durable)
     └── Actualizar checkpoint.json
     ↓
@@ -148,7 +149,7 @@ Los tres árbitros actuales usan **Vertex AI** con autenticación ADC (no API ke
 **Proyecto GCP**: `cloud-computing-cybersec-inaoe`  
 **Región Vertex**: `us-central1`  
 **Temperatura**: `0.1` (baja, para clasificación determinista)  
-**max_output_tokens**: `256` (el JSON binario de salida es muy corto)
+**max_output_tokens**: `2048` (el JSON binario de salida es muy corto; margen para thinking tokens en gemini-2.5)
 
 > ⚠️ Para que los árbitros Vertex funcionen, se necesita autenticación ADC:
 > ```bash
@@ -212,6 +213,19 @@ originales del dataset y agrega:
 | `completion_tokens_{arb_id}` | `completion_tokens_arb1` | Tokens de respuesta del árbitro |
 | `total_tokens_{arb_id}` | `total_tokens_arb1` | Total de tokens del árbitro |
 | `latency_s_{arb_id}` | `latency_s_arb1` | Latencia en segundos de esa llamada |
+| `entry_prompt_tokens` | `832` | Suma de tokens de entrada de todos los árbitros para esa entrada |
+| `entry_completion_tokens` | `90` | Suma de tokens de salida de todos los árbitros para esa entrada |
+| `entry_total_tokens` | `922` | Tokens totales de la entrada completa |
+| `entry_latency_s` | `34.035` | Tiempo total medido de la entrada completa |
+| `entry_latency_avg_s` | `11.345` | Tiempo promedio por llamada de árbitro en esa entrada |
+| `entry_arbiter_calls` | `3` | Número de llamadas de árbitro contabilizadas en la entrada |
+| `entry_tokens_per_call` | `307.33` | Promedio de tokens por llamada de árbitro |
+| `entry_consensus_observed_agreement` | `1.0` | Coincidencia por pares para esa entrada; diagnóstico/auditoría, no métrica principal del paper |
+| `entry_consensus_observed_agreement_percent` | `100.0` | Coincidencia por pares expresada como porcentaje |
+| `entry_consensus_mean_support_ratio` | `1.0` | Apoyo promedio al consenso por principio |
+| `entry_consensus_mean_support_percent` | `100.0` | Apoyo promedio expresado como porcentaje |
+| `entry_consensus_unanimous_principles` | `5` | Principios con voto unánime |
+| `entry_consensus_split_principles` | `0` | Principios con desacuerdo entre árbitros |
 | `consensus_global_fleiss_kappa` | — | Fleiss Kappa global del run |
 | `{P}_consensus_fleiss_kappa` | `AUTH_consensus_fleiss_kappa` | Fleiss Kappa por principio |
 | _(más métricas de acuerdo)_ | — | Cohen, Krippendorff, observed_agreement, positive_rate |
@@ -249,7 +263,7 @@ originales del dataset y agrega:
     "vertex_project": "mi-proyecto-gcp",
     "vertex_location": "us-central1"
   },
-  "generation_config": { "temperature": 0.1, "max_output_tokens": 256 },
+  "generation_config": { "temperature": 0.1, "max_output_tokens": 2048 },
   "system_prompt": "..."
 }
 ```
@@ -325,7 +339,7 @@ macOS 12 Monterey), Windows y Linux. No requiere privilegios de administrador.
 | `/` | Dashboard: árbitros activos, outputs recientes, estado del checkpoint |
 | `/arbiters` | CRUD completo de árbitros (crear, editar, eliminar) |
 | `/principles` | Edición de principios, template del prompt y preview coloreado del prompt final |
-| `/processing` | Parámetros de rate limiter, delays, backoff, recovery y seguridad |
+| `/processing` | Parámetros de rate limiter, delays, backoff, recovery, seguridad y **carga de dataset (drag & drop + click)** |
 | `/run` | Lanzar etiquetado, ver logs en tiempo real (SSE), métricas en vivo, resultados |
 
 ### Comunicación en tiempo real (SSE)
@@ -337,6 +351,20 @@ El pipeline emite dos tipos de mensajes al arrancarse desde la webapp:
 Estos eventos estructurados solo se emiten cuando la variable
 `DATA_LABELING_WEBAPP_METRICS=1` está activa (la webapp la activa automáticamente
 al lanzar el subproceso).
+
+### Frontera backend/frontend
+La regla actual del proyecto es: **todo cálculo de procesamiento y métricas vive en
+Python; la interfaz solo presenta datos**.
+
+- `scripts/label_persuasion.py` calcula consenso, diagnóstico de consenso por entrada,
+  tokens, latencia, llamadas por árbitro y columnas `entry_*`.
+- `scripts/agreement_metrics.py` calcula métricas globales y por principio
+  (Fleiss/Cohen/Krippendorff/acuerdo observado/tasa positiva), porcentajes e
+  interpretación del kappa.
+- `webapp/app.py` adapta CSV/eventos a JSON para la interfaz y mantiene compatibilidad
+  con CSV anteriores calculando faltantes en backend.
+- `webapp/templates/*.html` no debe decidir resultados ni métricas: solo renderiza,
+  formatea números/segundos/porcentajes y maneja interacción visual.
 
 ---
 
@@ -479,6 +507,9 @@ pairwise_cohen_kappa_avg   → Cohen Kappa promedio por pares
 krippendorff_alpha_nominal → Krippendorff Alpha nominal
 positive_rate              → tasa de etiquetas positivas (1)
 ```
+Cada métrica retorna además un campo `*_tone` (success/info/warning/danger) para
+coloreado consistente en la UI. La función `_percent_tone()` aplica la escala de
+4 niveles para valores porcentuales; `_kappa_tone()` para valores de kappa.
 
 **Interpretación del Kappa** (regla general):
 | Valor | Interpretación |
@@ -524,10 +555,21 @@ SSE es unidireccional (servidor → cliente), más simple de implementar con Fla
 suficiente para el caso de uso (streaming de logs). Los WebSockets requerirían una
 librería adicional (Flask-SocketIO) o cambiar el servidor.
 
-### Por qué `max_output_tokens: 256`
-El JSON de respuesta binaria es muy corto (~35 chars). El valor 256 es suficiente
-incluso si el modelo añade algo de pensamiento (thinking tokens en gemini-2.5-pro).
-Un valor más alto no mejora la respuesta pero consume más cuota.
+### Por qué `max_output_tokens: 2048`
+El JSON de respuesta binaria es muy corto (~35 chars). El valor anterior (256) era
+insuficiente porque **Gemini 2.5 en Vertex AI tiene "thinking mode" activado por defecto**,
+que consume tokens de salida para razonamiento interno antes de emitir el JSON.
+Con 256 tokens, la respuesta se truncaba a mitad del JSON (`JSONDecodeError`).
+
+**Solución aplicada:**
+- `max_output_tokens: 2048` en config para todos los árbitros (margen amplio).
+- En `_call_vertex_gemini`: desactivar thinking **solo para `gemini-2.5-flash`**:
+  ```python
+  if "gemini-2.5-flash" in provider["model"]:
+      generation_config["thinking_config"] = {"thinking_budget": 0}
+  ```
+- `gemini-2.5-pro` **no soporta** `thinking_budget=0` en Vertex AI (error 400), por
+  eso la condición es específica para flash.
 
 ### Configuración de Vertex AI como diccionario plano
 La configuración de generación se pasa como `dict` (no como objeto `GenerationConfig`)
@@ -541,12 +583,24 @@ respuestas en versiones recientes de Gemini.
 ### ✅ Completado y funcionando
 - Pipeline CLI completo con rate limiter, checkpoints, cola de fallos y métricas
 - Soporte de entrada CSV y Excel con sheet y columna configurables (webapp + CLI)
+- Pestaña `/processing` corregida tras mezcla de JS legacy: ya no muestra código
+  como texto y usa solo el flujo actual de drag & drop/upload
 - Webapp Flask con 38 endpoints, 5 páginas y streaming SSE
 - 3 árbitros configurados con Vertex AI (gemini-2.5-pro y gemini-2.5-flash)
+- JSONDecodeError solucionado: `max_output_tokens` 256→2048 y thinking desactivado
+  en gemini-2.5-flash (gemini-2.5-pro no soporta `thinking_budget=0`)
+- Controles de ejecución deshabilitados durante proceso activo en `/run`
 - Métricas de acuerdo inter-árbitros (Fleiss/Cohen/Krippendorff) en CLI y webapp
-- Sistema de colores semántico en la webapp
+- Diagnóstico de consenso por entrada y estadísticas de tokens/latencia por entrada
+  calculados en backend y persistidos en CSV
+- Separación backend/frontend reforzada: la UI no calcula métricas de negocio
+- Sistema de colores semántico unificado (4 niveles) aplicado a todas las métricas
+  de acuerdo: observado, Fleiss, Cohen, Krippendorff y tasa positiva
+- Badge global muestra acuerdo observado + Fleiss Kappa por separado para evitar
+  paradoja visual de prevalencia
 - Suite de 9 pruebas unitarias
 - README completo, bitácora actualizada y context.md de transferencia
+- `scripts/__init__.py` creado para resolver ModuleNotFoundError en subprocesos
 - Repositorio público en GitHub: https://github.com/lbustio/LabelForge
 
 ### ⚠️ Datos privados (investigación en curso)
@@ -556,7 +610,7 @@ respuestas en versiones recientes de Gemini.
 
 ### 🔜 Pendientes / Mejoras futuras identificadas
 - Ejecutar el pipeline completo sobre el dataset y obtener resultados finales
-- Analizar métricas de acuerdo resultantes para el paper
+- Analizar métricas agregadas de acuerdo inter-árbitros para el paper
 - Evaluar si agregar soporte para etiquetado con justificaciones en modo producción
 - Posible expansión a otras taxonomías o datasets
 
@@ -571,4 +625,4 @@ respuestas en versiones recientes de Gemini.
 
 ---
 
-*Última actualización: 2026-06-13 — Actualizar este archivo con cada cambio relevante.*
+*Última actualización: 2026-06-13 — métricas por entrada, frontera backend/frontend, colores unificados y badges separados para acuerdo observado + Fleiss Kappa.*

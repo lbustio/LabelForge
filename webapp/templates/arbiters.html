@@ -40,7 +40,7 @@
 
         <!-- Proveedor -->
         <div class="p-3 rounded mb-4 accent-panel accent-cyan" style="background:#12141e;border:1px solid rgba(var(--tone-cyan), .28)">
-          <div class="card-header-label mb-3">Configuracion del proveedor LLM</div>
+          <div class="card-header-label mb-3">Configuración del proveedor de modelos de lenguaje</div>
 
           <!-- Selector de proveedor -->
           <div class="row g-3 mb-3">
@@ -63,44 +63,44 @@
                   <i class="bi bi-hdd-rack me-1"></i>Ollama (local)
                 </button>
                 <button type="button" class="btn btn-sm provider-tab" data-provider="openai_compat" onclick="selectProvider('openai_compat')">
-                  <i class="bi bi-plug me-1"></i>OpenAI-compatible
+                  <i class="bi bi-plug me-1"></i>Compatible con OpenAI
                 </button>
               </div>
             </div>
           </div>
 
-          <!-- API Key (no para ollama) -->
+          <!-- Clave de API (no aplica para Ollama) -->
           <div class="row g-3 mb-3" id="apikey-section">
             <div class="col-md-6">
-              <label class="form-label small text-secondary">Variable de entorno de la API key</label>
+              <label class="form-label small text-secondary">Variable de entorno de la clave de API</label>
               <input type="text" id="arb-api-key-env" class="form-control" placeholder="ej: GEMINI_API_KEY">
               <div class="form-text text-secondary">Nombre de la variable en tu archivo secrets.env</div>
             </div>
             <div class="col-md-6">
-              <label class="form-label small text-secondary">API key override (opcional)</label>
-              <input type="password" id="arb-api-key-override" class="form-control" placeholder="Solo si quieres sobreescribir secrets.env">
+              <label class="form-label small text-secondary">Clave de API directa (opcional)</label>
+              <input type="password" id="arb-api-key-override" class="form-control" placeholder="Solo si quieres sobrescribir secrets.env">
               <div class="form-text text-secondary">Si se rellena, tiene prioridad sobre secrets.env</div>
             </div>
           </div>
 
-          <!-- Base URL (ollama / openai_compat) -->
+          <!-- Dirección base (Ollama / compatible con OpenAI) -->
           <div class="row g-3 mb-3" id="baseurl-section" style="display:none!important">
             <div class="col-md-8">
-              <label class="form-label small text-secondary">Base URL <span class="text-danger">*</span></label>
+              <label class="form-label small text-secondary">Dirección base <span class="text-danger">*</span></label>
               <input type="text" id="arb-base-url" class="form-control" placeholder="ej: http://localhost:11434/v1">
-              <div class="form-text text-secondary">URL base del servidor local. Para Ollama: http://localhost:11434/v1</div>
+              <div class="form-text text-secondary">Dirección base del servidor local. Para Ollama: http://localhost:11434/v1</div>
             </div>
           </div>
 
-          <!-- Vertex AI (Google Cloud credits / ADC) -->
+          <!-- Vertex AI (creditos de Google Cloud / credenciales predeterminadas) -->
           <div class="row g-3 mb-3" id="vertex-section" style="display:none!important">
             <div class="col-md-6">
-              <label class="form-label small text-secondary">Google Cloud Project ID <span class="text-danger">*</span></label>
+              <label class="form-label small text-secondary">Identificador del proyecto en Google Cloud <span class="text-danger">*</span></label>
               <input type="text" id="arb-vertex-project" class="form-control" placeholder="ej: mi-proyecto-gcp">
-              <div class="form-text text-secondary">Tambien puede venir de GOOGLE_CLOUD_PROJECT en secrets.env.</div>
+              <div class="form-text text-secondary">También puede venir de GOOGLE_CLOUD_PROJECT en secrets.env.</div>
             </div>
             <div class="col-md-4">
-              <label class="form-label small text-secondary">Region Vertex AI</label>
+              <label class="form-label small text-secondary">Región de Vertex AI</label>
               <input type="text" id="arb-vertex-location" class="form-control" placeholder="us-central1" value="us-central1">
               <div class="form-text text-secondary">Ej: us-central1, europe-west4.</div>
             </div>
@@ -133,34 +133,34 @@
               </div>
             </div>
 
-            <!-- Modelo seleccionado + aviso de rate limits -->
+            <!-- Modelo seleccionado y aviso de limites de peticiones -->
             <div class="d-flex align-items-center gap-2 p-2 rounded" style="background:#0a0c14;border:1px solid #2d3148;min-height:42px">
               <span class="text-secondary small me-1">Modelo seleccionado:</span>
               <span id="selected-model-chip" class="text-secondary small fst-italic">ninguno</span>
             </div>
 
-            <!-- Rate limit info (solo para Gemini) -->
+            <!-- Información de limites de peticiones (solo para Gemini) -->
             <div id="rate-limit-box" class="mt-2 p-2 rounded" style="display:none;font-size:.8rem">
             </div>
           </div>
         </div>
 
-        <!-- Generation config -->
+        <!-- Configuración de generación -->
         <div class="row g-3 mb-4">
           <div class="col-md-3">
-            <label class="form-label small text-secondary">Temperature</label>
+            <label class="form-label small text-secondary">Temperatura</label>
             <input type="number" id="arb-temp" class="form-control" value="0.1" min="0" max="2" step="0.05">
             <div class="form-text text-secondary">0 = determinista · 1 = creativo</div>
           </div>
           <div class="col-md-3">
-            <label class="form-label small text-secondary">Max output tokens</label>
+            <label class="form-label small text-secondary">Máximo de tokens de salida</label>
             <input type="number" id="arb-tokens" class="form-control" value="600" min="100" max="8192">
           </div>
         </div>
 
-        <!-- System prompt -->
+        <!-- Instrucción de sistema -->
         <div class="mb-2">
-          <label class="form-label small text-secondary">System prompt <span class="text-danger">*</span></label>
+          <label class="form-label small text-secondary">Instrucción de sistema <span class="text-danger">*</span></label>
           <textarea id="arb-system-prompt" class="form-control" rows="9"
             placeholder="Describe la personalidad, experiencia y enfoque de este arbitro..."></textarea>
         </div>
@@ -325,7 +325,7 @@ async function loadModels() {
   } catch(e) {
     grid.innerHTML = `<div class="col-12 py-3">
       <div class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>${e.message}</div>
-      <div class="text-secondary small mt-1">Verifica tu API key o la URL del servidor local.</div>
+      <div class="text-secondary small mt-1">Verifica tu clave de API o la dirección del servidor local.</div>
     </div>`;
     currentModels = [];
   }
@@ -424,21 +424,21 @@ async function loadRateLimitInfo() {
   try {
     const data = await fetch(url).then(r => r.json());
     const tone = data.alert_level === 'danger' ? 'danger' : (data.alert_level === 'warning' ? 'warning' : 'info');
-    const rpd = data.rpd === null ? 'sin limite diario' : `${data.rpd} RPD`;
+    const rpd = data.rpd === null ? 'sin límite diario' : `${data.rpd} RPD`;
     box.className = `mt-2 p-2 rounded border border-${tone} text-${tone}`;
     box.style.display = '';
     box.style.fontSize = '.8rem';
     box.innerHTML = `
-      <div class="fw-semibold mb-1"><i class="bi bi-speedometer2 me-1"></i>Limites Gemini orientativos</div>
+      <div class="fw-semibold mb-1"><i class="bi bi-speedometer2 me-1"></i>Límites orientativos de Gemini</div>
       <div>${data.rpm} RPM · ${Number(data.tpm).toLocaleString('es-ES')} TPM · ${rpd}</div>
-      <div class="mt-1">Delay minimo recomendado con ${data.n_arbiters} arbitro(s): <strong>${data.min_delay_s}s</strong></div>
+      <div class="mt-1">Espera mínima recomendada con ${data.n_arbiters} árbitro(s): <strong>${data.min_delay_s}s</strong></div>
       <div class="mt-1 text-secondary">${data.alert_msg}</div>
     `;
   } catch(e) {
     box.className = 'mt-2 p-2 rounded border border-warning text-warning';
     box.style.display = '';
     box.style.fontSize = '.8rem';
-    box.innerHTML = 'No se pudieron cargar los limites de rate para este modelo.';
+    box.innerHTML = 'No se pudieron cargar los límites de peticiones para este modelo.';
   }
 }
 
@@ -456,7 +456,7 @@ const PROVIDER_ICONS = {
 };
 const PROVIDER_LABELS = {
   gemini:'Gemini AI Studio', vertex_gemini:'Gemini Vertex AI', anthropic:'Claude', openai:'ChatGPT',
-  ollama:'Ollama', openai_compat:'OAI-compat'
+  ollama:'Ollama', openai_compat:'Compatible con OpenAI'
 };
 
 function renderList() {
@@ -504,8 +504,8 @@ function renderList() {
         </div>
       </div>
       <div class="d-flex gap-3 mt-3 pt-2 border-top border-dark">
-        <span class="text-secondary small"><i class="bi bi-thermometer me-1"></i>temp: ${a.generation_config?.temperature ?? 0.1}</span>
-        <span class="text-secondary small"><i class="bi bi-hash me-1"></i>max tokens: ${a.generation_config?.max_output_tokens ?? 600}</span>
+        <span class="text-secondary small"><i class="bi bi-thermometer me-1"></i>temperatura: ${a.generation_config?.temperature ?? 0.1}</span>
+        <span class="text-secondary small"><i class="bi bi-hash me-1"></i>máximo de tokens: ${a.generation_config?.max_output_tokens ?? 600}</span>
       </div>
     </div>`;
   }).join('');
@@ -611,7 +611,7 @@ async function saveArbiter() {
   };
 
   if (!payload.name || !payload.system_prompt) {
-    showToast('Completa nombre y system prompt', 'error'); return;
+    showToast('Completa el nombre y la instrucción de sistema', 'error'); return;
   }
   if (!selectedModel) {
     showToast('Selecciona un modelo', 'error'); return;

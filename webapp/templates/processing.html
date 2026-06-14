@@ -43,53 +43,101 @@
   }
 </style>
 
-<div class="page-title">Procesamiento &amp; Dataset</div>
+<div class="page-title">Procesamiento y conjunto de datos</div>
 
 <!-- =====================================================================
-     PANEL: Dataset de Entrada
+     PANEL: Conjunto de Datos de Entrada
 ====================================================================== -->
+<style>
+  .ds-dropzone {
+    border: 2px dashed rgba(var(--tone-cyan, 34,211,238), .4);
+    border-radius: .75rem;
+    padding: 2rem 1.5rem;
+    text-align: center;
+    cursor: pointer;
+    transition: background .2s, border-color .2s;
+    background: rgba(var(--tone-cyan, 34,211,238), .03);
+    position: relative;
+  }
+  .ds-dropzone:hover, .ds-dropzone.drag-over {
+    background: rgba(var(--tone-cyan, 34,211,238), .09);
+    border-color: rgba(var(--tone-cyan, 34,211,238), .75);
+  }
+  .ds-dropzone.drag-over {
+    box-shadow: 0 0 0 3px rgba(var(--tone-cyan, 34,211,238), .25);
+  }
+  .ds-dropzone-icon { font-size: 2.2rem; opacity: .55; }
+  .ds-file-info {
+    display:none;
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(var(--tone-cyan, 34,211,238), .25);
+    border-radius: .5rem;
+    padding: .6rem 1rem;
+    margin-top: .75rem;
+    font-size: .85rem;
+  }
+  .ds-file-info .ds-fname { font-weight: 600; color: #e2e8f0; }
+  .ds-file-info .ds-fsize { color: #64748b; font-size: .78rem; }
+</style>
+
 <div class="card-dark accent-panel accent-cyan mb-4">
   <div class="card-header-label">
-    <i class="bi bi-database me-2"></i>Dataset de Entrada
+    <i class="bi bi-database me-2"></i>Conjunto de datos de entrada
   </div>
 
-  <div class="row g-3 align-items-end" id="dataset-form">
+  <!-- Selector de archivo oculto -->
+  <input type="file" id="ds-file-input" accept=".csv,.xlsx,.xls"
+         style="display:none" onchange="onFileSelected(this.files)">
 
-    <!-- Archivo -->
-    <div class="col-12">
-      <label class="form-label small text-secondary" for="ds-input-file">
-        Archivo de entrada <span class="text-secondary">(ruta relativa al proyecto o absoluta)</span>
-      </label>
-      <div class="input-group">
-        <input type="text" class="form-control" id="ds-input-file"
-               placeholder="data/mi_dataset.csv  o  /ruta/absoluta/archivo.xlsx"
-               oninput="onDatasetFileChange()">
-        <button class="btn btn-outline-info btn-sm" type="button" id="btn-inspect"
-                onclick="inspectDataset()">
-          <i class="bi bi-search me-1"></i>Inspeccionar
-        </button>
-      </div>
-      <div id="ds-file-feedback" class="form-text text-secondary mt-1"></div>
+  <!-- Zona para arrastrar y soltar -->
+  <div class="ds-dropzone" id="ds-dropzone"
+       ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+    <div class="ds-dropzone-icon mb-2"><i class="bi bi-cloud-upload"></i></div>
+    <div class="fw-semibold text-light mb-1">Arrastra tu archivo aquí</div>
+    <div class="text-secondary small mb-3">o haz clic para abrir el explorador</div>
+    <button type="button" class="btn btn-outline-info btn-sm px-3"
+            onclick="document.getElementById('ds-file-input').click()">
+      <i class="bi bi-folder2-open me-1"></i>Seleccionar archivo
+    </button>
+    <div class="text-secondary mt-2" style="font-size:.75rem">
+      Formatos soportados: .csv &nbsp;·&nbsp; .xlsx &nbsp;·&nbsp; .xls
     </div>
+  </div>
 
-    <!-- Sheet (solo Excel, oculto por defecto) -->
+  <!-- Información del archivo seleccionado -->
+  <div class="ds-file-info" id="ds-file-info">
+    <div class="d-flex align-items-center gap-2">
+      <i class="bi bi-file-earmark-spreadsheet text-info fs-5"></i>
+      <div>
+        <div class="ds-fname" id="ds-fname">—</div>
+        <div class="ds-fsize" id="ds-fsize"></div>
+      </div>
+      <div class="ms-auto" id="ds-upload-status">
+        <span class="spinner-border spinner-border-sm text-info" style="display:none" id="ds-spinner"></span>
+        <span id="ds-status-text" class="small"></span>
+      </div>
+    </div>
+    <div id="ds-file-feedback" class="mt-2 small"></div>
+  </div>
+
+  <!-- Listas de hoja y columna -->
+  <div class="row g-3 mt-1 align-items-end" id="ds-selectors" style="display:none!important">
+
     <div class="col-md-5" id="ds-sheet-group" style="display:none">
-      <label class="form-label small text-secondary" for="ds-sheet">Hoja de cálculo (worksheet)</label>
+      <label class="form-label small text-secondary" for="ds-sheet">Hoja de cálculo</label>
       <select class="form-select" id="ds-sheet" onchange="onSheetChange()">
         <option value="">(primera hoja)</option>
       </select>
       <div class="form-text text-secondary">Solo aplicable a archivos Excel.</div>
     </div>
 
-    <!-- Columna -->
     <div class="col-md-5" id="ds-column-group">
       <label class="form-label small text-secondary" for="ds-column">Columna de texto a etiquetar</label>
       <select class="form-select" id="ds-column">
-        <option value="">(inspecciona el archivo primero)</option>
+        <option value="">(primero selecciona un archivo)</option>
       </select>
     </div>
 
-    <!-- Boton guardar -->
     <div class="col-md-2 d-flex align-items-end">
       <button class="btn btn-primary btn-sm w-100" onclick="saveDatasetConfig()">
         <i class="bi bi-floppy me-1"></i>Guardar
@@ -98,86 +146,87 @@
 
   </div>
 
-  <!-- Banner de estado del dataset actual -->
-  <div id="ds-current-banner" class="mt-3 p-2 rounded small" style="background:rgba(var(--tone-cyan),.08);border:1px solid rgba(var(--tone-cyan),.25);display:none">
+  <!-- Ruta guardada actualmente -->
+  <div id="ds-current-banner" class="mt-3 p-2 rounded small"
+       style="background:rgba(var(--tone-cyan,34,211,238),.08);border:1px solid rgba(var(--tone-cyan,34,211,238),.25);display:none">
     <i class="bi bi-info-circle me-1 text-info"></i>
     <span id="ds-current-text" class="text-secondary"></span>
   </div>
 </div>
 
 <div class="card-dark accent-panel accent-amber">
-  <div class="card-header-label">Configuracion del proceso</div>
+  <div class="card-header-label">Configuración del proceso</div>
   <form id="proc-form" onsubmit="saveProcessing(event)">
     <div class="row g-4">
 
       <div class="col-md-6">
         <div class="mb-3">
           <div class="field-label-row">
-            <label class="form-label small text-secondary" for="checkpoint_every">Checkpoint cada N entradas</label>
+            <label class="form-label small text-secondary" for="checkpoint_every">Punto de control cada N entradas</label>
             <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
                     data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="right"
-                    data-bs-title="Checkpoint cada N entradas"
-                    data-bs-content="El estado recuperable se guarda por entrada. Este valor define cada cuantas entradas se reporta avance en logs y UI."
-                    aria-label="Ayuda: checkpoint cada N entradas">
+                    data-bs-title="Punto de control cada N entradas"
+                    data-bs-content="El estado recuperable se guarda por entrada. Este valor define cada cuántas entradas se informa el avance en los registros y en la interfaz."
+                    aria-label="Ayuda: punto de control cada N entradas">
               <i class="bi bi-question-circle"></i>
             </button>
           </div>
           <input type="number" class="form-control" id="checkpoint_every" min="1" step="1">
-          <div class="form-text text-secondary">El estado durable se guarda por entrada; este valor controla el reporte de progreso cada N entradas.</div>
+          <div class="form-text text-secondary">El estado recuperable se guarda por entrada; este valor controla el informe de avance cada N entradas.</div>
         </div>
         <div class="mb-3">
           <div class="field-label-row">
-            <label class="form-label small text-secondary" for="claim_max_chars">Longitud maxima de la entrada (chars)</label>
+            <label class="form-label small text-secondary" for="claim_max_chars">Longitud máxima de la entrada (caracteres)</label>
             <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
                     data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="right"
-                    data-bs-title="Longitud maxima de la entrada"
-                    data-bs-content="Limite de caracteres que se envian al LLM. Ayuda a controlar tokens y tiempo; si es muy bajo puede cortar contexto util."
-                    aria-label="Ayuda: longitud maxima de la entrada">
+                    data-bs-title="Longitud máxima de la entrada"
+                    data-bs-content="Límite de caracteres que se envían al modelo de lenguaje. Ayuda a controlar tokens y tiempo; si es muy bajo puede cortar contexto útil."
+                    aria-label="Ayuda: longitud máxima de la entrada">
               <i class="bi bi-question-circle"></i>
             </button>
           </div>
           <input type="number" class="form-control" id="claim_max_chars" min="100" step="100">
-          <div class="form-text text-secondary">Entradas mas largas se truncan a este limite antes de enviarlas.</div>
+          <div class="form-text text-secondary">Las entradas más largas se recortan a este límite antes de enviarlas.</div>
         </div>
         <div class="mb-3">
           <div class="field-label-row">
-            <label class="form-label small text-secondary" for="recovery_threshold_successes">Umbral de recovery (exitos consecutivos)</label>
+            <label class="form-label small text-secondary" for="recovery_threshold_successes">Umbral de recuperación (éxitos consecutivos)</label>
             <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
                     data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="right"
-                    data-bs-title="Umbral de recovery"
-                    data-bs-content="Numero de llamadas exitosas seguidas necesarias para empezar a reducir el delay despues de una falla o rate limit."
-                    aria-label="Ayuda: umbral de recovery">
+                    data-bs-title="Umbral de recuperación"
+                    data-bs-content="Número de llamadas exitosas seguidas necesarias para empezar a reducir la espera después de una falla o de alcanzar un límite de peticiones."
+                    aria-label="Ayuda: umbral de recuperación">
               <i class="bi bi-question-circle"></i>
             </button>
           </div>
           <input type="number" class="form-control" id="recovery_threshold_successes" min="1" step="1">
-          <div class="form-text text-secondary">Numero de exitos consecutivos para reducir el delay.</div>
+          <div class="form-text text-secondary">Número de éxitos consecutivos para reducir la espera.</div>
         </div>
       </div>
 
       <div class="col-md-6">
         <div class="mb-3">
           <div class="field-label-row">
-            <label class="form-label small text-secondary" for="base_delay_seconds">Delay base entre requests (segundos)</label>
+            <label class="form-label small text-secondary" for="base_delay_seconds">Espera base entre peticiones (segundos)</label>
             <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
                     data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="left"
-                    data-bs-title="Delay base entre requests"
-                    data-bs-content="Espera inicial entre llamadas. Debe respetar el proveedor mas restrictivo; para cuotas free conviene usar el delay seguro."
-                    aria-label="Ayuda: delay base entre requests">
+                    data-bs-title="Espera base entre peticiones"
+                    data-bs-content="Espera inicial entre llamadas. Debe respetar el proveedor más restrictivo; para cuotas gratuitas conviene usar la espera segura."
+                    aria-label="Ayuda: espera base entre peticiones">
               <i class="bi bi-question-circle"></i>
             </button>
           </div>
           <input type="number" class="form-control" id="base_delay_seconds" min="0" step="0.1" oninput="validateDelayInput()">
-          <div id="rate-limit-summary" class="form-text text-secondary mt-2">Cargando limites de rate...</div>
+          <div id="rate-limit-summary" class="form-text text-secondary mt-2">Cargando límites de peticiones...</div>
         </div>
         <div class="mb-3">
           <div class="field-label-row">
-            <label class="form-label small text-secondary" for="min_delay_seconds">Delay minimo (segundos)</label>
+            <label class="form-label small text-secondary" for="min_delay_seconds">Espera mínima (segundos)</label>
             <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
                     data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="left"
-                    data-bs-title="Delay minimo"
-                    data-bs-content="Piso al que puede bajar el delay cuando la ejecucion se recupera. Evita acelerar demasiado y volver a chocar con limites."
-                    aria-label="Ayuda: delay minimo">
+                    data-bs-title="Espera mínima"
+                    data-bs-content="Piso al que puede bajar la espera cuando la ejecución se recupera. Evita acelerar demasiado y volver a chocar con límites."
+                    aria-label="Ayuda: espera mínima">
               <i class="bi bi-question-circle"></i>
             </button>
           </div>
@@ -185,12 +234,12 @@
         </div>
         <div class="mb-3">
           <div class="field-label-row">
-            <label class="form-label small text-secondary" for="max_delay_seconds">Delay maximo (segundos)</label>
+            <label class="form-label small text-secondary" for="max_delay_seconds">Espera máxima (segundos)</label>
             <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
                     data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="left"
-                    data-bs-title="Delay maximo"
-                    data-bs-content="Techo de espera despues de aplicar backoff. Evita que fallas temporales generen esperas cada vez mas largas."
-                    aria-label="Ayuda: delay maximo">
+                    data-bs-title="Espera máxima"
+                    data-bs-content="Techo de espera después de aplicar aumento progresivo. Evita que fallas temporales generen esperas cada vez más largas."
+                    aria-label="Ayuda: espera máxima">
               <i class="bi bi-question-circle"></i>
             </button>
           </div>
@@ -201,54 +250,54 @@
       <div class="col-md-6">
         <div class="mb-3">
           <div class="field-label-row">
-            <label class="form-label small text-secondary" for="rate_limit_backoff_multiplier">Multiplicador backoff rate limit (429)</label>
+            <label class="form-label small text-secondary" for="rate_limit_backoff_multiplier">Multiplicador por límite de peticiones (429)</label>
             <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
                     data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="right"
-                    data-bs-title="Backoff rate limit (429)"
-                    data-bs-content="Factor por el que se multiplica el delay cuando el proveedor responde 429 o cuota temporal. Mas alto significa mas espera y menos choques."
-                    aria-label="Ayuda: backoff rate limit">
+                    data-bs-title="Aumento por límite de peticiones (429)"
+                    data-bs-content="Factor por el que se multiplica la espera cuando el proveedor responde 429 o alcanza una cuota temporal. Un valor más alto significa más espera y menos choques."
+                    aria-label="Ayuda: aumento por límite de peticiones">
               <i class="bi bi-question-circle"></i>
             </button>
           </div>
           <input type="number" class="form-control" id="rate_limit_backoff_multiplier" min="1" step="0.1">
-          <div class="form-text text-secondary">Cuando se recibe un 429, el delay se multiplica por este factor.</div>
+          <div class="form-text text-secondary">Cuando se recibe un 429, la espera se multiplica por este factor.</div>
         </div>
       </div>
 
       <div class="col-md-6">
         <div class="mb-3">
           <div class="field-label-row">
-            <label class="form-label small text-secondary" for="server_error_backoff_multiplier">Multiplicador backoff error de servidor</label>
+            <label class="form-label small text-secondary" for="server_error_backoff_multiplier">Multiplicador por error del servidor</label>
             <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
                     data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="left"
-                    data-bs-title="Backoff error de servidor"
-                    data-bs-content="Factor por el que se multiplica el delay ante timeouts o errores 5xx. Da margen cuando el proveedor o la red estan inestables."
-                    aria-label="Ayuda: backoff error de servidor">
+                    data-bs-title="Aumento por error del servidor"
+                    data-bs-content="Factor por el que se multiplica la espera ante tiempos de espera agotados o errores 5xx. Da margen cuando el proveedor o la red están inestables."
+                    aria-label="Ayuda: aumento por error del servidor">
               <i class="bi bi-question-circle"></i>
             </button>
           </div>
           <input type="number" class="form-control" id="server_error_backoff_multiplier" min="1" step="0.1">
-          <div class="form-text text-secondary">Cuando hay un 5xx o timeout, el delay se multiplica por este factor.</div>
+          <div class="form-text text-secondary">Cuando hay un 5xx o se agota el tiempo de espera, la espera se multiplica por este factor.</div>
         </div>
         <div class="mb-3">
           <div class="field-label-row">
-            <label class="form-label small text-secondary" for="recovery_delay_multiplier">Multiplicador de recovery del delay</label>
+            <label class="form-label small text-secondary" for="recovery_delay_multiplier">Multiplicador de recuperación de la espera</label>
             <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
                     data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="left"
-                    data-bs-title="Recovery del delay"
-                    data-bs-content="Factor para reducir el delay cuando ya hubo suficientes exitos. Debe ser menor que 1; 0.8 reduce el delay 20%."
-                    aria-label="Ayuda: recovery del delay">
+                    data-bs-title="Recuperación de la espera"
+                    data-bs-content="Factor para reducir la espera cuando ya hubo suficientes éxitos. Debe ser menor que 1; 0.8 reduce la espera 20%."
+                    aria-label="Ayuda: recuperación de la espera">
               <i class="bi bi-question-circle"></i>
             </button>
           </div>
           <input type="number" class="form-control" id="recovery_delay_multiplier" min="0.1" max="1" step="0.05">
-          <div class="form-text text-secondary">Factor por el que se reduce el delay al alcanzar el umbral de recovery. Debe ser &lt; 1.</div>
+          <div class="form-text text-secondary">Factor por el que se reduce la espera al alcanzar el umbral de recuperación. Debe ser &lt; 1.</div>
         </div>
       </div>
 
     </div>
     <button type="submit" class="btn btn-primary btn-sm mt-2">
-      <i class="bi bi-floppy me-1"></i>Guardar parametros
+      <i class="bi bi-floppy me-1"></i>Guardar parámetros
     </button>
   </form>
 </div>
@@ -292,12 +341,12 @@ function renderRateLimitSummary() {
   if (!el) return;
   if (!rateLimitSummary || rateLimitSummary.error) {
     el.className = 'form-text text-warning mt-2';
-    el.textContent = 'No se pudieron cargar los limites de rate. Revisa la configuracion de arbitros.';
+    el.textContent = 'No se pudieron cargar los límites de peticiones. Revisa la configuración de árbitros.';
     return;
   }
   const tone = rateLimitSummary.global_alert === 'danger' ? 'text-danger' : (rateLimitSummary.global_alert === 'warning' ? 'text-warning' : 'text-info');
   el.className = `form-text ${tone} mt-2`;
-  el.innerHTML = `${rateLimitSummary.global_msg} <button type="button" class="btn btn-link btn-sm p-0 align-baseline" onclick="useSafeDelay()">Usar delay seguro</button>`;
+  el.innerHTML = `${rateLimitSummary.global_msg} <button type="button" class="btn btn-link btn-sm p-0 align-baseline" onclick="useSafeDelay()">Usar espera segura</button>`;
 }
 
 function useSafeDelay() {
@@ -319,7 +368,7 @@ function validateDelayInput() {
 async function saveProcessing(e) {
   e.preventDefault();
   if (!validateDelayInput()) {
-    showToast(`Delay base demasiado bajo. Minimo recomendado: ${rateLimitSummary.global_min_delay}s`, 'error');
+    showToast(`La espera base es demasiado baja. Mínimo recomendado: ${rateLimitSummary.global_min_delay}s`, 'error');
     return;
   }
   const payload = {};
@@ -333,7 +382,7 @@ async function saveProcessing(e) {
   });
   const data = await res.json();
   if (!res.ok) { showToast(data.error || 'Error al guardar', 'error'); return; }
-  showToast('Parametros guardados');
+  showToast('Parámetros guardados');
 }
 
 /* Inicializar cuando el DOM esté listo */
@@ -344,49 +393,110 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 /* -----------------------------------------------------------------------
-   Dataset helpers
+   Conjunto de datos: arrastrar, soltar, seleccionar y subir
 ----------------------------------------------------------------------- */
-let _datasetInspected = null;
 
-function onDatasetFileChange() {
-  // Reset inspected state when user edits the path
-  _datasetInspected = null;
-  document.getElementById('ds-sheet-group').style.display = 'none';
-  const colSel = document.getElementById('ds-column');
-  colSel.innerHTML = '<option value="">(inspecciona el archivo primero)</option>';
-  document.getElementById('ds-file-feedback').textContent = '';
+let _currentServerPath = '';   // ruta en el servidor del archivo subido
+
+/* --- Arrastrar y soltar ------------------------------------------------- */
+function onDragOver(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  document.getElementById('ds-dropzone').classList.add('drag-over');
+}
+function onDragLeave(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  document.getElementById('ds-dropzone').classList.remove('drag-over');
+}
+function onDrop(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  document.getElementById('ds-dropzone').classList.remove('drag-over');
+  const files = e.dataTransfer.files;
+  if (files && files.length > 0) onFileSelected(files);
 }
 
-async function inspectDataset() {
-  const filePath = document.getElementById('ds-input-file').value.trim();
-  if (!filePath) { showToast('Escribe la ruta del archivo primero', 'error'); return; }
+/* --- Clic en la zona para abrir el selector de archivos ----------------- */
+document.addEventListener('DOMContentLoaded', function() {
+  const dropzone = document.getElementById('ds-dropzone');
+  if (dropzone) {
+    dropzone.addEventListener('click', function(e) {
+      // Evita abrir dos veces el selector al pulsar el botón o sus hijos.
+      if (e.target.closest('button')) return;
+      document.getElementById('ds-file-input').click();
+    });
+  }
+});
 
-  const btn = document.getElementById('btn-inspect');
-  const originalLabel = '<i class="bi bi-search me-1"></i>Inspeccionar';
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Inspeccionando...';
+/* --- Selección de archivo ---------------------------------------------- */
+function onFileSelected(files) {
+  if (!files || files.length === 0) return;
+  const file = files[0];
+  const allowed = ['.csv', '.xlsx', '.xls'];
+  const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
+  if (!allowed.includes(ext)) {
+    setFeedback(`Formato '${ext}' no soportado. Usa .csv, .xlsx o .xls`, 'danger');
+    return;
+  }
+  showFileInfo(file);
+  uploadAndInspect(file);
+}
+
+function showFileInfo(file) {
+  document.getElementById('ds-fname').textContent = file.name;
+  document.getElementById('ds-fsize').textContent = formatBytes(file.size);
+  document.getElementById('ds-file-info').style.display = '';
+  document.getElementById('ds-file-feedback').innerHTML = '';
+  setUploadStatus('', false);
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024)      return bytes + ' B';
+  if (bytes < 1048576)   return (bytes/1024).toFixed(1) + ' KB';
+  return (bytes/1048576).toFixed(1) + ' MB';
+}
+
+function setUploadStatus(text, spinning) {
+  document.getElementById('ds-spinner').style.display = spinning ? '' : 'none';
+  document.getElementById('ds-status-text').textContent = text;
+}
+
+function setFeedback(msg, type) {
+  const fb = document.getElementById('ds-file-feedback');
+  const icon = type === 'success' ? 'bi-check-circle' : 'bi-exclamation-circle';
+  fb.innerHTML = `<span class="text-${type}"><i class="bi ${icon} me-1"></i>${msg}</span>`;
+}
+
+/* --- Subir e inspeccionar ---------------------------------------------- */
+async function uploadAndInspect(file) {
+  setUploadStatus('Subiendo...', true);
+  const selectors = document.getElementById('ds-selectors');
+  selectors.style.setProperty('display', 'none', 'important');
+
+  const formData = new FormData();
+  formData.append('file', file);
 
   try {
-    const res = await fetch('/api/dataset/inspect', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({file: filePath}),
-    });
+    const res = await fetch('/api/dataset/upload', { method: 'POST', body: formData });
     const data = await res.json();
     if (!res.ok) {
-      document.getElementById('ds-file-feedback').innerHTML =
-        `<span class="text-danger"><i class="bi bi-exclamation-circle me-1"></i>${data.error}</span>`;
+      setUploadStatus('', false);
+      setFeedback(data.error || 'Error al subir el archivo', 'danger');
       return;
     }
 
-    _datasetInspected = data;
-    document.getElementById('ds-file-feedback').innerHTML =
-      `<span class="text-success"><i class="bi bi-check-circle me-1"></i>` +
-      `${data.columns.length} columnas detectadas${data.is_excel ? ` &mdash; ${data.sheets.length} sheet(s)` : ''}</span>`;
+    _currentServerPath = data.path;
+    setUploadStatus('✓ Listo', false);
+    setFeedback(
+      `${data.columns.length} columnas detectadas` +
+      (data.is_excel ? ` &mdash; ${data.sheets.length} hoja(s)` : ''),
+      'success'
+    );
 
-    // Sheet dropdown
-    const sheetGroup = document.getElementById('ds-sheet-group');
+    // Lista de hojas
     const sheetSel   = document.getElementById('ds-sheet');
+    const sheetGroup = document.getElementById('ds-sheet-group');
     if (data.is_excel && data.sheets.length > 0) {
       sheetSel.innerHTML = '<option value="">(primera hoja)</option>' +
         data.sheets.map(s => `<option value="${s}">${s}</option>`).join('');
@@ -396,48 +506,49 @@ async function inspectDataset() {
       sheetGroup.style.display = 'none';
     }
 
-    // Column dropdown
-    populateColumnDropdown(data.columns, document.getElementById('ds-column').value);
+    // Lista de columnas
+    populateColumnDropdown(data.columns, '');
+
+    // Mostrar sección de selects
+    selectors.style.removeProperty('display');
 
   } catch (e) {
-    document.getElementById('ds-file-feedback').innerHTML =
-      `<span class="text-danger">Error de red: ${e.message}</span>`;
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = originalLabel;
+    setUploadStatus('', false);
+    setFeedback('Error de red: ' + e.message, 'danger');
   }
 }
 
+/* --- Cambio de hoja ----------------------------------------------------- */
 async function onSheetChange() {
-  // Re-inspect with the new sheet to get correct columns
-  const filePath = document.getElementById('ds-input-file').value.trim();
-  const sheet    = document.getElementById('ds-sheet').value;
-  if (!filePath) return;
-
-  const res = await fetch('/api/dataset/inspect', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({file: filePath, sheet}),
-  });
-  const data = await res.json();
-  if (res.ok) {
-    populateColumnDropdown(data.columns, document.getElementById('ds-column').value);
-  }
+  const sheet = document.getElementById('ds-sheet').value;
+  if (!_currentServerPath) return;
+  try {
+    const res = await fetch('/api/dataset/inspect', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({file: _currentServerPath, sheet}),
+    });
+    const data = await res.json();
+    if (res.ok) populateColumnDropdown(data.columns, '');
+  } catch (_) {}
 }
 
-function populateColumnDropdown(columns, currentValue) {
+/* --- Poblar columnas --------------------------------------------------- */
+function populateColumnDropdown(columns, current) {
   const sel = document.getElementById('ds-column');
   sel.innerHTML = columns
-    .map(c => `<option value="${c}" ${c === currentValue ? 'selected' : ''}>${c}</option>`)
+    .map(c => `<option value="${c}" ${c === current ? 'selected' : ''}>${c}</option>`)
     .join('');
 }
 
+/* --- Guardar configuración --------------------------------------------- */
 async function saveDatasetConfig() {
-  const inputFile  = document.getElementById('ds-input-file').value.trim();
+  const inputFile  = _currentServerPath ||
+                     document.getElementById('ds-current-text').textContent.split(' ')[0];
   const sheet      = document.getElementById('ds-sheet').value;
   const textColumn = document.getElementById('ds-column').value;
 
-  if (!inputFile) { showToast('La ruta del archivo es obligatoria', 'error'); return; }
+  if (!inputFile) { showToast('Primero selecciona un archivo', 'error'); return; }
   if (!textColumn) { showToast('Selecciona la columna de texto', 'error'); return; }
 
   const res = await fetch('/api/dataset/config', {
@@ -447,43 +558,49 @@ async function saveDatasetConfig() {
   });
   const data = await res.json();
   if (!res.ok) { showToast(data.error || 'Error al guardar', 'error'); return; }
-  showToast('Configuración de dataset guardada');
+  showToast('Configuración guardada ✓');
   renderDatasetBanner(data);
 }
 
+/* --- Cargar configuración existente ------------------------------------ */
 async function loadDatasetConfig() {
   try {
     const res = await fetch('/api/dataset/config');
     const data = await res.json();
-    if (!res.ok) return;
-
-    document.getElementById('ds-input-file').value = data.input_file || '';
-
-    // Si hay archivo configurado, inspeccionar para llenar dropdowns
-    if (data.input_file) {
-      const res2 = await fetch('/api/dataset/inspect', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({file: data.input_file, sheet: data.sheet || ''}),
-      });
-      if (res2.ok) {
-        const info = await res2.json();
-        _datasetInspected = info;
-
-        if (info.is_excel && info.sheets.length > 0) {
-          const sheetSel = document.getElementById('ds-sheet');
-          sheetSel.innerHTML = '<option value="">(primera hoja)</option>' +
-            info.sheets.map(s => `<option value="${s}" ${s === data.sheet ? 'selected' : ''}>${s}</option>`).join('');
-          document.getElementById('ds-sheet-group').style.display = '';
-        }
-
-        populateColumnDropdown(info.columns, data.text_column || '');
-        document.getElementById('ds-file-feedback').innerHTML =
-          `<span class="text-success"><i class="bi bi-check-circle me-1"></i>` +
-          `${info.columns.length} columnas${info.is_excel ? ` &mdash; ${info.sheets.length} sheet(s)` : ''}</span>`;
-      }
-    }
+    if (!res.ok || !data.input_file) return;
+    _currentServerPath = data.input_file;
     renderDatasetBanner(data);
+
+    // Intenta inspeccionar el archivo ya configurado para mostrar información.
+    const res2 = await fetch('/api/dataset/inspect', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({file: data.input_file, sheet: data.sheet || ''}),
+    });
+    if (res2.ok) {
+      const info = await res2.json();
+      // Muestra información del archivo previamente configurado.
+      document.getElementById('ds-fname').textContent = data.input_file.split('/').pop();
+      document.getElementById('ds-fsize').textContent = `ya configurado en el servidor`;
+      document.getElementById('ds-file-info').style.display = '';
+      setFeedback(
+        `${info.columns.length} columnas detectadas` +
+        (info.is_excel ? ` &mdash; ${info.sheets.length} hoja(s)` : ''),
+        'success'
+      );
+
+      const sheetSel   = document.getElementById('ds-sheet');
+      const sheetGroup = document.getElementById('ds-sheet-group');
+      if (info.is_excel && info.sheets.length > 0) {
+        sheetSel.innerHTML = '<option value="">(primera hoja)</option>' +
+          info.sheets.map(s => `<option value="${s}" ${s===data.sheet?'selected':''}>${s}</option>`).join('');
+        sheetGroup.style.display = '';
+      }
+      populateColumnDropdown(info.columns, data.text_column || '');
+
+      const selectors = document.getElementById('ds-selectors');
+      selectors.style.removeProperty('display');
+    }
   } catch (_) {}
 }
 
@@ -491,7 +608,7 @@ function renderDatasetBanner(data) {
   const banner = document.getElementById('ds-current-banner');
   const text   = document.getElementById('ds-current-text');
   if (!data.input_file) { banner.style.display = 'none'; return; }
-  const sheet  = data.sheet ? ` &mdash; sheet: <strong>${data.sheet}</strong>` : '';
+  const sheet  = data.sheet ? ` &mdash; hoja: <strong>${data.sheet}</strong>` : '';
   const col    = data.text_column ? ` &mdash; columna: <strong>${data.text_column}</strong>` : '';
   text.innerHTML = `<strong>${data.input_file}</strong>${sheet}${col}`;
   banner.style.display = '';

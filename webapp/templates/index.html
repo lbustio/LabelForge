@@ -4,8 +4,8 @@
 <div class="home-hero">
   <img src="{{ url_for('static', filename='logo-cropped.png') }}" alt="LabelForge">
   <div class="home-hero-copy">
-    <div class="kicker">Data Labeling Platform</div>
-    <div class="headline">Etiquetado, consenso y monitoreo en un solo lugar</div>
+    <div class="kicker">Plataforma de etiquetado de datos</div>
+    <div class="headline">Etiquetado, consenso y seguimiento en un solo lugar</div>
   </div>
 </div>
 <div class="page-title">Panel de control</div>
@@ -38,7 +38,7 @@
         <span class="metric-kicker">Resultados</span>
       </div>
       <div class="metric-value" id="stat-outputs">—</div>
-      <div class="metric-label">Outputs generados</div>
+      <div class="metric-label">Resultados generados</div>
     </div>
   </div>
   <div class="col-md-3">
@@ -48,7 +48,7 @@
         <span class="metric-kicker">Resiliencia</span>
       </div>
       <div class="metric-value" id="stat-checkpoint-val">—</div>
-      <div class="metric-label">Entradas en checkpoint</div>
+      <div class="metric-label">Entradas con punto de control</div>
     </div>
   </div>
 </div>
@@ -62,7 +62,7 @@
   </div>
   <div class="col-md-6">
     <div class="card-dark accent-panel accent-emerald">
-      <div class="card-header-label">Outputs recientes</div>
+      <div class="card-header-label">Resultados recientes</div>
       <div id="outputs-list"><span class="text-secondary small">Cargando...</span></div>
     </div>
   </div>
@@ -86,7 +86,7 @@ function showToast(msg, type) {
   }
 }
 
-// --- Modal HTML (injected at end of body) ---
+// --- HTML de modales insertado al final del cuerpo ---
 function buildModals() {
   const html = `
 <div class="modal fade" id="arbiterModal" tabindex="-1">
@@ -119,7 +119,7 @@ function buildModals() {
       <div class="modal-header border-bottom border-secondary">
         <h5 class="modal-title" style="color:#e2e8f0">
           <i class="bi bi-filetype-csv me-2" style="color:#34d399"></i>
-          <span id="outModalTitle">Output</span>
+          <span id="outModalTitle">Resultado</span>
         </h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
@@ -141,7 +141,7 @@ function buildModals() {
 }
 buildModals();
 
-// --- Arbiter click / modal ---
+// --- Clic en arbitro / modal ---
 let _currentArbId = null;
 
 function showArbiterModal(arb) {
@@ -156,9 +156,9 @@ function showArbiterModal(arb) {
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Persona</span><br><span style="color:#e2e8f0">${escapeHtml(arb.persona || '—')}</span></div>
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Proveedor</span><br><span style="color:#e2e8f0">${escapeHtml(p.type || '—')}</span></div>
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Modelo</span><br><span style="color:#e2e8f0">${escapeHtml(p.model || '—')}</span></div>
-    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Temperature</span><br><span style="color:#e2e8f0">${gc.temperature ?? '0.1'}</span></div>
+    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Temperatura</span><br><span style="color:#e2e8f0">${gc.temperature ?? '0.1'}</span></div>
     <div class="mb-0">
-      <span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">System Prompt</span>
+      <span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Instrucción de sistema</span>
       <pre style="background:#0f1117;border:1px solid #2d3148;border-radius:.5rem;padding:.6rem;margin-top:.3rem;font-size:.78rem;color:#c4b5fd;max-height:180px;overflow-y:auto;white-space:pre-wrap">${escapeHtml(arb.system_prompt || '—')}</pre>
     </div>
   `;
@@ -182,7 +182,7 @@ function showArbiterModal(arb) {
   new bootstrap.Modal(document.getElementById('arbiterModal')).show();
 }
 
-// --- Output click / modal ---
+// --- Clic en resultado / modal ---
 let _currentOutputName = null;
 
 function showOutputModal(out) {
@@ -198,7 +198,7 @@ function showOutputModal(out) {
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Archivo</span><br><span style="color:#e2e8f0">${escapeHtml(out.name)}</span></div>
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Tamaño</span><br><span style="color:#e2e8f0">${out.size_kb} KB</span></div>
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Ultima modificación</span><br><span style="color:#e2e8f0">${escapeHtml(out.modified || '—')}</span></div>
-    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Run</span><br><span style="color:#e2e8f0">${escapeHtml(out.run_timestamp || '—')}</span></div>
+    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Ejecución</span><br><span style="color:#e2e8f0">${escapeHtml(out.run_timestamp || '—')}</span></div>
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Entradas totales / OK / Fallidas</span><br><span style="color:#e2e8f0">${totalRows} / ${rowsOk} / ${rowsFailed}</span></div>
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Tokens totales</span><br><span style="color:#e2e8f0">${tokens}</span></div>
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Principios</span><br><span style="color:#e2e8f0">${(out.principles || []).length ? out.principles.join(', ') : '—'}</span></div>
@@ -207,11 +207,11 @@ function showOutputModal(out) {
 
   document.getElementById('outModalOpenBtn').href = `/outputs/${encodeURIComponent(out.name)}`;
   document.getElementById('outModalDeleteBtn').onclick = async () => {
-    if (!confirm(`Eliminar output "${out.name}"?`)) return;
+    if (!confirm(`¿Eliminar resultado "${out.name}"?`)) return;
     try {
       const r = await fetch(`/api/outputs/${encodeURIComponent(out.name)}`, { method: 'DELETE' });
       if (!r.ok) { const e = await r.json(); throw new Error(e.error); }
-      showToast(`Output "${out.name}" eliminado`, 'success');
+      showToast(`Resultado "${out.name}" eliminado`, 'success');
       bootstrap.Modal.getInstance(document.getElementById('outputModal')).hide();
       loadDashboard();
     } catch (err) {
@@ -222,7 +222,7 @@ function showOutputModal(out) {
   new bootstrap.Modal(document.getElementById('outputModal')).show();
 }
 
-// Store data for modal access
+// Guarda datos para los modales.
 let _arbitersData = [];
 let _outputsData = [];
 
@@ -269,10 +269,10 @@ function loadDashboard() {
       el.addEventListener('click', () => showArbiterModal(_arbitersData[+el.dataset.arbIndex]));
     });
 
-    // Outputs
+    // Resultados
     const outEl = document.getElementById('outputs-list');
     if (!outputs.length) {
-      outEl.innerHTML = '<span class="text-secondary small">Sin outputs todavia.</span>';
+      outEl.innerHTML = '<span class="text-secondary small">Sin resultados todavía.</span>';
     } else {
       outEl.innerHTML = outputs.slice(0,5).map((o, idx) => {
         const tone = rowTones[(idx + 2) % rowTones.length];

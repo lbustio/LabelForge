@@ -32,7 +32,7 @@
   .prompt-legend-output { background: #082f24; border: 1px solid #86efac; }
 </style>
 
-<div class="page-title">Principios y Prompt Template</div>
+<div class="page-title">Principios y plantilla de instrucción</div>
 
 <!-- Principios -->
 <div class="card-dark accent-panel accent-violet mb-4">
@@ -48,18 +48,18 @@
   </button>
 </div>
 
-<!-- Prompt template -->
+<!-- Plantilla de instrucción -->
 <div class="card-dark accent-panel accent-blue">
-  <div class="card-header-label">User Prompt Template</div>
+  <div class="card-header-label">Plantilla de instrucción de usuario</div>
   <p class="text-secondary small mb-3">
-    Este es el prompt que recibe cada arbitro. Debe contener el placeholder
+    Esta es la instrucción que recibe cada arbitro. Debe contener el marcador
     <code>{claim}</code>
-    donde se insertara el texto/entrada a analizar. Usa <code>{% raw %}{{ }}{% endraw %}</code>
+    donde se insertara el texto de entrada a analizar. Usa <code>{% raw %}{{ }}{% endraw %}</code>
     para llaves literales en el JSON de salida. Usa
     <code>{principles_catalog}</code>
     para insertar automaticamente las definiciones de los principios y
     <code>{output_instruction}</code>
-    para insertar automaticamente el formato de salida segun el check.
+    para insertar automaticamente el formato de salida segun la casilla.
   </p>
   <div class="form-check form-switch mb-3">
     <input class="form-check-input" type="checkbox" role="switch" id="include-justifications">
@@ -69,13 +69,13 @@
   </div>
   <textarea id="prompt-template" class="form-control" rows="18"></textarea>
   <button class="btn btn-primary btn-sm mt-3" onclick="savePromptTemplate()">
-    <i class="bi bi-floppy me-1"></i>Guardar template
+    <i class="bi bi-floppy me-1"></i>Guardar plantilla
   </button>
 </div>
 
-<!-- Prompt preview -->
+<!-- Vista previa de la instrucción -->
 <div class="card-dark accent-panel accent-emerald">
-  <div class="card-header-label">Ejemplo de prompt final</div>
+  <div class="card-header-label">Ejemplo de instrucción final</div>
   <div class="row g-3 mb-3">
     <div class="col-lg-4">
       <label class="form-label small text-secondary">Arbitro</label>
@@ -87,10 +87,10 @@
         value="Says the Annies List political group supports third-trimester abortions on demand.">
     </div>
   </div>
-  <div class="prompt-color-legend" aria-label="Leyenda de colores del prompt">
+  <div class="prompt-color-legend" aria-label="Leyenda de colores de la instrucción">
     <span class="prompt-legend-item">
       <span class="prompt-legend-swatch prompt-legend-system"></span>
-      SYSTEM: instrucciones del arbitro
+      Sistema: instrucciones del arbitro
     </span>
     <span class="prompt-legend-item">
       <span class="prompt-legend-swatch prompt-legend-rule"></span>

@@ -8,8 +8,8 @@ Este proyecto es una plataforma interactiva y un pipeline robusto diseñado para
 
 El proyecto consta de dos partes principales que interactúan entre sí a través del archivo de configuración central:
 
-1. **Pipeline de Etiquetado (CLI)**: Ejecuta el procesamiento secuencial del dataset, realiza llamadas a las APIs de los LLMs, valida los formatos JSON devueltos, gestiona de forma dinámica los límites de peticiones (Rate Limits), almacena checkpoints para reanudar el proceso en caso de fallo, procesa la cola de entradas fallidas, calcula el consenso mayoritario y genera reportes detallados de **uso de tokens y latencia** por árbitro.
-2. **Interfaz de Control (WebApp Flask)**: Proporciona un panel de control interactivo para administrar los árbitros, modificar los principios y las plantillas de prompts, ajustar parámetros de procesamiento en tiempo real, lanzar el etiquetado, visualizar los registros (logs) del sistema en tiempo real y consultar el **panel de métricas de tokens y latencia** del último run.
+1. **Pipeline de Etiquetado (CLI)**: Ejecuta el procesamiento secuencial del dataset, realiza llamadas a las APIs de los LLMs, valida los formatos JSON devueltos, gestiona de forma dinámica los límites de peticiones (Rate Limits), almacena checkpoints para reanudar el proceso en caso de fallo, procesa la cola de entradas fallidas, calcula el consenso mayoritario y genera reportes detallados de **uso de tokens, latencia y métricas por entrada**.
+2. **Interfaz de Control (WebApp Flask)**: Proporciona un panel de control interactivo para administrar los árbitros, modificar los principios y las plantillas de prompts, ajustar parámetros de procesamiento en tiempo real, lanzar el etiquetado, visualizar los registros (logs) del sistema en tiempo real y consultar métricas calculadas por el backend. La interfaz no decide resultados ni recalcula métricas de negocio: solo presenta los datos recibidos desde Python.
 
 ```mermaid
 flowchart TD
@@ -79,9 +79,10 @@ El sistema analiza y evalúa la presencia (1) o ausencia (0) de cinco tácticas 
 *   **Resiliencia (Checkpoints y Cola de Reintentos)**:
     *   **Puntos de control**: Guarda el progreso cada $N$ entradas. Si la ejecución se detiene, se reanuda desde la última entrada procesada sin perder el trabajo completado.
     *   **Manejo de errores**: Si una entrada falla con un árbitro, se encola en `failed_queue.jsonl`. Al final de la corrida, el sistema reduce la velocidad del rate limiter e intenta procesar de nuevo únicamente las entradas fallidas antes de generar el reporte final.
-*   **Métricas de Acuerdo Inter-Árbitros**: Al finalizar cada run, el módulo [`scripts/agreement_metrics.py`](scripts/agreement_metrics.py) calcula automáticamente estadísticas de fiabilidad entre evaluadores: acuerdo observado por pares, **Fleiss Kappa** (multi-árbitro), **Cohen's Kappa** (promedio por pares) y **Krippendorff's Alpha** nominal, tanto de forma global como desglosada por principio. Estas métricas son estándar para reportar en estudios con múltiples codificadores.
-*   **Contabilidad Exhaustiva de Tokens**: Cada llamada al LLM registra los tokens de entrada (prompt), salida (completion) y total, tanto por llamada individual (en el CSV) como acumulados por árbitro y globalmente en el reporte final (log y webapp).
-*   **Contabilidad Exhaustiva de Latencia**: El tiempo exacto de cada petición al LLM se mide con `time.perf_counter()` y se almacena en el CSV. El reporte final incluye latencia promedio, mínima, máxima y total acumulada por árbitro.
+*   **Métricas de Acuerdo Inter-Árbitros**: Al finalizar cada run, el módulo [`scripts/agreement_metrics.py`](scripts/agreement_metrics.py) calcula automáticamente estadísticas de fiabilidad entre evaluadores: acuerdo observado por pares, **Fleiss Kappa** (multi-árbitro), **Cohen's Kappa** (promedio por pares) y **Krippendorff's Alpha** nominal, tanto de forma global como desglosada por principio. También prepara porcentajes e interpretación del kappa para que la interfaz solo los muestre.
+*   **Diagnóstico de Consenso por Entrada**: Para cada entrada se calculan coincidencia entre árbitros, apoyo promedio al consenso, principios unánimes, principios divididos y apoyo por principio. Estas métricas nacen en el pipeline/backend y se guardan en el CSV para auditoría y depuración; no sustituyen las métricas agregadas de acuerdo inter-árbitros que se reportan metodológicamente.
+*   **Contabilidad Exhaustiva de Tokens**: Cada llamada al LLM registra los tokens de entrada (prompt), salida (completion) y total. Además, cada entrada guarda agregados `entry_*` con suma de tokens, llamadas contabilizadas y tokens por llamada.
+*   **Contabilidad Exhaustiva de Latencia**: El tiempo exacto de cada petición al LLM se mide con `time.perf_counter()` y se almacena en el CSV. Cada entrada incluye tiempo total y promedio; el reporte final incluye latencia promedio, mínima, máxima y total acumulada por árbitro.
 *   **Política de Seguridad (`free_only_mode`)**: Bloquea proveedores con riesgo de cargo (Vertex AI, Anthropic, OpenAI) cuando el modo seguro está activo, evitando consumo accidental de tokens de pago durante pruebas.
 *   **Dataset Configurable (CSV y Excel)**: El archivo de entrada, la hoja de cálculo (solo Excel) y la columna de texto son configurables desde la webapp o la CLI sin tocar código. Soporta `.csv`, `.xlsx` y `.xls`.
 *   **Soporte Multimodelo y Multiproveedor**: Integra los SDKs oficiales de Google GenAI (`google-genai`), Vertex AI (`google-cloud-aiplatform`), Anthropic (`anthropic`) y OpenAI (`openai`), además de APIs locales u open-source compatibles con el protocolo de OpenAI (Ollama, LM Studio, vLLM).
@@ -94,19 +95,19 @@ El sistema analiza y evalúa la presencia (1) o ausencia (0) de cinco tácticas 
 *   **[`main_label.py`](file:///e:/Code/python/OpenCode/LabelForge/main_label.py)**: Punto de entrada principal para ejecutar el etiquetado a través de la terminal.
 *   **[`main_webapp.py`](file:///e:/Code/python/OpenCode/LabelForge/main_webapp.py)**: Punto de entrada para inicializar la aplicación web Flask en modo local.
 *   **`scripts/`**:
-    *   **[`label_persuasion.py`](file:///e:/Code/python/OpenCode/LabelForge/scripts/label_persuasion.py)**: Contiene la lógica central del pipeline: controladores de API por proveedor, limitador dinámico de peticiones, procesamiento de checkpoints, consenso, **medición de tokens y latencia por llamada**, y generación del reporte final.
+    *   **[`label_persuasion.py`](file:///e:/Code/python/OpenCode/LabelForge/scripts/label_persuasion.py)**: Contiene la lógica central del pipeline: controladores de API por proveedor, limitador dinámico de peticiones, procesamiento de checkpoints, consenso, **medición de tokens y latencia por llamada y por entrada**, diagnóstico de consenso por entrada y generación del reporte final.
     *   **[`arbiters_config.json`](file:///e:/Code/python/OpenCode/LabelForge/scripts/arbiters_config.json)**: Archivo JSON central que almacena la configuración de los principios, los árbitros, los prompts del sistema y los parámetros del limitador de velocidad.
     *   **[`agreement_metrics.py`](file:///e:/Code/python/OpenCode/LabelForge/scripts/agreement_metrics.py)**: Módulo compartido de cálculo de métricas de acuerdo inter-árbitros (Fleiss Kappa, Cohen's Kappa, Krippendorff's Alpha).
     *   **[`utils.py`](file:///e:/Code/python/OpenCode/LabelForge/scripts/utils.py)**: Helper utilitario para parseo numérico y tipos de datos seguros.
 *   **`webapp/`**:
-    *   **[`app.py`](file:///e:/Code/python/OpenCode/LabelForge/webapp/app.py)**: Backend Flask de la aplicación web que gestiona los servicios API, el renderizado de plantillas, la ejecución del subproceso CLI de etiquetado y el **endpoint `/api/run/stats`** para métricas de tokens y latencia.
+    *   **[`app.py`](file:///e:/Code/python/OpenCode/LabelForge/webapp/app.py)**: Backend Flask de la aplicación web que gestiona los servicios API, el renderizado de plantillas, la ejecución del subproceso CLI de etiquetado y los endpoints de métricas. Lee datos ya calculados por el pipeline y solo calcula respaldos para CSV antiguos.
     *   **`templates/`**:
         *   [`base.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/base.html): Estructura HTML común y hoja de estilos globales (diseño web oscuro y premium con Bootstrap).
         *   [`index.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/index.html): Panel de control con estadísticas rápidas (árbitros, principios, salidas generadas, entradas en checkpoint).
         *   [`arbiters.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/arbiters.html): Panel de gestión de árbitros (CRUD completo, asignación de modelos, tokens y claves API).
         *   [`principles.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/principles.html): Visualización y edición de los principios de persuasión y la plantilla del prompt del usuario.
         *   [`processing.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/processing.html): Panel de configuración de parámetros de red, checkpoints y cálculos de tiempos/delays recomendados.
-        *   [`run.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/run.html): Interfaz interactiva de lanzamiento y monitorización del proceso de etiquetado con streaming de logs por SSE y **panel de métricas de tokens y latencia** post-run.
+        *   [`run.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/run.html): Interfaz interactiva de lanzamiento y monitorización del proceso de etiquetado con streaming de logs por SSE, métricas en vivo y resultados. Su JavaScript se limita a interacción visual y formato de valores.
 *   **`data/`**: Directorio para los archivos de datos de entrada. El dataset principal (`data/all_datasets_en_es/all_datasets_en_es.csv`) es **privado** (investigación en curso) y está excluido del repositorio mediante `.gitignore`. Se publicará al concluir el estudio.
 *   **`output/`**: Carpeta de destino para los datasets etiquetados resultantes (`labeled_YYYYMMDD_HHMMSS.csv`).
 *   **`checkpoints/`**: Almacena el estado intermedio de ejecuciones: `checkpoint.json`, `failed_queue.jsonl`, `run_state.json`, `claim_results.jsonl` y `arbiter_results.jsonl`. **Excluido del repositorio** (datos de estado local privados).
@@ -205,10 +206,10 @@ Puedes especificar argumentos adicionales en consola:
 #### Flujo de trabajo en la Webapp:
 1.  **Panel de Inicio**: Observa el estado actual del dataset, los árbitros activos y el último checkpoint.
 2.  **Gestionar Árbitros**: Ve a la pestaña **Arbitros** para agregar nuevos perfiles o modificar los modelos de lenguaje utilizados por cada uno (p. ej., cambiar de `gemini-2.5-pro` a `gemini-2.5-flash`).
-3.  **Configurar Dataset**: En **Procesamiento**, usa el panel “Dataset de Entrada” para seleccionar el archivo de datos (CSV o Excel), la hoja de cálculo (si aplica) y la columna de texto. El botón **Inspeccionar** rellena automáticamente los dropdowns de sheets y columnas.
+3.  **Configurar Dataset**: En **Procesamiento**, usa el panel "Dataset de Entrada" para seleccionar el archivo de datos (CSV o Excel) mediante **drag & drop** o haciendo click en la zona o el botón "Seleccionar archivo". El botón **Inspeccionar** rellena automáticamente los dropdowns de sheets y columnas.
 4.  **Configurar Parámetros**: En la misma pestaña **Procesamiento**, selecciona tu nivel de facturación (Free o Paid) para recibir recomendaciones automáticas de delay seguro.
-5.  **Ejecutar**: En la pestaña **Ejecutar**, define una cantidad límite de entradas para probar (ej. `10` o `50`) y presiona **Iniciar Etiquetado**. Verás el progreso detallado y los reportes directamente en el visor de logs.
-6.  **Panel de Métricas**: Al finalizar el run, el panel **"Tokens y Latencia del último run"** se actualiza automáticamente mostrando las estadísticas completas de consumo.
+5.  **Ejecutar**: En la pestaña **Ejecutar**, define una cantidad límite de entradas para probar (ej. `10` o `50`) y presiona **Iniciar Etiquetado**. Verás el progreso detallado y los reportes directamente en el visor de logs. Mientras el proceso corre, todos los controles (límite, limpiar checkpoint) se deshabilitan automáticamente para evitar cambios accidentales.
+6.  **Panel de Métricas**: Al finalizar la ejecución, el resumen del resultado guardado se actualiza automáticamente mostrando las estadísticas completas de consumo calculadas por el backend.
 
 ---
 
@@ -244,7 +245,7 @@ python main_label.py --input data/dataset.xlsx --sheet "Datos" --column "Noticia
 
 ## 📊 Contabilidad de Tokens y Latencia
 
-El sistema registra de forma exhaustiva el consumo de tokens y el tiempo de respuesta de cada llamada a los LLMs. Esta información se almacena en **tres lugares simultáneamente**:
+El sistema registra de forma exhaustiva el consumo de tokens y el tiempo de respuesta de cada llamada a los LLMs. Los cálculos se hacen en backend y se almacenan en **tres lugares simultáneamente**:
 
 ### 1. En el CSV de salida (por entrada y por árbitro)
 
@@ -256,6 +257,13 @@ Cada fila del CSV etiquetado incluye las siguientes columnas adicionales para ca
 | `completion_tokens_[arb_id]` | Tokens generados en la respuesta de ese árbitro |
 | `total_tokens_[arb_id]` | Suma de prompt + completion tokens para ese árbitro |
 | `latency_s_[arb_id]` | Tiempo de respuesta de la llamada al LLM en segundos |
+| `entry_prompt_tokens` | Suma de tokens de entrada de todos los árbitros en esa entrada |
+| `entry_completion_tokens` | Suma de tokens de salida de todos los árbitros en esa entrada |
+| `entry_total_tokens` | Total de tokens de la entrada completa |
+| `entry_latency_s` | Tiempo total medido de la entrada completa |
+| `entry_latency_avg_s` | Tiempo promedio por llamada de árbitro en esa entrada |
+| `entry_arbiter_calls` | Número de llamadas de árbitro contabilizadas |
+| `entry_tokens_per_call` | Promedio de tokens por llamada de árbitro |
 
 > Los campos se marcan con `-1` si la entrada falló definitivamente en ese árbitro.
 
@@ -277,11 +285,11 @@ Al finalizar cada ejecución, el reporte aparece en consola **y** se guarda auto
   CONSUMO GLOBAL TOTAL DEL RUN  : 14685 tokens
 ```
 
-### 3. En la WebApp (panel visual post-run)
+### 3. En la WebApp (panel visual)
 
-La pestaña **Ejecutar** incluye el panel **"Tokens y Latencia del último run"** que se actualiza automáticamente al terminar cada ejecución. El panel muestra:
+La pestaña **Ejecutar** incluye paneles de métricas en vivo y de resumen del resultado guardado. Ambos muestran datos calculados por Python. El panel muestra:
 
-*   **KPIs globales**: Tokens totales del run, número de entradas etiquetadas y promedio de tokens por entrada.
+*   **KPIs globales**: Tokens totales del run, número de entradas etiquetadas y promedio de tokens por entrada, entregados ya calculados por el backend.
 *   **Tabla por árbitro**: Tokens de entrada, salida y total; número de llamadas; latencia promedio, mínima/máxima y latencia total acumulada.
 
 El panel también se carga al abrir la página si ya existe un CSV previo, gracias al endpoint `GET /api/run/stats`.
@@ -303,6 +311,13 @@ El CSV resultante conservará todas las columnas originales del dataset e incorp
 | `completion_tokens_[arbiter_id]` | Tokens de salida generados por ese árbitro en esta entrada |
 | `total_tokens_[arbiter_id]` | Total de tokens consumidos por ese árbitro en esta entrada |
 | `latency_s_[arbiter_id]` | Latencia de la llamada al LLM de ese árbitro en segundos |
+| `entry_total_tokens` | Tokens totales de la entrada, sumando todos los árbitros |
+| `entry_latency_s` | Tiempo total de la entrada, sumando llamadas medidas |
+| `entry_consensus_observed_agreement` | Coincidencia por pares para esa entrada; útil para auditoría, no como métrica principal del paper |
+| `entry_consensus_observed_agreement_percent` | Coincidencia por pares expresada como porcentaje |
+| `entry_consensus_mean_support_ratio` | Apoyo promedio al consenso por principio |
+| `entry_consensus_unanimous_principles` | Número de principios con voto unánime |
+| `entry_consensus_split_principles` | Número de principios con desacuerdo entre árbitros |
 
 Si una entrada falla permanentemente después de la cola de reintentos, el consenso se marcará con `-1` y la justificación se registrará como `FAILED`.
 
@@ -329,7 +344,7 @@ Si una entrada falla permanentemente después de la cola de reintentos, el conse
 | `GET` | `/api/run/status` | Estado actual del proceso (running / idle) |
 | `GET` | `/api/run/current-stats` | Métricas en vivo del run activo (tokens, latencia, progreso) |
 | `GET` | `/api/run/logs` | Stream SSE de logs en tiempo real |
-| `GET` | `/api/run/stats` | Estadísticas de tokens, latencia y métricas de acuerdo del último CSV |
+| `GET` | `/api/run/stats` | Estadísticas de tokens, latencia, diagnóstico de consenso por entrada y métricas agregadas de acuerdo del último CSV |
 
 ### Árbitros
 
@@ -368,6 +383,7 @@ Si una entrada falla permanentemente después de la cola de reintentos, el conse
 | `GET` | `/api/dataset/config` | Devuelve la configuración actual del dataset (archivo, sheet, columna) |
 | `PUT` | `/api/dataset/config` | Guarda la configuración del dataset en `arbiters_config.json` |
 | `POST` | `/api/dataset/inspect` | Inspecciona un CSV o Excel y devuelve sheets y columnas disponibles |
+| `POST` | `/api/dataset/upload` | Sube un CSV o Excel a `data/uploads/` e inspecciona sus columnas |
 
 ### Outputs y checkpoint
 
@@ -386,9 +402,31 @@ Si una entrada falla permanentemente después de la cola de reintentos, el conse
 
 ### Vertex AI — Configuración de `max_output_tokens`
 
-Los modelos de razonamiento como `gemini-2.5-pro` generan tokens de "pensamiento" (thinking tokens) que **se descuentan del límite de `max_output_tokens`**. Por esta razón, la configuración usa un valor de `8192` tokens en lugar del valor por defecto de `600`. Si se reduce este valor en modelos de razonamiento, las respuestas JSON se truncan parcialmente, causando errores de parseo.
+Los modelos de razonamiento como `gemini-2.5-pro` generan tokens de "pensamiento" (thinking tokens) que **se descuentan del límite de `max_output_tokens`**. Por esta razón, la configuración usa un valor de `2048` tokens (default anterior `600`). Si se reduce demasiado, las respuestas JSON se truncan y causan `JSONDecodeError`.
 
-La configuración de generación se pasa como **diccionario plano** (no como objeto `GenerationConfig`) para evitar un bug del SDK de Vertex AI con versiones recientes de Gemini que causaba truncamiento silencioso de respuestas.
+La configuración de generación se pasa como **diccionario plano** (no `GenerationConfig`) para evitar un bug del SDK de Vertex AI que causaba truncamiento silencioso. En `gemini-2.5-flash` se desactiva explícitamente el thinking (`thinking_budget: 0`); en `gemini-2.5-pro` no se fuerza porque Vertex AI devuelve error 400.
+
+### Sistema de Colores para Métricas de Acuerdo
+
+Todas las métricas de acuerdo inter-árbitros se muestran en la webapp con una escala de colores unificada de 4 niveles, aplicada tanto en el backend (campos `*_tone`) como en el frontend:
+
+| Nivel | Kappa | Porcentaje | Color Bootstrap |
+|---|---|---|---|
+| Alto | ≥ 0.8 | ≥ 80% | `success` (verde) |
+| Medio-alto | ≥ 0.6 | ≥ 60% | `info` (azul) |
+| Bajo | ≥ 0.4 | ≥ 40% | `warning` (amarillo) |
+| Muy bajo | < 0.4 | < 40% | `danger` (rojo) |
+
+Cada métrica expone su propio campo `*_tone` desde `compute_agreement_metrics()`: `observed_agreement_tone`, `fleiss_kappa_tone`, `pairwise_cohen_kappa_avg_tone`, `krippendorff_alpha_nominal_tone`, `positive_rate_tone`. En el panel global de `/run` se muestran dos badges separados: **acuerdo observado** (con su color) y **Fleiss Kappa** (con su interpretación y color), resolviendo visualmente la paradoja de prevalencia (kappa bajo con acuerdo observado alto).
+
+### Frontera backend/frontend
+
+La regla actual es que **todo cálculo de procesamiento y métricas vive en Python**:
+
+- `scripts/label_persuasion.py` calcula consenso, diagnóstico de consenso por entrada, tokens, latencia y columnas `entry_*`.
+- `scripts/agreement_metrics.py` calcula métricas globales y por principio, porcentajes e interpretación del kappa.
+- `webapp/app.py` expone esos datos por API y solo calcula respaldos para CSV antiguos.
+- Las plantillas en `webapp/templates/` solo renderizan datos, formatean valores y manejan interacción visual.
 
 ### Política de Seguridad (`free_only_mode`)
 
@@ -419,7 +457,7 @@ Módulo compartido entre el pipeline CLI y la WebApp que centraliza el cálculo 
 - **Krippendorff's Alpha nominal**: tolera datos faltantes.
 - **Acuerdo observado promedio** y **tasa positiva** por principio.
 
-Las métricas se calculan tanto de forma global como desglosadas por principio y se exponen en `/api/run/stats`.
+Las métricas se calculan tanto de forma global como desglosadas por principio y se exponen en `/api/run/stats`. El módulo también entrega porcentajes, interpretación textual del kappa y campos `*_tone` (success/info/warning/danger) para que la interfaz pueda colorear cada métrica sin lógica propia.
 
 ### Configuración del Servidor Web
 
