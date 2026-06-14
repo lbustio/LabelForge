@@ -148,7 +148,16 @@ OPENAI_API_KEY=tu_clave_de_openai_aqui
 # Google Cloud / Vertex AI
 GOOGLE_CLOUD_PROJECT=id_del_proyecto_gcp
 VERTEX_LOCATION=us-central1
+
+# Servidor web (opcionales — descomenta para cambiar los valores por defecto)
+# LABELFORGE_HOST=127.0.0.1   # 0.0.0.0 para acceso desde la red local
+# LABELFORGE_PORT=7860         # Puerto libre en macOS, Windows y Linux
 ```
+
+> **Nota sobre macOS**: el puerto `5000` está ocupado por el servicio AirPlay
+> Receiver desde macOS 12 Monterey. LabelForge usa `7860` por defecto para
+> evitar ese conflicto. Si necesitas otro puerto, define `LABELFORGE_PORT` en
+> `secrets.env` o usa el argumento `--port` en la línea de comandos.
 
 ### 4. Autenticación para Vertex AI (Google Cloud)
 
@@ -188,6 +197,7 @@ Puedes especificar argumentos adicionales en consola:
 *   `--port`: Cambiar el puerto del servidor (ej. `--port 8080`).
 *   `--host`: Configurar el host (ej. `--host 0.0.0.0` para acceso en red local).
 *   `--debug`: Ejecutar en modo desarrollo con recarga automática (*hot reloader*).
+
 
 #### Flujo de trabajo en la Webapp:
 1.  **Panel de Inicio**: Observa el estado actual del dataset, los árbitros activos y el último checkpoint.

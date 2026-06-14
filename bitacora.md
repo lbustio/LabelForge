@@ -1144,6 +1144,104 @@ webapp.
 - `bitacora.md`
 
 
+### 2026-06-13 20:07 - Exclusión de datos privados de investigación del repositorio Git
+
+**Autor/agente:** Antigravity (Medium).
+
+**Objetivo:** evitar que los datos del dataset bilingüe de investigación en curso
+y los archivos de checkpoint del pipeline queden publicados en GitHub antes de
+que la investigación esté concluida.
+
+**Decision tomada:**
+
+1. **`.gitignore` actualizado**: se añadió `data/all_datasets_en_es/` como
+   entrada explícita ignorada (el directorio completo, no solo extensiones).
+   Se eliminó la excepción `!checkpoints/.gitkeep` para que el directorio
+   `checkpoints/` quede completamente invisible a Git.
+   Ambas secciones incluyen comentarios que explican la razón de privacidad.
+
+2. **Archivos desindexados con `git rm --cached`**:
+   - `checkpoints/.gitkeep` — ya rastreado, se eliminó del índice.
+   - `data/all_datasets_en_es/all_datasets_en_es readme.txt` — ya rastreado,
+     se eliminó del índice.
+
+3. **Los archivos físicos permanecen locales** — solo se excluyen del
+   repositorio público. Al finalizar la investigación se pueden hacer públicos.
+
+**Razon practica:**
+
+Los datos forman parte de un estudio en curso. Publicarlos antes de tiempo
+podría comprometer la investigación o el proceso de publicación académica.
+El `.gitignore` es la barrera correcta para esto; `git rm --cached` limpia
+lo que ya había sido rastreado por error.
+
+**Verificacion realizada:**
+
+- `git status --short` tras la operación: ningún archivo de `checkpoints/` ni
+  de `data/all_datasets_en_es/` aparece en el índice.
+- Push exitoso al remoto: commit `f957cc7`.
+
+**Archivos tocados:**
+
+- `.gitignore`
+- `bitacora.md`
 
 
+### 2026-06-13 20:09 - Cambio de puerto del servidor Flask: 5000 → 7860 (cross-platform)
+
+**Autor/agente:** Antigravity (Medium).
+
+**Objetivo:** eliminar el conflicto de puerto en macOS, donde el puerto 5000
+está reservado por el sistema operativo para AirPlay Receiver desde macOS 12
+Monterey, y homogeneizar la configuración del servidor para macOS, Windows y
+Linux usando un único puerto libre en todos los sistemas.
+
+**Contexto observado:**
+
+- En macOS 12+, el servicio AirPlay Receiver ocupa el puerto 5000 por defecto,
+  impidiendo que Flask arranque sin cambio manual del usuario.
+- La configuración anterior no era consistente: `app.py` usaba `port=5000` sin
+  `host` explícito, y `main_webapp.py` usaba `127.0.0.1:5000` como default.
+- No había forma de cambiar host o puerto sin editar código fuente.
+
+**Decision tomada:**
+
+1. **Puerto por defecto cambiado a `7860`**: libre en macOS, Windows y Linux,
+   no requiere privilegios de administrador, reconocido en el ecosistema ML/AI
+   (Gradio, HuggingFace Spaces).
+
+2. **Host siempre explícito `127.0.0.1`**: garantiza comportamiento loopback
+   idéntico en los tres sistemas operativos. El usuario puede cambiarlo a
+   `0.0.0.0` para acceso en red local.
+
+3. **Jerarquía de configuración** (de mayor a menor prioridad):
+   - Argumentos CLI `--host` / `--port` (siempre tienen precedencia)
+   - Variables de entorno `LABELFORGE_HOST` / `LABELFORGE_PORT` (leídas desde
+     `secrets.env` en `main_webapp.py` y desde el entorno en `app.py`)
+   - Valores hardcoded: `127.0.0.1` / `7860`
+
+4. **`secrets.env.example` actualizado**: documenta las nuevas variables
+   `LABELFORGE_HOST` y `LABELFORGE_PORT` con comentarios explicativos.
+
+5. **`README.md` actualizado**: URL de ejemplo actualizada a `:7860`.
+
+**Razon practica:**
+
+Un puerto único y libre en todos los SO elimina errores silenciosos en macOS
+sin afectar a Windows ni Linux. El mecanismo de env vars permite cambiar el
+comportamiento sin tocar código fuente, alineándolo con la convención
+12-factor app.
+
+**Verificacion realizada:**
+
+- Compilación de `webapp/app.py` y `main_webapp.py`: exitosa.
+- Push exitoso al remoto: commit `3c14804`.
+
+**Archivos tocados:**
+
+- `webapp/app.py`
+- `main_webapp.py`
+- `secrets.env.example`
+- `README.md`
+- `bitacora.md`
 
