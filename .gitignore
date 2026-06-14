@@ -37,7 +37,12 @@ adc.json
 
 # ---------------------------------------------------------------------------
 # Datos locales, datasets grandes y material que no debe publicarse
+# INVESTIGACIÓN EN CURSO: estos directorios se harán públicos al finalizar
 # ---------------------------------------------------------------------------
+# Dataset bilingüe completo - datos privados de investigación
+data/all_datasets_en_es/
+
+# Patrones generales para otros datos pesados
 data/**/*.csv
 data/**/*.tsv
 data/**/*.jsonl
@@ -63,6 +68,7 @@ biblio/**/*.docx
 
 # ---------------------------------------------------------------------------
 # Salidas, checkpoints y archivos generados por ejecuciones
+# INVESTIGACIÓN EN CURSO: checkpoints contienen estado del pipeline privado
 # ---------------------------------------------------------------------------
 output/
 logs/
@@ -72,7 +78,6 @@ checkpoints/
 *.err
 !output/.gitkeep
 !logs/.gitkeep
-!checkpoints/.gitkeep
 
 # ---------------------------------------------------------------------------
 # Python
