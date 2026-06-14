@@ -4,10 +4,10 @@ main_label.py
 Entrypoint principal para el proceso de etiquetado de principios de persuasion.
 
 Uso:
-    python main_label.py [--limit N] [--api-key KEY] [--config PATH] [--input PATH]
+    python main_label.py [--limit N] [--config PATH] [--input PATH]
 
 Ejemplos:
-    # Procesar 10 claims para prueba
+    # Procesar 10 entradas para prueba
     python main_label.py --limit 10
 
     # Procesar todo el dataset

@@ -53,31 +53,31 @@
       <div class="col-md-6">
         <div class="mb-3">
           <div class="field-label-row">
-            <label class="form-label small text-secondary" for="checkpoint_every">Checkpoint cada N claims</label>
+            <label class="form-label small text-secondary" for="checkpoint_every">Checkpoint cada N entradas</label>
             <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
                     data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="right"
-                    data-bs-title="Checkpoint cada N claims"
-                    data-bs-content="El estado recuperable se guarda por claim. Este valor define cada cuantos claims se reporta avance en logs y UI."
-                    aria-label="Ayuda: checkpoint cada N claims">
+                    data-bs-title="Checkpoint cada N entradas"
+                    data-bs-content="El estado recuperable se guarda por entrada. Este valor define cada cuantas entradas se reporta avance en logs y UI."
+                    aria-label="Ayuda: checkpoint cada N entradas">
               <i class="bi bi-question-circle"></i>
             </button>
           </div>
           <input type="number" class="form-control" id="checkpoint_every" min="1" step="1">
-          <div class="form-text text-secondary">El estado durable se guarda por claim; este valor controla el reporte de progreso cada N claims.</div>
+          <div class="form-text text-secondary">El estado durable se guarda por entrada; este valor controla el reporte de progreso cada N entradas.</div>
         </div>
         <div class="mb-3">
           <div class="field-label-row">
-            <label class="form-label small text-secondary" for="claim_max_chars">Longitud maxima del claim (chars)</label>
+            <label class="form-label small text-secondary" for="claim_max_chars">Longitud maxima de la entrada (chars)</label>
             <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
                     data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="right"
-                    data-bs-title="Longitud maxima del claim"
+                    data-bs-title="Longitud maxima de la entrada"
                     data-bs-content="Limite de caracteres que se envian al LLM. Ayuda a controlar tokens y tiempo; si es muy bajo puede cortar contexto util."
-                    aria-label="Ayuda: longitud maxima del claim">
+                    aria-label="Ayuda: longitud maxima de la entrada">
               <i class="bi bi-question-circle"></i>
             </button>
           </div>
           <input type="number" class="form-control" id="claim_max_chars" min="100" step="100">
-          <div class="form-text text-secondary">Claims mas largos se truncan a este limite antes de enviarlos.</div>
+          <div class="form-text text-secondary">Entradas mas largas se truncan a este limite antes de enviarlas.</div>
         </div>
         <div class="mb-3">
           <div class="field-label-row">
@@ -116,7 +116,7 @@
             <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
                     data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="left"
                     data-bs-title="Delay minimo"
-                    data-bs-content="Piso al que puede bajar el delay cuando el run se recupera. Evita acelerar demasiado y volver a chocar con limites."
+                    data-bs-content="Piso al que puede bajar el delay cuando la ejecucion se recupera. Evita acelerar demasiado y volver a chocar con limites."
                     aria-label="Ayuda: delay minimo">
               <i class="bi bi-question-circle"></i>
             </button>

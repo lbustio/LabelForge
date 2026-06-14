@@ -74,12 +74,12 @@
             <div class="col-md-6">
               <label class="form-label small text-secondary">Variable de entorno de la API key</label>
               <input type="text" id="arb-api-key-env" class="form-control" placeholder="ej: GEMINI_API_KEY">
-              <div class="form-text text-secondary">Nombre de la variable en tu archivo .env</div>
+              <div class="form-text text-secondary">Nombre de la variable en tu archivo secrets.env</div>
             </div>
             <div class="col-md-6">
               <label class="form-label small text-secondary">API key override (opcional)</label>
-              <input type="password" id="arb-api-key-override" class="form-control" placeholder="Solo si quieres sobreescribir el .env">
-              <div class="form-text text-secondary">Si se rellena, tiene prioridad sobre el .env</div>
+              <input type="password" id="arb-api-key-override" class="form-control" placeholder="Solo si quieres sobreescribir secrets.env">
+              <div class="form-text text-secondary">Si se rellena, tiene prioridad sobre secrets.env</div>
             </div>
           </div>
 
@@ -97,7 +97,7 @@
             <div class="col-md-6">
               <label class="form-label small text-secondary">Google Cloud Project ID <span class="text-danger">*</span></label>
               <input type="text" id="arb-vertex-project" class="form-control" placeholder="ej: mi-proyecto-gcp">
-              <div class="form-text text-secondary">Tambien puede venir de GOOGLE_CLOUD_PROJECT en .env.</div>
+              <div class="form-text text-secondary">Tambien puede venir de GOOGLE_CLOUD_PROJECT en secrets.env.</div>
             </div>
             <div class="col-md-4">
               <label class="form-label small text-secondary">Region Vertex AI</label>

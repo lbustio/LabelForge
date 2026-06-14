@@ -54,8 +54,10 @@
   <p class="text-secondary small mb-3">
     Este es el prompt que recibe cada arbitro. Debe contener el placeholder
     <code>{claim}</code>
-    donde se insertara el claim a analizar. Usa <code>{% raw %}{{ }}{% endraw %}</code>
-    para llaves literales en el JSON de salida. Puedes usar
+    donde se insertara el texto/entrada a analizar. Usa <code>{% raw %}{{ }}{% endraw %}</code>
+    para llaves literales en el JSON de salida. Usa
+    <code>{principles_catalog}</code>
+    para insertar automaticamente las definiciones de los principios y
     <code>{output_instruction}</code>
     para insertar automaticamente el formato de salida segun el check.
   </p>
@@ -80,7 +82,7 @@
       <select id="preview-arbiter" class="form-select"></select>
     </div>
     <div class="col-lg-8">
-      <label class="form-label small text-secondary">Claim de ejemplo</label>
+      <label class="form-label small text-secondary">Texto de ejemplo</label>
       <input id="preview-claim" class="form-control"
         value="Says the Annies List political group supports third-trimester abortions on demand.">
     </div>
@@ -96,7 +98,7 @@
     </span>
     <span class="prompt-legend-item">
       <span class="prompt-legend-swatch prompt-legend-claim"></span>
-      Amarillo: claim insertado
+      Amarillo: texto insertado
     </span>
     <span class="prompt-legend-item">
       <span class="prompt-legend-swatch prompt-legend-output"></span>
@@ -238,11 +240,25 @@ function buildOutputInstruction() {
   return `Return JSON only: {${keys.map(k => `"${k}":0`).join(',')}}`;
 }
 
-function renderTemplate(template, claim, outputInstruction) {
+function buildPrinciplesCatalog() {
+  const lines = ['Persuasion principles to label:'];
+  for (const key of Object.keys(principles)) {
+    const currentKey = (document.getElementById(`pk-${key}`)?.value || key).trim();
+    const currentValue = (document.getElementById(`pv-${key}`)?.value || principles[key] || '').trim();
+    if (currentKey) lines.push(`- ${currentKey}: ${currentValue}`);
+  }
+  return lines.join('\n');
+}
+
+function renderTemplate(template, claim, principlesCatalog, outputInstruction) {
   let rendered = template
     .replaceAll('{claim}', claim)
+    .replaceAll('{principles_catalog}', principlesCatalog)
     .replaceAll('{output_instruction}', outputInstruction)
     .replaceAll('{output_schema}', outputInstruction);
+  if (!template.includes('{principles_catalog}')) {
+    rendered = `${principlesCatalog}\n\n${rendered}`;
+  }
   if (!template.includes('{output_instruction}') && !template.includes('{output_schema}')) {
     rendered = `${rendered}\n\n${outputInstruction}`;
   }
@@ -255,8 +271,9 @@ function highlightFragment(text, fragment, style) {
   return text.split(escaped).join(`<span style="${style}">${escaped}</span>`);
 }
 
-function highlightPrompt(text, claim, outputInstruction) {
+function highlightPrompt(text, claim, principlesCatalog, outputInstruction) {
   let html = escapeHtml(text);
+  html = highlightFragment(html, principlesCatalog, 'background:#1f1b3d;color:#ddd6fe;border-radius:.25rem;padding:.05rem .2rem');
   html = highlightFragment(html, claim, 'background:#3a2c0a;color:#fde68a;border-radius:.25rem;padding:.05rem .2rem');
   html = highlightFragment(html, outputInstruction, 'background:#082f24;color:#86efac;border-radius:.25rem;padding:.05rem .2rem');
   html = html.replaceAll(
@@ -274,8 +291,9 @@ function renderPromptPreview() {
   const arbiter = arbiters.find(a => a.id === selectedId) || arbiters[0] || {};
   const claim = document.getElementById('preview-claim').value || '';
   const template = document.getElementById('prompt-template').value || '';
+  const principlesCatalog = buildPrinciplesCatalog();
   const outputInstruction = buildOutputInstruction();
-  const finalPrompt = renderTemplate(template, claim, outputInstruction);
+  const finalPrompt = renderTemplate(template, claim, principlesCatalog, outputInstruction);
   const systemPrompt = arbiter.system_prompt || '';
 
   target.innerHTML = `
@@ -285,7 +303,7 @@ function renderPromptPreview() {
     </div>
     <div>
       <div class="small fw-semibold mb-2" style="color:#93c5fd">USER</div>
-      <pre class="mb-0" style="white-space:pre-wrap;background:#0a0c14;border:1px solid #2d3148;border-radius:.5rem;color:#dbeafe;padding:1rem;font-size:.82rem">${highlightPrompt(finalPrompt, claim, outputInstruction)}</pre>
+      <pre class="mb-0" style="white-space:pre-wrap;background:#0a0c14;border:1px solid #2d3148;border-radius:.5rem;color:#dbeafe;padding:1rem;font-size:.82rem">${highlightPrompt(finalPrompt, claim, principlesCatalog, outputInstruction)}</pre>
     </div>`;
 }
 

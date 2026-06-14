@@ -34,12 +34,23 @@ warnings.filterwarnings("ignore", category=UserWarning, module="vertexai")
 from dotenv import load_dotenv
 
 # ---------------------------------------------------------------------------
+# Módulo compartido de métricas de acuerdo
+# ---------------------------------------------------------------------------
+from scripts.agreement_metrics import (
+    CONSENSUS_METRIC_KEYS,
+    build_consensus_metric_fieldnames,
+    compute_consensus_metrics,
+    flatten_consensus_metrics,
+)
+from scripts.utils import number as _number
+
+# ---------------------------------------------------------------------------
 # Rutas base
 # ---------------------------------------------------------------------------
 BASE_DIR    = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = Path(__file__).resolve().parent
 
-load_dotenv(BASE_DIR / ".env")
+load_dotenv(BASE_DIR / "secrets.env")
 
 OUTPUT_DIR     = BASE_DIR / "output"
 LOG_DIR        = BASE_DIR / "logs"
@@ -210,7 +221,7 @@ def validate_safety_policy(cfg: dict):
     if not bool(safety.get("free_only_mode", False)):
         return
 
-    allowed = set(safety.get("allowed_provider_types", ["gemini", "ollama", "openai_compat"]))
+    allowed = set(safety.get("allowed_provider_types", ["gemini", "vertex_gemini", "ollama", "openai_compat"]))
     allow_remote_compat = bool(safety.get("allow_remote_openai_compat", False))
     violations = []
 
@@ -496,14 +507,25 @@ def build_output_instruction(task_cfg: dict) -> str:
     return f"Return JSON only: {schema}"
 
 
+def build_principles_catalog(task_cfg: dict) -> str:
+    lines = ["Persuasion principles to label:"]
+    for key, description in task_cfg["principles"].items():
+        lines.append(f"- {key}: {description}")
+    return "\n".join(lines)
+
+
 def build_user_prompt(task_cfg: dict, claim: str, max_chars: int) -> str:
     template = task_cfg["user_prompt_template"]
     output_instruction = build_output_instruction(task_cfg)
+    principles_catalog = build_principles_catalog(task_cfg)
     prompt = template.format(
         claim=claim[:max_chars],
+        principles_catalog=principles_catalog,
         output_instruction=output_instruction,
         output_schema=output_instruction,
     )
+    if "{principles_catalog}" not in template:
+        prompt = f"{principles_catalog}\n\n{prompt}"
     if "{output_instruction}" not in template and "{output_schema}" not in template:
         prompt = f"{prompt}\n\n{output_instruction}"
     return prompt
@@ -686,16 +708,6 @@ def build_extra_fieldnames(arbiters: list, principles: list) -> list:
     return extra
 
 
-def _number(value, default=0):
-    if value in (None, ""):
-        return default
-    try:
-        if default is None:
-            return int(float(value))
-        return type(default)(value)
-    except (TypeError, ValueError):
-        return default
-
 
 def _record_status(record: dict, principles: list) -> str:
     values = [_number(record.get(f"{p}_consensus"), None) for p in principles]
@@ -873,7 +885,7 @@ def total_token_budget(cfg: dict) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Procesamiento de un claim
+# Procesamiento de una entrada
 # ---------------------------------------------------------------------------
 def process_claim(
     row_index: int,
@@ -892,7 +904,7 @@ def process_claim(
     arb_results = dict(partial_arbiter_results.get(row_key, {}))
     for arb in arbiters:
         if arb["id"] in arb_results:
-            log.info(f"[claim {row_index}] Arbitro {arb['id']} ya completado — reutilizando checkpoint")
+            log.info(f"[entrada {row_index}] Arbitro {arb['id']} ya completado — reutilizando checkpoint")
             continue
         result = call_arbiter(arb, claim, rate_limiters[arb["id"]], task_cfg, proc_cfg)
         if result is None:
@@ -901,7 +913,7 @@ def process_claim(
             cfg["_last_failure_kind"] = arb.get("_last_error_kind", "unknown")
             cfg["_last_failure_retryable"] = arb.get("_last_retryable", True)
             cfg["_pause_requested"] = bool(arb.get("_last_pause_recommended", True))
-            log.warning(f"[claim {row_index}] Arbitro {arb['id']} fallo — claim encolado — {reason[:240]}")
+            log.warning(f"[entrada {row_index}] Arbitro {arb['id']} fallo — entrada encolada — {reason[:240]}")
             return None
         arb_results[arb["id"]] = result
         partial_arbiter_results.setdefault(row_key, {})[arb["id"]] = result
@@ -926,7 +938,7 @@ def process_claim(
         record[f"total_tokens_{arb['id']}"]      = p_tok + c_tok
         record[f"latency_s_{arb['id']}"]         = latency
 
-    log.info(f"[claim {row_index}] OK — " + " ".join(f"{p}={consensus[p]}" for p in principles))
+    log.info(f"[entrada {row_index}] OK — " + " ".join(f"{p}={consensus[p]}" for p in principles))
     return record
 
 
@@ -941,16 +953,21 @@ def write_output_csv(
     principles: list,
     output_path: Path,
 ):
-    extra            = build_extra_fieldnames(arbiters, principles)
-    output_fieldnames = list(original_fieldnames) + extra
-    empty_record      = {f: "" for f in extra}
+    extra = build_extra_fieldnames(arbiters, principles)
+    consensus_metric_fields = build_consensus_metric_fieldnames(principles)
+    output_fieldnames = list(original_fieldnames) + extra + consensus_metric_fields
+    empty_record = {f: "" for f in extra}
+    consensus_metrics = flatten_consensus_metrics(
+        compute_consensus_metrics(results, principles, arbiters),
+        principles,
+    )
 
     with open(output_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=output_fieldnames, extrasaction="ignore")
         writer.writeheader()
         for i, row in enumerate(rows):
             record = results.get(str(i), empty_record.copy())
-            writer.writerow({**row, **record})
+            writer.writerow({**row, **record, **consensus_metrics})
 
     log.info(f"CSV final: {output_path}")
 
@@ -960,14 +977,14 @@ def write_output_csv(
 # ---------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser(
-        description="Etiqueta claims con principios de persuasion usando arbitros multi-proveedor."
+        description="Etiqueta entradas con principios de persuasion usando arbitros multi-proveedor."
     )
     parser.add_argument("--config", default=str(SCRIPTS_DIR / "arbiters_config.json"),
                         help="Ruta al JSON de configuracion")
     parser.add_argument("--input",  default=str(BASE_DIR / "data" / "all_datasets_en_es" / "all_datasets_en_es.csv"),
                         help="Ruta al CSV de entrada")
     parser.add_argument("--limit",  type=int, default=None,
-                        help="Limitar el numero de claims (para pruebas)")
+                        help="Limitar el numero de entradas (para pruebas)")
     args = parser.parse_args()
 
     cfg = load_config(Path(args.config))
@@ -983,7 +1000,7 @@ def main():
         rows                = list(reader)
 
     total = len(rows) if args.limit is None else min(args.limit, len(rows))
-    log.info(f"Total de claims a procesar: {total}")
+    log.info(f"Total de entradas a procesar: {total}")
 
     previous_state = load_run_state()
     if should_reuse_run_state(previous_state, args, total):
@@ -1033,7 +1050,7 @@ def main():
     results    = checkpoint["results"]
     partial_arbiter_results = load_arbiter_results()
     if results:
-        log.info(f"Reanudacion: {len(results)} claims con resultado final persistido")
+        log.info(f"Reanudacion: {len(results)} entradas con resultado final persistido")
     if partial_arbiter_results:
         partial_count = sum(len(v) for v in partial_arbiter_results.values())
         log.info(f"Reanudacion: {partial_count} respuestas de arbitros persistidas")
@@ -1078,12 +1095,12 @@ def main():
         claim = row.get("claim", "").strip()
 
         if not claim:
-            log.warning(f"[claim {i}] Vacio — saltando")
+            log.warning(f"[entrada {i}] Vacia — saltando")
             results[str(i)] = {f: "" for f in build_extra_fieldnames(arbiters, principles)}
             append_claim_result(i, results[str(i)], "skipped")
             save_checkpoint(max_persisted_index(results), results)
             save_progress_state(state, results, arbiters, principles, "running")
-            emit_run_metric("claim_skipped", row_index=i, stage="main", reason="claim vacio")
+            emit_run_metric("claim_skipped", row_index=i, stage="main", reason="entrada vacia")
             continue
 
         cfg.pop("_pause_requested", None)
@@ -1150,7 +1167,7 @@ def main():
             idx    = item["index"]
             existing = results.get(str(idx))
             if existing and is_record_final(existing, principles):
-                log.info(f"[claim {idx}] Ya tiene resultado final — saltando cola de fallidos")
+                log.info(f"[entrada {idx}] Ya tiene resultado final — saltando cola de fallidos")
                 continue
             claim  = item["row"].get("claim", "").strip()
             cfg.pop("_pause_requested", None)
@@ -1176,7 +1193,7 @@ def main():
                     emit_run_metric("paused", run_id=run_id, pause_kind=kind, pause_reason=reason)
                     return
 
-                log.error(f"[claim {idx}] Fallo definitivo")
+                log.error(f"[entrada {idx}] Fallo definitivo")
                 still_failed.append(item)
                 results[str(idx)] = make_failed_record(arbiters, principles)
                 append_claim_result(idx, results[str(idx)], "failed")
@@ -1190,9 +1207,9 @@ def main():
                 emit_run_metric("claim_ok", run_id=run_id, **build_claim_metric(idx, item["row"], record, arbiters, principles, "retry"))
 
         if still_failed:
-            log.warning(f"{len(still_failed)} claims fallaron definitivamente:")
+            log.warning(f"{len(still_failed)} entradas fallaron definitivamente:")
             for item in still_failed:
-                log.warning(f"  - claim {item['index']}")
+                log.warning(f"  - entrada {item['index']}")
 
         clear_failed_queue()
         save_checkpoint(total - 1, results)

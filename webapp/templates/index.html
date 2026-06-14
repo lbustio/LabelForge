@@ -48,7 +48,7 @@
         <span class="metric-kicker">Resiliencia</span>
       </div>
       <div class="metric-value" id="stat-checkpoint-val">—</div>
-      <div class="metric-label">Claims en checkpoint</div>
+      <div class="metric-label">Entradas en checkpoint</div>
     </div>
   </div>
 </div>
@@ -199,7 +199,7 @@ function showOutputModal(out) {
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Tamaño</span><br><span style="color:#e2e8f0">${out.size_kb} KB</span></div>
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Ultima modificación</span><br><span style="color:#e2e8f0">${escapeHtml(out.modified || '—')}</span></div>
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Run</span><br><span style="color:#e2e8f0">${escapeHtml(out.run_timestamp || '—')}</span></div>
-    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Claims totales / OK / Fallidos</span><br><span style="color:#e2e8f0">${totalRows} / ${rowsOk} / ${rowsFailed}</span></div>
+    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Entradas totales / OK / Fallidas</span><br><span style="color:#e2e8f0">${totalRows} / ${rowsOk} / ${rowsFailed}</span></div>
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Tokens totales</span><br><span style="color:#e2e8f0">${tokens}</span></div>
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Principios</span><br><span style="color:#e2e8f0">${(out.principles || []).length ? out.principles.join(', ') : '—'}</span></div>
     <div class="mb-0"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Arbitros</span><br><span style="color:#e2e8f0">${(out.arbiters || []).length ? out.arbiters.join(', ') : '—'}</span></div>

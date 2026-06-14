@@ -27,9 +27,9 @@ y que criterios deben respetarse.
 
 ## Contexto actual del proyecto
 
-LabelForge es una plataforma para etiquetar claims de noticias falsas segun la
-taxonomia de Principios de Persuasion de Ana Ferreira aplicada a ingenieria
-social. El sistema combina:
+LabelForge es una plataforma para etiquetar entradas textuales de forma general,
+incluyendo datasets de noticias falsas segun la taxonomia de Principios de
+Persuasion de Ana Ferreira aplicada a ingenieria social. El sistema combina:
 
 - Un pipeline CLI de etiquetado masivo.
 - Una webapp Flask para configuracion, ejecucion y monitoreo.
@@ -155,6 +155,84 @@ la pagina.
   elementos `results-panel` y `stats-successful-rows`.
 - No se pudo ejecutar `node --check` porque `node` no esta instalado en el
   entorno local.
+
+**Archivos tocados:**
+
+- `webapp/app.py`
+- `webapp/templates/run.html`
+- `bitacora.md`
+
+### 2026-06-13 18:10 - Terminologia general: entradas en vez de claims
+
+**Autor/agente:** OpenCode.
+
+**Objetivo:** ajustar la terminologia del proyecto porque LabelForge evoluciono
+de un etiquetador de claims de fake news a una plataforma de etiquetado de datos
+textuales mas general.
+
+**Decision tomada:**
+
+La terminologia publica pasa a ser:
+
+- `entrada(s)` para cada fila/unidad procesada;
+- `texto` para el contenido textual que se envia al LLM;
+- `datos` o `dataset` para el conjunto completo.
+
+Se mantiene `claim` como nombre tecnico/legacy en variables internas,
+checkpoints, eventos SSE y columna CSV esperada, para no romper compatibilidad
+con datasets y outputs existentes. La documentacion aclara que `claim` representa
+el texto de la entrada.
+
+**Archivos tocados:**
+
+- `README.md`
+- `main_label.py`
+- `scripts/arbiters_config.json`
+- `scripts/label_persuasion.py`
+- `webapp/app.py`
+- `webapp/templates/index.html`
+- `webapp/templates/principles.html`
+- `webapp/templates/processing.html`
+- `webapp/templates/run.html`
+- `bitacora.md`
+
+### 2026-06-13 18:00 - Metricas de agreement entre arbitros
+
+**Autor/agente:** OpenCode.
+
+**Objetivo:** calcular metricas reportables de acuerdo inter-evaluador para el
+paper, a partir de las etiquetas binarias emitidas por los arbitros.
+
+**Decision tomada:**
+
+Se agrego en `/api/run/stats` un bloque `agreement` con metricas globales y por
+principio:
+
+- acuerdo observado promedio por pares;
+- Fleiss kappa multi-arbitro;
+- Cohen kappa promedio por pares;
+- Krippendorff alpha nominal;
+- tasa positiva de etiquetas.
+
+La UI de `Ejecutar` ahora muestra un panel `Agreement entre arbitros` dentro del
+resumen del ultimo output guardado, con interpretacion rapida del kappa global.
+
+**Razon practica:**
+
+Estas metricas son estandar en estudios con multiples evaluadores/codificadores y
+permiten reportar no solo el consenso final, sino la confiabilidad entre arbitros.
+Fleiss kappa es apropiado para multiples arbitros con datos completos;
+Krippendorff alpha nominal tolera datos faltantes; Cohen kappa promedio facilita
+comparar pares de arbitros.
+
+**Verificacion realizada:**
+
+- Prueba sintetica con acuerdo perfecto en `AUTH` y parcial en `SP` produjo
+  metricas diferenciadas esperadas.
+- `GET /api/run/stats?limit=1` devolvio HTTP 200 con bloque `agreement` usando el
+  output real mas reciente.
+- `GET /run` devolvio HTTP 200 y renderizo `agreement-panel`.
+- `conda run -n fakenewsds python -m py_compile webapp\app.py scripts\label_persuasion.py`
 
 **Archivos tocados:**
 
@@ -895,3 +973,156 @@ webapp.
 - `webapp/templates/processing.html`
 - `webapp/templates/run.html`
 - `bitacora.md`
+
+### 2026-06-13 18:00 - Revision general y correccion de hallazgos
+
+**Autor/agente:** OpenCode.
+
+**Objetivo:** revisar estructura, redundancias y riesgos del codigo completo, y corregir los problemas sin refactorizar lo que ya funciona.
+
+**Hallazgos de la revision (ordenados por severidad):**
+
+1. **Politica de seguridad bloqueaba la config actual** – `free_only_mode` no incluye `vertex_gemini` en `allowed_provider_types`. La config usa 3 arbitros Vertex. `validate_safety_policy()` lanza RuntimeError y la ejecucion ni empieza.
+2. **`_build_arbiter()` descarta `vertex_project` / `vertex_location`** – La webapp envia esos campos al guardar un arbitro, pero la funcion del backend no los preserva en el JSON. Editar un arbitro Vertex desde la UI lo deja sin proyecto/region.
+3. **Metricas de acuerdo duplicadas** – `scripts/label_persuasion.py` y `webapp/app.py` tienen copias casi identicas de `_cohen_kappa`, `_agreement_for_items`, y `compute_consensus_metrics`/`_compute_agreement_metrics`. Si divergen, los reportes CSV y webapp discrepan silenciosamente.
+4. **Documentacion/UI desactualizada** – `README.md`, mensajes de error y tooltips en `arbiters.html` referencian `.env`, pero el codigo carga `secrets.env`.
+5. **Ayuda obsoleta en `main_label.py`** – menciona `--api-key KEY` que no existe en el parser real.
+6. **`requirements.txt` / `environment.yml`** – listan dependencias transitivas a mano (`requests`, `tqdm`, `tenacity`, etc.) que no se importan directamente. No rompe pero dificulta mantenimiento.
+7. **Sin tests automatizados** – no hay suite de tests unitarios ni de integracion.
+
+**Correcciones aplicadas:**
+
+- `scripts/arbiters_config.json`: agregado `vertex_gemini` a `allowed_provider_types`.
+- `scripts/label_persuasion.py`: actualizado default de `allowed_provider_types` y removida la logica duplicada de metricas.
+- `webapp/app.py`: `_build_arbiter()` ahora preserva `vertex_project` y `vertex_location`. Removida la logica duplicada de metricas.
+- `scripts/agreement_metrics.py`: archivo nuevo con las metricas de acuerdo compartidas entre CLI y WebApp.
+- `README.md`, `webapp/templates/arbiters.html`, `webapp/app.py`: referencias a `.env` → `secrets.env`.
+- `main_label.py`: removido `--api-key` del texto de uso.
+
+**Pendiente (no critico, para paso futuro):**
+
+1. Extraer `_number()`, `_safe_int()` y otras utilidades duplicadas.
+2. Ordenar `requirements.txt` dejando solo dependencias directas.
+3. Agregar suite basica de tests (al menos para agreement_metrics y validacion de config).
+4. La bitacora tiene referencias historicas a `.env` que no se modificaron.
+
+**Verificacion realizada:**
+
+- `conda run -n fakenewsds python -m py_compile main_label.py main_webapp.py scripts/label_persuasion.py webapp/app.py`
+- `conda run -n fakenewsds python -c "..." validate_safety_policy()`: ok con config actual.
+- `_build_arbiter()` in-memory: preserva `vertex_project` y `vertex_location`.
+- Compilacion de `scripts/agreement_metrics.py` como import: ok.
+
+**Archivos tocados:**
+
+- `scripts/arbiters_config.json`
+- `scripts/label_persuasion.py`
+- `scripts/agreement_metrics.py` (nuevo)
+- `webapp/app.py`
+- `webapp/templates/arbiters.html`
+- `README.md`
+- `main_label.py`
+- `bitacora.md`
+
+### 2026-06-13 19:10 - Corrección de importación de métricas y eliminación de duplicados en WebApp
+
+**Autor/agente:** Antigravity (Medium).
+
+**Objetivo:** resolver un ImportError crítico detectado al importar `label_persuasion.py`, corregir errores de tipado de datos en el cálculo de métricas de acuerdo compartido, y eliminar definitivamente el código duplicado de acuerdo inter-árbitros en `webapp/app.py`.
+
+**Decision tomada:**
+
+1. **Corrección de importación**: En [`scripts/label_persuasion.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/label_persuasion.py), se intentaba importar `compute_consensus_metrics` de [`scripts/agreement_metrics.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/agreement_metrics.py), pero la función no existía. Se agregó el puente `compute_consensus_metrics` en [`scripts/agreement_metrics.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/agreement_metrics.py) para que reciba `(results: dict, principles: list, arbiters: list)` y lo traduzca al formato esperado por `compute_agreement_metrics`.
+2. **Corrección de NameError y Coerción de datos**:
+   - En [`scripts/agreement_metrics.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/agreement_metrics.py), se corrigió un `NameError` en `flatten_consensus_metrics` donde se usaba la variable inexistente `p` en lugar de `principle`.
+   - Se añadió la función `_safe_int()` para asegurar que las etiquetas se procesen como enteros (0 o 1) tanto si provienen de la memoria (enteros) como si se leen del CSV por `DictReader` (cadenas de texto `"0"` o `"1"`).
+3. **Limpieza en WebApp**: Se removieron de [`webapp/app.py`](file:///E:/Code/python/OpenCode/LabelForge/webapp/app.py) las funciones duplicadas de métricas (`_cohen_kappa`, `_agreement_for_items` y `_compute_agreement_metrics`) que aún se encontraban activas y se enlazó el endpoint `/api/run/stats` directamente con la función importada `compute_agreement_metrics`.
+
+**Verificacion realizada:**
+
+- `conda run -n fakenewsds python -m py_compile main_label.py main_webapp.py scripts/label_persuasion.py webapp/app.py scripts/agreement_metrics.py` (Compilación limpia).
+- `conda run -n fakenewsds python -c "from webapp.app import app"` (Importación runtime del servidor Flask exitosa).
+- `conda run -n fakenewsds python -c "import scripts.label_persuasion"` (Importación runtime del pipeline CLI sin ImportError).
+
+**Archivos tocados:**
+
+- `scripts/agreement_metrics.py`
+- `webapp/app.py`
+- `bitacora.md`
+
+### 2026-06-13 19:50 - Creación de utils.py, deduplicación de utilidades, limpieza de requirements.txt y suite de pruebas unitarias
+
+**Autor/agente:** Antigravity (Medium).
+
+**Objetivo:** unificar helpers redundantes de conversión numérica en un archivo común, simplificar el archivo de requerimientos, e implementar una suite de pruebas automatizadas para asegurar la confiabilidad del cálculo de acuerdo, utilitarios y validación de seguridad.
+
+**Decision tomada:**
+
+1. **Centralización de Helpers**: Se creó el archivo [`scripts/utils.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/utils.py) que reúne y generaliza las funciones `safe_int`, `safe_float`, `safe_binary_int` y `number`.
+2. **Refactorización de Módulos**:
+   - [`scripts/agreement_metrics.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/agreement_metrics.py): se actualizó para importar `safe_binary_int` desde `scripts.utils`.
+   - [`scripts/label_persuasion.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/label_persuasion.py): se actualizó para importar `number` como `_number` desde `scripts.utils` y remover la definición local redundante.
+   - [`webapp/app.py`](file:///E:/Code/python/OpenCode/LabelForge/webapp/app.py): se actualizó para importar `safe_int` como `_safe_int` y `safe_float` como `_safe_float` desde `scripts.utils` y eliminar sus definiciones locales redundantes.
+3. **Limpieza de Requerimientos**: Se simplificó [`requirements.txt`](file:///E:/Code/python/OpenCode/LabelForge/requirements.txt) conservando únicamente las 6 dependencias directas y principales de primer nivel del sistema (google-genai, google-cloud-aiplatform, anthropic, openai, flask, python-dotenv).
+4. **Suite de Pruebas Unitarias**: Se creó [`tests/test_pipeline.py`](file:///E:/Code/python/OpenCode/LabelForge/tests/test_pipeline.py) utilizando `unittest` para cubrir las utilidades, el cálculo de Fleiss/Cohen/Krippendorff de acuerdo global y por principio, y la verificación de las políticas de seguridad de Vertex y Gemini.
+
+**Verificacion realizada:**
+
+- `conda run -n fakenewsds python -m unittest tests/test_pipeline.py` (9/9 pruebas unitarias exitosas en 0.001s).
+- `conda run -n fakenewsds python -m py_compile main_label.py main_webapp.py scripts/label_persuasion.py webapp/app.py scripts/agreement_metrics.py scripts/utils.py tests/test_pipeline.py` (Compilación completa exitosa).
+
+**Archivos tocados:**
+
+- `scripts/utils.py` (nuevo)
+- `scripts/agreement_metrics.py`
+- `scripts/label_persuasion.py`
+- `webapp/app.py`
+- `requirements.txt`
+- `tests/test_pipeline.py` (nuevo)
+- `bitacora.md`
+
+### 2026-06-13 19:55 - Renombrado de plantilla de variables de entorno y corrección de docstrings
+
+**Autor/agente:** Antigravity (Medium).
+
+**Objetivo:** renombrar la plantilla de variables de entorno para que coincida con el nombre real del archivo cargado (`secrets.env`), y corregir las referencias desactualizadas a `.env` en los comentarios y docstrings del código.
+
+**Decision tomada:**
+
+1. **Renombrado de Plantilla**: Se renombró el archivo `.env.example` a [`secrets.env.example`](file:///E:/Code/python/OpenCode/LabelForge/secrets.env.example) mediante Git para mantener alineación con el archivo real `secrets.env` que carga el proyecto. Se actualizó el comentario de ayuda interno.
+2. **Corrección de Docstring**: En [`webapp/app.py`](file:///E:/Code/python/OpenCode/LabelForge/webapp/app.py), se reemplazó la referencia desactualizada a `.env` por `secrets.env` en la descripción del parámetro `api_key` de la ruta `/api/models`.
+
+**Verificacion realizada:**
+
+- `git status` muestra el renombrado de `.env.example` -> `secrets.env.example`.
+- Compilación del proyecto: exitosa.
+
+**Archivos tocados:**
+
+- `secrets.env.example` (renombrado de `.env.example`)
+- `webapp/app.py`
+- `bitacora.md`
+
+### 2026-06-13 19:57 - Actualización de README.md para reflejar los archivos del sistema y la suite de pruebas
+
+**Autor/agente:** Antigravity (Medium).
+
+**Objetivo:** actualizar la documentación principal (`README.md`) para reflejar con precisión los archivos nuevos creados en el refactor (utils, agreement_metrics, tests), e instruir al usuario sobre el uso de la plantilla `secrets.env.example` y la ejecución de la suite de pruebas.
+
+**Decision tomada:**
+
+1. **Estructura de Carpetas**: Se agregaron descripciones detalladas para [`scripts/agreement_metrics.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/agreement_metrics.py), [`scripts/utils.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/utils.py) y el directorio [`tests/`](file:///E:/Code/python/OpenCode/LabelForge/tests/) en la sección de estructura del proyecto de [`README.md`](file:///E:/Code/python/OpenCode/LabelForge/README.md).
+2. **Guía de Configuración e Instalación**: Se actualizó el paso de configuración de variables de entorno para que haga mención explícita a la copia del archivo [`secrets.env.example`](file:///E:/Code/python/OpenCode/LabelForge/secrets.env.example) como origen. Se añadió el apartado `5. Ejecución de Pruebas Unitarias` con el comando correspondiente.
+
+**Verificacion realizada:**
+
+- Compilación del proyecto y formato Markdown de README.md correctos.
+
+**Archivos tocados:**
+
+- `README.md`
+- `bitacora.md`
+
+
+
+

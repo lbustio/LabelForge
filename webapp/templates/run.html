@@ -5,43 +5,60 @@
   <i class="bi bi-play-circle me-2" style="color:#34d399"></i>Ejecutar etiquetado
 </div>
 
-<!-- Fila 1: Configurar + Estado -->
-<div class="row g-3 mb-4">
-  <div class="col-md-5">
-    <div class="card-dark accent-panel accent-violet h-100">
-      <div class="card-header-label"><i class="bi bi-gear me-1"></i>Configurar run</div>
+<!-- ============================================================ -->
+<!-- FILA 1: Configuración del Run                                 -->
+<!-- ============================================================ -->
+<div class="card-dark accent-panel accent-violet mb-4">
+  <div class="card-header-label"><i class="bi bi-gear me-1"></i>Configuracion de la ejecucion</div>
+  <div class="row g-3">
+    <div class="col-md-5">
       <div class="mb-3">
         <label class="form-label small text-secondary">
-          <i class="bi bi-sliders me-1"></i>Limite de claims
+          <i class="bi bi-sliders me-1"></i>Limite de entradas
         </label>
-        <input type="number" id="limit-input" class="form-control" min="1" placeholder="Vacio = procesar todo">
+        <input type="number" id="limit-input" class="form-control" min="1" value="10" placeholder="Vacio = procesar todo">
         <div class="form-text text-secondary">Util para pruebas rapidas. Deja vacio para procesar el dataset completo.</div>
       </div>
-      <div class="mb-3">
-        <label class="form-label small text-secondary">
-          <i class="bi bi-bookmark-check me-1"></i>Checkpoint
-        </label>
-        <div id="checkpoint-info" class="p-2 rounded" style="background:#0a0c14;border:1px solid #2d3148">
-          <span class="text-secondary small">Cargando...</span>
-        </div>
-        <button class="btn btn-sm btn-danger-soft mt-2" onclick="clearCheckpoint()">
-          <i class="bi bi-x-circle me-1"></i>Limpiar checkpoint
-        </button>
+    </div>
+    <div class="col-md-7">
+      <label class="form-label small text-secondary">
+        <i class="bi bi-bookmark-check me-1"></i>Checkpoint
+      </label>
+      <div id="checkpoint-area">
+        <span class="text-secondary small">Cargando...</span>
+      </div>
+      <div id="config-resumen" class="mt-2 small text-secondary">
+        <span id="config-arbiters">—</span> arbitros · 
+        <span id="config-principles">—</span> principios · 
+        Dataset: <span id="config-dataset">—</span>
       </div>
     </div>
   </div>
-  <div class="col-md-7">
-    <div class="card-dark accent-panel accent-emerald h-100">
-      <div class="card-header-label"><i class="bi bi-activity me-1"></i>Estado del proceso</div>
-      <div class="d-flex align-items-center gap-2 mb-3">
-        <span class="status-dot idle" id="status-dot"></span>
-        <span class="small text-secondary" id="status-text">Inactivo</span>
-      </div>
-      <div class="row g-2 mb-3">
+</div>
+
+<!-- ============================================================ -->
+<!-- FILA 2: Control de Ejecución                                  -->
+<!-- ============================================================ -->
+<div class="card-dark accent-panel accent-emerald mb-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="card-header-label mb-0"><i class="bi bi-activity me-1"></i>Control de ejecucion</div>
+    <div class="d-flex align-items-center gap-2">
+      <span class="status-dot idle" id="status-dot"></span>
+      <span class="small" id="status-text" style="color:#94a3b8">Inactivo</span>
+    </div>
+  </div>
+  <div class="row g-3 align-items-end">
+    <div class="col-md-4">
+      <button id="btn-start" class="btn btn-primary btn-lg w-100" onclick="startRun()">
+        <i class="bi bi-play-fill me-1"></i>Iniciar
+      </button>
+    </div>
+    <div class="col-md-8">
+      <div class="row g-2">
         <div class="col-4">
           <div class="metric-mini accent-emerald text-center">
             <div class="metric-value" id="stat-processed">—</div>
-            <div class="metric-label">Claims OK</div>
+            <div class="metric-label">Entradas OK</div>
           </div>
         </div>
         <div class="col-4">
@@ -57,23 +74,17 @@
           </div>
         </div>
       </div>
-      <div class="d-flex gap-2">
-        <button id="btn-start" class="btn btn-primary" onclick="startRun()">
-          <i class="bi bi-play-fill me-1"></i>Iniciar
-        </button>
-        <button id="btn-stop" class="btn btn-danger" onclick="stopRun()" disabled>
-          <i class="bi bi-stop-fill me-1"></i>Detener
-        </button>
-      </div>
     </div>
   </div>
 </div>
 
-<!-- Fila 2: Live metrics (visible solo durante run) -->
-<div class="card-dark accent-panel accent-emerald mb-3" id="live-stats-panel" style="display:none">
+<!-- ============================================================ -->
+<!-- FILA 3: Monitoreo en Vivo                                     -->
+<!-- ============================================================ -->
+<div class="card-dark accent-panel accent-blue mb-4" id="live-stats-panel">
   <div class="d-flex justify-content-between align-items-center mb-3">
     <div class="card-header-label mb-0"><i class="bi bi-graph-up me-1"></i>Metricas en vivo</div>
-    <span class="badge bg-primary-subtle text-primary border border-primary" id="live-source">Sin run activo</span>
+    <span class="badge bg-primary-subtle text-primary border border-primary" id="live-source">Sin ejecucion activa</span>
   </div>
   <div class="row g-2 mb-3">
     <div class="col-md-2 col-6">
@@ -91,7 +102,7 @@
     <div class="col-md-2 col-6">
       <div class="metric-mini accent-emerald text-center">
         <div class="metric-value" id="live-successful-rows">—</div>
-        <div class="metric-label">Claims OK</div>
+        <div class="metric-label">Entradas OK</div>
       </div>
     </div>
     <div class="col-md-2 col-6">
@@ -103,7 +114,7 @@
     <div class="col-md-2 col-6">
       <div class="metric-mini accent-amber text-center">
         <div class="metric-value" id="live-tpr">—</div>
-        <div class="metric-label">Tokens / claim</div>
+        <div class="metric-label">Tokens / entrada</div>
       </div>
     </div>
     <div class="col-md-2 col-6">
@@ -117,50 +128,48 @@
   <div id="live-last-claim" class="mt-3"></div>
 </div>
 
-<!-- Fila 3: Log en tiempo real + Errores/Cola -->
-<div class="row g-3 mb-3">
-  <div class="col-lg-7">
+<!-- ============================================================ -->
+<!-- FILA 4: Registro de Actividad + Diagnóstico                   -->
+<!-- ============================================================ -->
+<div class="row g-3 mb-4">
+  <div class="col-lg-8">
     <div class="card-dark accent-panel accent-blue h-100">
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <div class="card-header-label mb-0"><i class="bi bi-terminal me-1"></i>Log en tiempo real</div>
-        <div>
-          <button class="btn btn-sm btn-outline-secondary me-2" onclick="clearLog()">
-            <i class="bi bi-eraser me-1"></i>Limpiar
-          </button>
-          <span class="text-secondary small">
-            <i class="bi bi-info-circle me-1"></i>Usa Detener solo si es necesario.
-          </span>
-        </div>
+        <div class="card-header-label mb-0"><i class="bi bi-terminal me-1"></i>Registro de actividad</div>
+        <button class="btn btn-sm btn-outline-secondary" onclick="clearLog()">
+          <i class="bi bi-eraser me-1"></i>Limpiar
+        </button>
       </div>
       <div class="log-box" id="log-box"></div>
+      <div class="mt-3">
+        <button id="btn-stop" class="btn btn-danger w-100" onclick="stopRun()" disabled>
+          <i class="bi bi-stop-fill me-1"></i>Detener ejecucion
+        </button>
+      </div>
     </div>
   </div>
-  <div class="col-lg-5">
-    <div class="row g-3">
-      <div class="col-12">
-        <div class="card-dark accent-panel accent-rose h-100">
-          <div class="d-flex justify-content-between align-items-center mb-2">
-            <div class="card-header-label mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Errores detectados</div>
-            <span class="badge bg-danger-subtle text-danger border border-danger" id="errors-count">0</span>
-          </div>
-          <div id="errors-list" class="small text-secondary" style="max-height:200px;overflow-y:auto">Sin errores detectados.</div>
-        </div>
+  <div class="col-lg-4">
+    <div class="card-dark accent-panel accent-rose mb-3">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="card-header-label mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Errores</div>
+        <span class="badge bg-danger-subtle text-danger border border-danger" id="errors-count">0</span>
       </div>
-      <div class="col-12">
-        <div class="card-dark accent-panel accent-amber h-100">
-          <div class="d-flex justify-content-between align-items-center mb-2">
-            <div class="card-header-label mb-0"><i class="bi bi-queue me-1"></i>Claims en cola de reintentos</div>
-            <span class="badge bg-warning-subtle text-warning border border-warning" id="queued-count">0</span>
-          </div>
-          <div id="queued-list" class="small text-secondary" style="max-height:200px;overflow-y:auto">Sin claims encolados.</div>
-        </div>
+      <div id="errors-list" class="small text-secondary" style="max-height:200px;overflow-y:auto">Sin errores detectados.</div>
+    </div>
+    <div class="card-dark accent-panel accent-amber">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="card-header-label mb-0"><i class="bi bi-queue me-1"></i>Entradas en cola</div>
+        <span class="badge bg-warning-subtle text-warning border border-warning" id="queued-count">0</span>
       </div>
+      <div id="queued-list" class="small text-secondary" style="max-height:200px;overflow-y:auto">Sin entradas encoladas.</div>
     </div>
   </div>
 </div>
 
-<!-- Fila 4: Resultados post-run -->
-<div class="card-dark accent-panel accent-blue mb-3" id="stats-panel" style="display:none">
+<!-- ============================================================ -->
+<!-- FILA 5: Resultados del Output (post-run)                      -->
+<!-- ============================================================ -->
+<div class="card-dark accent-panel accent-emerald mb-4" id="stats-panel" style="display:none">
   <div class="d-flex justify-content-between align-items-center mb-3">
     <div class="card-header-label mb-0"><i class="bi bi-bar-chart me-1"></i>Resumen del ultimo output guardado</div>
     <span class="badge bg-success-subtle text-success border border-success" id="stats-source"></span>
@@ -175,13 +184,13 @@
     <div class="col-md-2 col-6">
       <div class="metric-mini accent-blue text-center">
         <div class="metric-value" id="stats-total-rows">—</div>
-        <div class="metric-label">Claims totales</div>
+        <div class="metric-label">Entradas totales</div>
       </div>
     </div>
     <div class="col-md-2 col-6">
       <div class="metric-mini accent-emerald text-center">
         <div class="metric-value" id="stats-successful-rows">—</div>
-        <div class="metric-label">Claims OK</div>
+        <div class="metric-label">Entradas OK</div>
       </div>
     </div>
     <div class="col-md-2 col-6">
@@ -193,7 +202,7 @@
     <div class="col-md-2 col-6">
       <div class="metric-mini accent-amber text-center">
         <div class="metric-value" id="stats-tpr">—</div>
-        <div class="metric-label">Tokens / claim</div>
+        <div class="metric-label">Tokens / entrada</div>
       </div>
     </div>
     <div class="col-md-2 col-6">
@@ -204,10 +213,13 @@
     </div>
   </div>
   <div id="stats-arbiters-table"></div>
+  <div id="agreement-panel" class="mt-4"></div>
 </div>
 
-<!-- Fila 5: Resultados obtenidos (tabla por claim) -->
-<div class="card-dark accent-panel accent-cyan mb-3" id="results-panel" style="display:none">
+<!-- ============================================================ -->
+<!-- FILA 6: Resultados por Entrada                                -->
+<!-- ============================================================ -->
+<div class="card-dark accent-panel accent-cyan mb-4" id="results-panel" style="display:none">
   <div class="d-flex justify-content-between align-items-center mb-3">
     <div class="card-header-label mb-0"><i class="bi bi-table me-1"></i>Resultados obtenidos</div>
     <span class="badge bg-info-subtle text-info border border-info" id="stats-results-count"></span>
@@ -215,8 +227,10 @@
   <div id="stats-results-table"></div>
 </div>
 
-<!-- Fila 6: Outputs generados -->
-<div class="card-dark accent-panel accent-emerald mb-3">
+<!-- ============================================================ -->
+<!-- FILA 7: Outputs Generados                                     -->
+<!-- ============================================================ -->
+<div class="card-dark accent-panel accent-violet mb-3">
   <div class="card-header-label"><i class="bi bi-folder me-1"></i>Archivos de salida generados</div>
   <div id="outputs-table"><span class="text-secondary small">Cargando...</span></div>
 </div>
@@ -234,22 +248,46 @@ let latestLiveStats = null;
 // ---------- checkpoint ----------
 async function loadCheckpoint() {
   const cp = await fetch('/api/checkpoint/status').then(r => r.json());
-  const el = document.getElementById('checkpoint-info');
+  const area = document.getElementById('checkpoint-area');
   const runState = cp.run_state;
-  if (runState?.status === 'paused') {
-    el.innerHTML = `<div class="text-warning small">
-      <div><i class="bi bi-pause-circle me-1"></i><strong>Run pausado:</strong> ${escapeHtml(runState.run_id || '')}</div>
-      <div class="mt-1">Procesados: <strong>${formatNumber(runState.processed_rows)}</strong> / ${formatNumber(runState.total_rows)}</div>
-      <div class="mt-1">Motivo: <span class="text-danger">${escapeHtml(runState.pause_kind || 'pausa')}</span> — ${escapeHtml(runState.pause_reason || 'sin detalle')}</div>
-      <div class="mt-1 text-secondary">Presiona Iniciar para reanudar desde el checkpoint.</div>
-    </div>`;
-  } else if (cp.exists) {
-    const status = runState?.status ? ` · estado: ${escapeHtml(runState.status)}` : '';
-    el.innerHTML = `<span class="text-warning small"><i class="bi bi-bookmark-check me-1"></i>
-      Checkpoint activo: <strong>${cp.claims_done}</strong> claims procesados (ultimo indice: ${cp.last_index})${status}</span>`;
-  } else {
-    el.innerHTML = '<span class="text-secondary small"><i class="bi bi-bookmark-x me-1"></i>Sin checkpoint — se procesara desde el inicio</span>';
+
+  if (!cp.exists || !runState) {
+    area.innerHTML = '<span class="text-secondary small"><i class="bi bi-bookmark-x me-1"></i>Sin checkpoint — se procesara desde el inicio</span>';
+    return;
   }
+
+  const isPaused = runState.status === 'paused';
+  const resumeBtn = isPaused
+    ? `<button class="btn btn-sm btn-primary mt-2" onclick="document.getElementById(\'btn-start\').click()">
+         <i class="bi bi-play-fill me-1"></i>Reanudar esta ejecucion
+       </button>`
+    : '';
+  const icon = isPaused ? 'bi-pause-circle text-warning' : 'bi-bookmark-check text-info';
+  const label = isPaused ? 'Ejecucion pausada' : 'Checkpoint disponible';
+
+  area.innerHTML = `
+    <div class="p-3 rounded" style="background:#0a0c14;border:1px solid #2d3148">
+      <div class="d-flex justify-content-between align-items-start">
+        <div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi ${icon}"></i>
+            <span class="fw-semibold ${isPaused ? 'text-warning' : 'text-info'}">${label}</span>
+            <span class="text-secondary small">${escapeHtml(runState.run_id || '')}</span>
+          </div>
+          <div class="small" style="color:#94a3b8">
+            <div class="mb-1"><span class="text-secondary">Procesadas:</span> <strong>${formatNumber(runState.processed_rows || 0)}</strong> / ${formatNumber(runState.total_rows || 0)} entradas</div>
+            <div class="mb-1"><span class="text-secondary">Exitosos:</span> ${formatNumber(runState.successful_rows || 0)} · <span class="text-secondary">Fallidos:</span> ${formatNumber(runState.failed_rows || 0)}</div>
+            ${runState.pause_kind ? `<div class="mb-1"><span class="text-secondary">Motivo pausa:</span> <span class="text-danger">${escapeHtml(runState.pause_kind)}</span> — ${escapeHtml(runState.pause_reason || '')}</div>` : ''}
+            <div><span class="text-secondary">Ultima actualizacion:</span> ${escapeHtml(runState.updated_at || '')}</div>
+            ${runState.output_file ? `<div class="mt-1"><span class="text-secondary">Output:</span> ${escapeHtml(runState.output_file)}</div>` : ''}
+          </div>
+          ${resumeBtn}
+        </div>
+        <button class="btn btn-sm btn-danger-soft" onclick="clearCheckpoint()" title="Limpiar checkpoint">
+          <i class="bi bi-x-circle"></i>
+        </button>
+      </div>
+    </div>`;
 }
 
 async function clearCheckpoint() {
@@ -257,6 +295,16 @@ async function clearCheckpoint() {
   await fetch('/api/checkpoint/clear', {method: 'POST'});
   await loadCheckpoint();
   showToast('Checkpoint limpiado');
+}
+
+// ---------- config summary ----------
+async function loadConfigSummary() {
+  try {
+    const cfg = await fetch('/api/config').then(r => r.json());
+    document.getElementById('config-arbiters').textContent = cfg.arbiters.length;
+    document.getElementById('config-principles').textContent = Object.keys(cfg.task?.principles || {}).length;
+    // Extraer nombre del dataset del input_file si existe en run_state
+  } catch(e) { /* silencio */ }
 }
 
 // ---------- outputs ----------
@@ -424,7 +472,7 @@ function parseStats(line) {
     lastArbErrors[arbError[1]] = `${arbError[2]}: ${arbError[3]}`;
   }
 
-  const queued = line.match(/\[claim\s+(\d+)\]\s+Arbitro\s+(\S+)\s+fallo\s+—\s+claim encolado(?:\s+—\s+(.+))?/);
+  const queued = line.match(/\[(?:claim|entrada)\s+(\d+)\]\s+Arbitro\s+(\S+)\s+fallo\s+—\s+(?:claim encolado|entrada encolada)(?:\s+—\s+(.+))?/);
   if (queued) {
     const reason = queued[3] || lastArbErrors[queued[2]] || 'No se encontro detalle previo del error.';
     queuedClaims.push({claim: queued[1], arbiter: queued[2], reason});
@@ -457,9 +505,7 @@ function updateStats() {
 }
 
 function resetLiveStats() {
-  const panel = document.getElementById('live-stats-panel');
-  panel.style.display = '';
-  document.getElementById('live-source').textContent = 'Iniciando run...';
+  document.getElementById('live-source').textContent = 'Iniciando ejecucion...';
   document.getElementById('live-total-tokens').textContent = '0';
   document.getElementById('live-progress').textContent = '0/—';
   document.getElementById('live-successful-rows').textContent = '0';
@@ -482,10 +528,8 @@ async function loadCurrentRunStats() {
 function renderLiveStats(data) {
   if (!data) return;
   latestLiveStats = data;
-  const panel = document.getElementById('live-stats-panel');
-  panel.style.display = '';
 
-  const source = data.source_file || data.run_id || 'run actual';
+  const source = data.source_file || data.run_id || 'ejecucion actual';
   const state = data.active ? 'en vivo' : data.finished ? 'finalizado' : data.pause_kind ? 'pausado' : 'preparado';
   document.getElementById('live-source').textContent = `${source} / ${state}`;
 
@@ -544,7 +588,7 @@ function renderLiveStats(data) {
   if (data.pause_kind && !last) {
     document.getElementById('live-last-claim').innerHTML = `
       <div class="p-3 rounded" style="background:#130b10;border:1px solid #3f1f2a">
-        <div class="fw-semibold text-danger">Run pausado</div>
+        <div class="fw-semibold text-danger">Ejecucion pausada</div>
         <div class="small mt-1">${escapeHtml(data.pause_kind)} — ${escapeHtml(data.pause_reason || 'sin detalle')}</div>
       </div>`;
     return;
@@ -559,7 +603,7 @@ function renderLiveStats(data) {
   document.getElementById('live-last-claim').innerHTML = `
     <div class="p-3 rounded" style="background:#0a0c14;border:1px solid #2d3148">
       <div class="d-flex justify-content-between gap-3 mb-2">
-        <div class="fw-semibold">Ultimo claim procesado</div>
+        <div class="fw-semibold">Ultima entrada procesada</div>
         <div class="${statusClass} small text-nowrap">#${escapeHtml(last.row_index)} / ${status}</div>
       </div>
       <div class="small">${escapeHtml(last.claim || last.reason || '')}</div>
@@ -588,6 +632,38 @@ function formatSeconds(value) {
   return `${n >= 10 ? n.toFixed(1) : n.toFixed(3)}s`;
 }
 
+function formatMetric(value, decimals = 3) {
+  if (value === null || value === undefined || value === '') return '—';
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toFixed(decimals) : '—';
+}
+
+function formatPercent(value) {
+  if (value === null || value === undefined || value === '') return '—';
+  const n = Number(value);
+  return Number.isFinite(n) ? `${(n * 100).toFixed(1)}%` : '—';
+}
+
+function agreementTone(kappa) {
+  if (kappa === null || kappa === undefined || kappa === '') return 'secondary';
+  const n = Number(kappa);
+  if (n >= 0.8) return 'success';
+  if (n >= 0.6) return 'info';
+  if (n >= 0.4) return 'warning';
+  return 'danger';
+}
+
+function agreementInterpretation(kappa) {
+  if (kappa === null || kappa === undefined || kappa === '') return 'sin datos';
+  const n = Number(kappa);
+  if (n >= 0.8) return 'casi perfecto';
+  if (n >= 0.6) return 'sustancial';
+  if (n >= 0.4) return 'moderado';
+  if (n >= 0.2) return 'bajo';
+  if (n >= 0) return 'leve';
+  return 'menor que azar';
+}
+
 function labelBadge(principle, value) {
   let cls = 'bg-secondary-subtle text-secondary border-secondary';
   let text = '—';
@@ -599,6 +675,56 @@ function labelBadge(principle, value) {
 
 function renderConsensus(consensus, principles) {
   return principles.map(p => labelBadge(p, consensus?.[p])).join('');
+}
+
+function renderAgreementMetrics(agreement) {
+  const target = document.getElementById('agreement-panel');
+  if (!target || !agreement) return;
+  const global = agreement.global || {};
+  const rows = Object.entries(agreement.per_principle || {}).map(([principle, m]) => `
+    <tr>
+      <td class="fw-semibold">${escapeHtml(principle)}</td>
+      <td>${formatNumber(m.items)}</td>
+      <td>${formatPercent(m.observed_agreement)}</td>
+      <td><span class="badge bg-${agreementTone(m.fleiss_kappa)}-subtle text-${agreementTone(m.fleiss_kappa)} border border-${agreementTone(m.fleiss_kappa)}">${formatMetric(m.fleiss_kappa)}</span></td>
+      <td>${formatMetric(m.pairwise_cohen_kappa_avg)}</td>
+      <td>${formatMetric(m.krippendorff_alpha_nominal)}</td>
+      <td>${formatPercent(m.positive_rate)}</td>
+    </tr>
+  `).join('');
+
+  target.innerHTML = `
+    <div class="pt-3" style="border-top:1px solid #2d3148">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="card-header-label mb-0"><i class="bi bi-clipboard-data me-1"></i>Agreement entre arbitros</div>
+        <span class="badge bg-${agreementTone(global.fleiss_kappa)}-subtle text-${agreementTone(global.fleiss_kappa)} border border-${agreementTone(global.fleiss_kappa)}">
+          Global: ${agreementInterpretation(global.fleiss_kappa)}
+        </span>
+      </div>
+      <div class="row g-2 mb-3">
+        <div class="col-md-3 col-6"><div class="metric-mini accent-emerald text-center"><div class="metric-value">${formatPercent(global.observed_agreement)}</div><div class="metric-label">Acuerdo observado</div></div></div>
+        <div class="col-md-3 col-6"><div class="metric-mini accent-violet text-center"><div class="metric-value">${formatMetric(global.fleiss_kappa)}</div><div class="metric-label">Fleiss kappa</div></div></div>
+        <div class="col-md-3 col-6"><div class="metric-mini accent-cyan text-center"><div class="metric-value">${formatMetric(global.pairwise_cohen_kappa_avg)}</div><div class="metric-label">Cohen kappa prom.</div></div></div>
+        <div class="col-md-3 col-6"><div class="metric-mini accent-amber text-center"><div class="metric-value">${formatMetric(global.krippendorff_alpha_nominal)}</div><div class="metric-label">Krippendorff alpha</div></div></div>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="table table-dark table-sm mb-2" style="border-color:#2d3148;font-size:.8rem">
+          <thead><tr>
+            <th class="text-secondary">Principio</th>
+            <th class="text-secondary">Items</th>
+            <th class="text-secondary">Acuerdo obs.</th>
+            <th class="text-secondary">Fleiss kappa</th>
+            <th class="text-secondary">Cohen prom.</th>
+            <th class="text-secondary">Krippendorff alpha</th>
+            <th class="text-secondary">Tasa positiva</th>
+          </tr></thead>
+          <tbody>${rows || '<tr><td colspan="7" class="text-secondary">Sin datos de agreement.</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div class="small text-secondary">
+        Reportables para paper: acuerdo observado, Fleiss kappa multi-arbitro, Cohen kappa promedio por pares y Krippendorff alpha nominal.
+      </div>
+    </div>`;
 }
 
 function renderArbiterResult(arb, principles) {
@@ -639,7 +765,7 @@ function renderResultsTable(data) {
   panel.style.display = '';
   document.getElementById('stats-results-count').textContent = data.results_truncated
     ? `Mostrando ${formatNumber(data.results_count)} de ${formatNumber(data.results_total)}`
-    : `${formatNumber(data.results_total)} claims`;
+    : `${formatNumber(data.results_total)} entradas`;
 
   const body = rows.map(row => {
     const meta = [row.dataset, row.class ? `class ${row.class}` : ''].filter(Boolean).join(' / ');
@@ -672,7 +798,7 @@ function renderResultsTable(data) {
         <thead style="position:sticky;top:0;z-index:1">
           <tr>
             <th class="text-secondary">#</th>
-            <th class="text-secondary">Claim</th>
+            <th class="text-secondary">Entrada</th>
             <th class="text-secondary">Consenso</th>
             <th class="text-secondary">Arbitros</th>
             <th class="text-secondary">Tokens</th>
@@ -702,11 +828,11 @@ function renderRunLists() {
 
   const queuedEl = document.getElementById('queued-list');
   if (!queuedClaims.length) {
-    queuedEl.innerHTML = 'Sin claims encolados.';
+    queuedEl.innerHTML = 'Sin entradas encoladas.';
   } else {
     queuedEl.innerHTML = `<div style="max-height:260px;overflow:auto">${queuedClaims.slice(-30).reverse().map(q => `
       <div class="p-2 mb-2 rounded" style="background:#151107;border:1px solid #49350e">
-        <div class="text-warning fw-semibold">Claim ${escapeHtml(q.claim)} · ${escapeHtml(q.arbiter)}</div>
+        <div class="text-warning fw-semibold">Entrada ${escapeHtml(q.claim)} · ${escapeHtml(q.arbiter)}</div>
         <div class="text-secondary" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.76rem">${escapeHtml(q.reason)}</div>
       </div>
     `).join('')}</div>`;
@@ -771,10 +897,12 @@ async function loadRunStats() {
     </table>
     </div>`;
 
+  renderAgreementMetrics(data.agreement);
   renderResultsTable(data);
 }
 
 // ---------- init ----------
+loadConfigSummary();
 loadCheckpoint();
 loadOutputs();
 loadFailedQueue();

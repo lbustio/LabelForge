@@ -1,6 +1,6 @@
 # LabelForge — Analizador de Principios de Persuasión
 
-Este proyecto es una plataforma interactiva y un pipeline robusto diseñado para etiquetar de manera automática y masiva claims de noticias falsas utilizando la taxonomía de **Principios de Persuasión de Ana Ferreira** (Ingeniería Social). El sistema emplea un enfoque multi-agente por consenso (árbitros con distintos perfiles profesionales/personas) con soporte para múltiples proveedores de Modelos de Lenguaje (LLM).
+Este proyecto es una plataforma interactiva y un pipeline robusto diseñado para etiquetar de manera automática y masiva entradas textuales utilizando taxonomías configurables, incluida la taxonomía de **Principios de Persuasión de Ana Ferreira** (Ingeniería Social). El sistema emplea un enfoque multi-agente por consenso (árbitros con distintos perfiles profesionales/personas) con soporte para múltiples proveedores de Modelos de Lenguaje (LLM).
 
 ---
 
@@ -8,7 +8,7 @@ Este proyecto es una plataforma interactiva y un pipeline robusto diseñado para
 
 El proyecto consta de dos partes principales que interactúan entre sí a través del archivo de configuración central:
 
-1. **Pipeline de Etiquetado (CLI)**: Ejecuta el procesamiento secuencial del dataset, realiza llamadas a las APIs de los LLMs, valida los formatos JSON devueltos, gestiona de forma dinámica los límites de peticiones (Rate Limits), almacena checkpoints para reanudar el proceso en caso de fallo, procesa la cola de claims fallidos, calcula el consenso mayoritario y genera reportes detallados de **uso de tokens y latencia** por árbitro.
+1. **Pipeline de Etiquetado (CLI)**: Ejecuta el procesamiento secuencial del dataset, realiza llamadas a las APIs de los LLMs, valida los formatos JSON devueltos, gestiona de forma dinámica los límites de peticiones (Rate Limits), almacena checkpoints para reanudar el proceso en caso de fallo, procesa la cola de entradas fallidas, calcula el consenso mayoritario y genera reportes detallados de **uso de tokens y latencia** por árbitro.
 2. **Interfaz de Control (WebApp Flask)**: Proporciona un panel de control interactivo para administrar los árbitros, modificar los principios y las plantillas de prompts, ajustar parámetros de procesamiento en tiempo real, lanzar el etiquetado, visualizar los registros (logs) del sistema en tiempo real y consultar el **panel de métricas de tokens y latencia** del último run.
 
 ```mermaid
@@ -25,7 +25,7 @@ flowchart TD
         Runner[scripts/label_persuasion.py]
         Limiter[Dynamic Rate Limiter]
         Checkpoint[Checkpoint Manager]
-        FailedQ[Failed Claims Queue]
+        FailedQ[Failed Entries Queue]
         Metrics[Token & Latency Tracker]
     end
 
@@ -61,7 +61,7 @@ flowchart TD
 
 ## 🎯 Principios de Persuasión (Taxonomía de Ana Ferreira)
 
-El sistema analiza y evalúa la presencia (1) o ausencia (0) de cinco tácticas de influencia y persuasión psicológica en cada claim:
+El sistema analiza y evalúa la presencia (1) o ausencia (0) de cinco tácticas de influencia y persuasión psicológica en cada entrada textual:
 
 *   **`AUTH` (Authority / Autoridad)**: Apela a figuras públicas, expertos, instituciones oficiales o credenciales para otorgar credibilidad o carácter coercitivo al mensaje.
 *   **`SP` (Social Proof / Consenso Social)**: Implica que una creencia o comportamiento es compartido por una gran cantidad de personas, explotando la conformidad social y la conducta de rebaño.
@@ -73,12 +73,12 @@ El sistema analiza y evalúa la presencia (1) o ausencia (0) de cinco tácticas 
 
 ## 🌟 Características Clave
 
-*   **Consenso por Mayoría**: Para cada claim, múltiples árbitros independientes (por ejemplo, 3) evalúan de forma paralela. Se calcula la predicción de consenso mediante votación mayoritaria simple.
-*   **Árbitros Expertos con Personas**: Cada árbitro se configura con un rol/persona particular (p. ej., Psicólogo Clínico, Especialista en Ciberseguridad, Investigador Forense) y una instrucción de sistema (`system_prompt`) adaptada para que evalúe el claim desde su perspectiva profesional particular.
+*   **Consenso por Mayoría**: Para cada entrada, múltiples árbitros independientes (por ejemplo, 3) evalúan de forma paralela. Se calcula la predicción de consenso mediante votación mayoritaria simple.
+*   **Árbitros Expertos con Personas**: Cada árbitro se configura con un rol/persona particular (p. ej., Psicólogo Clínico, Especialista en Ciberseguridad, Investigador Forense) y una instrucción de sistema (`system_prompt`) adaptada para que evalúe el texto desde su perspectiva profesional particular.
 *   **Dynamic Rate Limiter (Limitador Dinámico)**: Adapta el delay de peticiones automáticamente basándose en las respuestas del servidor. Si recibe un código `429` (Rate Limit) o un error `5xx`, aplica un multiplicador de *backoff* exponencial; si las llamadas tienen éxito de forma consecutiva, reduce el delay de manera progresiva hasta el límite inferior seguro.
 *   **Resiliencia (Checkpoints y Cola de Reintentos)**:
-    *   **Puntos de control**: Guarda el progreso cada $N$ claims. Si la ejecución se detiene, se reanuda desde el último claim procesado sin perder el trabajo completado.
-    *   **Manejo de errores**: Si un claim falla con un árbitro, se encola en `failed_queue.jsonl`. Al final de la corrida, el sistema reduce la velocidad del rate limiter e intenta procesar de nuevo únicamente los claims fallidos antes de generar el reporte final.
+    *   **Puntos de control**: Guarda el progreso cada $N$ entradas. Si la ejecución se detiene, se reanuda desde la última entrada procesada sin perder el trabajo completado.
+    *   **Manejo de errores**: Si una entrada falla con un árbitro, se encola en `failed_queue.jsonl`. Al final de la corrida, el sistema reduce la velocidad del rate limiter e intenta procesar de nuevo únicamente las entradas fallidas antes de generar el reporte final.
 *   **Contabilidad Exhaustiva de Tokens**: Cada llamada al LLM registra los tokens de entrada (prompt), salida (completion) y total, tanto por llamada individual (en el CSV) como acumulados por árbitro y globalmente en el reporte final (log y webapp).
 *   **Contabilidad Exhaustiva de Latencia**: El tiempo exacto de cada petición al LLM se mide con `time.perf_counter()` y se almacena en el CSV. El reporte final incluye latencia promedio, mínima, máxima y total acumulada por árbitro.
 *   **Soporte Multimodelo y Multiproveedor**: Integra los SDKs oficiales de Google GenAI (`google-genai`), Vertex AI (`google-cloud-aiplatform`), Anthropic (`anthropic`) y OpenAI (`openai`), además de APIs locales u open-source compatibles con el protocolo de OpenAI (Ollama, LM Studio, vLLM).
@@ -93,11 +93,13 @@ El sistema analiza y evalúa la presencia (1) o ausencia (0) de cinco tácticas 
 *   **`scripts/`**:
     *   **[`label_persuasion.py`](file:///e:/Code/python/OpenCode/LabelForge/scripts/label_persuasion.py)**: Contiene la lógica central del pipeline: controladores de API por proveedor, limitador dinámico de peticiones, procesamiento de checkpoints, consenso, **medición de tokens y latencia por llamada**, y generación del reporte final.
     *   **[`arbiters_config.json`](file:///e:/Code/python/OpenCode/LabelForge/scripts/arbiters_config.json)**: Archivo JSON central que almacena la configuración de los principios, los árbitros, los prompts del sistema y los parámetros del limitador de velocidad.
+    *   **[`agreement_metrics.py`](file:///e:/Code/python/OpenCode/LabelForge/scripts/agreement_metrics.py)**: Módulo compartido de cálculo de métricas de acuerdo inter-árbitros (Fleiss Kappa, Cohen's Kappa, Krippendorff's Alpha).
+    *   **[`utils.py`](file:///e:/Code/python/OpenCode/LabelForge/scripts/utils.py)**: Helper utilitario para parseo numérico y tipos de datos seguros.
 *   **`webapp/`**:
     *   **[`app.py`](file:///e:/Code/python/OpenCode/LabelForge/webapp/app.py)**: Backend Flask de la aplicación web que gestiona los servicios API, el renderizado de plantillas, la ejecución del subproceso CLI de etiquetado y el **endpoint `/api/run/stats`** para métricas de tokens y latencia.
     *   **`templates/`**:
         *   [`base.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/base.html): Estructura HTML común y hoja de estilos globales (diseño web oscuro y premium con Bootstrap).
-        *   [`index.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/index.html): Panel de control con estadísticas rápidas (árbitros, principios, salidas generadas, claims en checkpoint).
+        *   [`index.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/index.html): Panel de control con estadísticas rápidas (árbitros, principios, salidas generadas, entradas en checkpoint).
         *   [`arbiters.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/arbiters.html): Panel de gestión de árbitros (CRUD completo, asignación de modelos, tokens y claves API).
         *   [`principles.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/principles.html): Visualización y edición de los principios de persuasión y la plantilla del prompt del usuario.
         *   [`processing.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/processing.html): Panel de configuración de parámetros de red, checkpoints y cálculos de tiempos/delays recomendados.
@@ -106,6 +108,7 @@ El sistema analiza y evalúa la presencia (1) o ausencia (0) de cinco tácticas 
 *   **`output/`**: Carpeta de destino para los datasets etiquetados resultantes (`labeled_YYYYMMDD_HHMMSS.csv`).
 *   **`checkpoints/`**: Almacena de forma temporal los archivos `checkpoint.json` y `failed_queue.jsonl`.
 *   **`logs/`**: Almacena los registros detallados de cada ejecución del pipeline (`run_YYYYMMDD_HHMMSS.log`), incluyendo el reporte completo de tokens y latencia al final.
+*   **`tests/`**: Contiene la suite de pruebas unitarias automáticas ([`test_pipeline.py`](file:///e:/Code/python/OpenCode/LabelForge/tests/test_pipeline.py)) para auditar el correcto funcionamiento de utilidades, métricas y seguridad.
 
 ---
 
@@ -129,8 +132,8 @@ Alternativamente, si utilizas un entorno de Python estándar (`venv`), instala l
 pip install -r requirements.txt
 ```
 
-### 3. Configuración de Variables de Entorno (`.env`)
-Renombra o edita el archivo [`.env`](file:///e:/Code/python/OpenCode/LabelForge/.env) en la raíz del proyecto para incluir tus credenciales y claves API de los diferentes proveedores que desees utilizar:
+### 3. Configuración de Variables de Entorno (`secrets.env`)
+Crea el archivo [`secrets.env`](file:///e:/Code/python/OpenCode/LabelForge/secrets.env) en la raíz del proyecto copiando la plantilla [`secrets.env.example`](file:///e:/Code/python/OpenCode/LabelForge/secrets.env.example) y edítalo para incluir tus credenciales y claves API de los diferentes proveedores que desees utilizar:
 
 ```env
 # Google Gemini (API Key estándar)
@@ -156,7 +159,15 @@ gcloud auth application-default login
 gcloud auth application-default set-quota-project TU_PROJECT_ID
 ```
 
-Esto guarda las credenciales localmente para que el SDK de Vertex AI las use de forma automática sin necesidad de una API Key en el `.env`.
+Esto guarda las credenciales localmente para que el SDK de Vertex AI las use de forma automática sin necesidad de una API Key en `secrets.env`.
+
+### 5. Ejecución de Pruebas Unitarias
+
+El proyecto cuenta con pruebas automáticas para garantizar la estabilidad y consistencia de las métricas matemáticas y helpers de conversión. Ejecútalas usando:
+
+```bash
+python -m unittest tests/test_pipeline.py
+```
 
 ---
 
@@ -182,7 +193,7 @@ Puedes especificar argumentos adicionales en consola:
 1.  **Panel de Inicio**: Observa el estado actual del dataset, los árbitros activos y el último checkpoint.
 2.  **Gestionar Árbitros**: Ve a la pestaña **Arbitros** para agregar nuevos perfiles o modificar los modelos de lenguaje utilizados por cada uno (p. ej., cambiar de `gemini-2.5-pro` a `gemini-2.5-flash`).
 3.  **Configurar Parámetros**: En **Procesamiento**, selecciona tu nivel de facturación (Free o Paid) para recibir recomendaciones automáticas de delay seguro. Ajusta los límites según el rendimiento observado.
-4.  **Ejecutar**: En la pestaña **Ejecutar**, define una cantidad límite de claims para probar (ej. `10` o `50`) y presiona **Iniciar Etiquetado**. Verás el progreso detallado y los reportes directamente en el visor de logs.
+4.  **Ejecutar**: En la pestaña **Ejecutar**, define una cantidad límite de entradas para probar (ej. `10` o `50`) y presiona **Iniciar Etiquetado**. Verás el progreso detallado y los reportes directamente en el visor de logs.
 5.  **Panel de Métricas**: Al finalizar el run, el panel **"Tokens y Latencia del último run"** se actualiza automáticamente mostrando las estadísticas completas de consumo (ver sección siguiente).
 
 ---
@@ -192,13 +203,13 @@ Puedes especificar argumentos adicionales en consola:
 Para ejecutar el pipeline directamente desde consola sin usar el servidor web, utiliza el script [`main_label.py`](file:///e:/Code/python/OpenCode/LabelForge/main_label.py):
 
 ```bash
-# Procesar únicamente los primeros 10 claims para prueba
+# Procesar únicamente las primeras 10 entradas para prueba
 python main_label.py --limit 10
 
 # Procesar todo el dataset completo
 python main_label.py
 
-# Utilizar un archivo de configuración JSON personalizado y procesar 50 claims
+# Utilizar un archivo de configuración JSON personalizado y procesar 50 entradas
 python main_label.py --config scripts/mi_configuracion.json --limit 50
 
 # Especificar un dataset de entrada diferente
@@ -207,7 +218,7 @@ python main_label.py --input data/otro_dataset.csv
 
 #### Argumentos soportados en CLI:
 *   `--config`: Ruta absoluta o relativa al JSON de configuración (default: `scripts/arbiters_config.json`).
-*   `--input`: Ruta al archivo CSV con los claims a etiquetar (default: `data/all_datasets_en_es/all_datasets_en_es.csv`). El archivo CSV de entrada debe contener, como mínimo, una columna llamada `claim`.
+*   `--input`: Ruta al archivo CSV con las entradas a etiquetar (default: `data/all_datasets_en_es/all_datasets_en_es.csv`). Por compatibilidad con datasets previos, el CSV de entrada debe contener una columna llamada `claim`; en la UI y documentación nueva esa columna se interpreta como el texto de la entrada.
 *   `--limit`: Limita la cantidad de filas a procesar (entero). Si se omite, se procesará todo el archivo.
 
 ---
@@ -216,7 +227,7 @@ python main_label.py --input data/otro_dataset.csv
 
 El sistema registra de forma exhaustiva el consumo de tokens y el tiempo de respuesta de cada llamada a los LLMs. Esta información se almacena en **tres lugares simultáneamente**:
 
-### 1. En el CSV de salida (por claim y por árbitro)
+### 1. En el CSV de salida (por entrada y por árbitro)
 
 Cada fila del CSV etiquetado incluye las siguientes columnas adicionales para cada árbitro (`[arb_id]` es el identificador del árbitro, p. ej. `arb1`, `arb2`, `arb3`):
 
@@ -227,7 +238,7 @@ Cada fila del CSV etiquetado incluye las siguientes columnas adicionales para ca
 | `total_tokens_[arb_id]` | Suma de prompt + completion tokens para ese árbitro |
 | `latency_s_[arb_id]` | Tiempo de respuesta de la llamada al LLM en segundos |
 
-> Los campos se marcan con `-1` si el claim falló definitivamente en ese árbitro.
+> Los campos se marcan con `-1` si la entrada falló definitivamente en ese árbitro.
 
 ### 2. En el archivo de log (reporte final al terminar el run)
 
@@ -251,7 +262,7 @@ Al finalizar cada ejecución, el reporte aparece en consola **y** se guarda auto
 
 La pestaña **Ejecutar** incluye el panel **"Tokens y Latencia del último run"** que se actualiza automáticamente al terminar cada ejecución. El panel muestra:
 
-*   **KPIs globales**: Tokens totales del run, número de claims etiquetados y promedio de tokens por claim.
+*   **KPIs globales**: Tokens totales del run, número de entradas etiquetadas y promedio de tokens por entrada.
 *   **Tabla por árbitro**: Tokens de entrada, salida y total; número de llamadas; latencia promedio, mínima/máxima y latencia total acumulada.
 
 El panel también se carga al abrir la página si ya existe un CSV previo, gracias al endpoint `GET /api/run/stats`.
@@ -269,12 +280,12 @@ El CSV resultante conservará todas las columnas originales del dataset e incorp
 | `[P]_[arbiter_id]` | Evaluación individual de ese árbitro (1 = presente, 0 = ausente) |
 | `[P]_[arbiter_id]_why` | Justificación breve en lenguaje natural aportada por el árbitro |
 | `[P]_consensus` | Evaluación por mayoría consensuada de todos los árbitros (1 ó 0) |
-| `prompt_tokens_[arbiter_id]` | Tokens de entrada consumidos por ese árbitro en este claim |
-| `completion_tokens_[arbiter_id]` | Tokens de salida generados por ese árbitro en este claim |
-| `total_tokens_[arbiter_id]` | Total de tokens consumidos por ese árbitro en este claim |
+| `prompt_tokens_[arbiter_id]` | Tokens de entrada consumidos por ese árbitro en esta entrada |
+| `completion_tokens_[arbiter_id]` | Tokens de salida generados por ese árbitro en esta entrada |
+| `total_tokens_[arbiter_id]` | Total de tokens consumidos por ese árbitro en esta entrada |
 | `latency_s_[arbiter_id]` | Latencia de la llamada al LLM de ese árbitro en segundos |
 
-Si un claim falla permanentemente después de la cola de reintentos, el consenso se marcará con `-1` y la justificación se registrará como `FAILED`.
+Si una entrada falla permanentemente después de la cola de reintentos, el consenso se marcará con `-1` y la justificación se registrará como `FAILED`.
 
 ---
 
@@ -295,7 +306,7 @@ Si un claim falla permanentemente después de la cola de reintentos, el consenso
 | `GET` | `/api/outputs` | Lista de CSVs generados en `output/` |
 | `GET` | `/api/checkpoint/status` | Estado del checkpoint actual |
 | `POST` | `/api/checkpoint/clear` | Limpia el checkpoint activo |
-| `GET` | `/api/failed-queue` | Cola de claims fallidos pendientes |
+| `GET` | `/api/failed-queue` | Cola de entradas fallidas pendientes |
 | `GET` | `/api/config` | Configuración completa (árbitros + principios) |
 | `POST` | `/api/config/save` | Guarda la configuración actual |
 

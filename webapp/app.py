@@ -16,6 +16,12 @@ from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
 # ---------------------------------------------------------------------------
+# Módulo compartido de métricas de acuerdo y utilidades
+# ---------------------------------------------------------------------------
+from scripts.agreement_metrics import compute_agreement_metrics
+from scripts.utils import safe_int as _safe_int, safe_float as _safe_float
+
+# ---------------------------------------------------------------------------
 # Rutas
 # ---------------------------------------------------------------------------
 BASE_DIR        = Path(__file__).resolve().parent.parent
@@ -25,7 +31,7 @@ SCRIPTS_DIR     = BASE_DIR / "scripts"
 OUTPUT_DIR      = BASE_DIR / "output"
 CHECKPOINTS_DIR = BASE_DIR / "checkpoints"
 
-load_dotenv(BASE_DIR / ".env")
+load_dotenv(BASE_DIR / "secrets.env")
 
 app = Flask(__name__)
 
@@ -47,7 +53,7 @@ GEMINI_MODEL_DESCRIPTIONS = {
     "gemini-2.5-flash-lite":        "Version ligera de 2.5 Flash. Optimo para alto volumen con bajo costo.",
     "gemini-2.0-flash-lite":        "Version mas ligera. Maximo throughput, menor precision analitica.",
     "gemini-2.0-flash-lite-001":    "Flash-Lite estable. Para procesar grandes volumenes rapidamente.",
-    "gemini-flash-lite-latest":     "Ultima Flash-Lite. Minimo costo por claim, menor razonamiento.",
+    "gemini-flash-lite-latest":     "Ultima Flash-Lite. Minimo costo por entrada, menor razonamiento.",
     "gemma-4-26b-a4b-it":           "Modelo abierto Gemma 26B. Buena capacidad para analisis textual.",
     "gemma-4-31b-it":               "Modelo abierto Gemma 31B. Mayor capacidad que 26B para razonamiento.",
 }
@@ -57,7 +63,7 @@ ANTHROPIC_MODEL_DESCRIPTIONS = {
     "claude-opus-4-0":              "Opus de ultima generacion. Capacidad analitica excepcional.",
     "claude-sonnet-4-5":            "Balance ideal calidad/velocidad. Muy recomendado para arbitros.",
     "claude-sonnet-4-0":            "Sonnet de alta capacidad. Excelente comprension contextual.",
-    "claude-haiku-4-5":             "Haiku rapido y eficiente. Ideal para alto volumen de claims.",
+    "claude-haiku-4-5":             "Haiku rapido y eficiente. Ideal para alto volumen de entradas.",
     "claude-3-5-sonnet-20241022":   "Sonnet 3.5 estable. Excelente razonamiento y velocidad.",
     "claude-3-5-haiku-20241022":    "Haiku 3.5 rapido. Buen balance velocidad/precision.",
     "claude-3-opus-20240229":       "Opus 3 de alta capacidad. Muy buen razonamiento analitico.",
@@ -158,7 +164,7 @@ def compute_min_delay(model_id: str, tier: str, n_arbiters: int = 1) -> dict:
     """
     Calcula el delay minimo recomendado en segundos dado:
       - Los limites RPM del modelo
-      - El numero de arbitros (cada claim genera N llamadas, una por arbitro)
+      - El numero de arbitros (cada entrada genera N llamadas, una por arbitro)
 
     Formula: delay_min = (60 / RPM) * n_arbiters
     Se agrega un 20% de margen de seguridad.
@@ -168,14 +174,14 @@ def compute_min_delay(model_id: str, tier: str, n_arbiters: int = 1) -> dict:
 
     # Segundos por request a este RPM
     secs_per_req = 60.0 / rpm
-    # Con N arbitros por claim, el delay entre claims debe ser al menos:
+    # Con N arbitros por entrada, el delay entre entradas debe ser al menos:
     delay_min = secs_per_req * n_arbiters * 1.2  # 20% de margen
 
     # Nivel de alerta
     if rpm <= 5:
         alert_level = "danger"
         alert_msg   = (f"Modelo muy restrictivo en tier gratuito ({rpm} RPM). "
-                       f"Con {n_arbiters} arbitros necesitas al menos {delay_min:.1f}s entre claims. "
+                       f"Con {n_arbiters} arbitros necesitas al menos {delay_min:.1f}s entre entradas. "
                        f"Considera activar facturacion o usar un modelo Flash.")
     elif rpm <= 15:
         alert_level = "warning"
@@ -445,7 +451,7 @@ def api_models():
     Devuelve los modelos disponibles para un proveedor dado.
     Query params:
       - provider : gemini | vertex_gemini | anthropic | openai | ollama | openai_compat
-      - api_key  : opcional, override de la key del .env
+      - api_key  : opcional, override de la key del secrets.env
       - base_url : para ollama / openai_compat
       - project  : Google Cloud project para vertex_gemini
       - location : region Vertex AI para vertex_gemini
@@ -483,7 +489,7 @@ def api_models():
 
 def _list_gemini_models(api_key: str) -> list:
     if not api_key:
-        raise ValueError("Se requiere GEMINI_API_KEY en .env o como parametro.")
+        raise ValueError("Se requiere GEMINI_API_KEY en secrets.env o como parametro.")
     from google import genai as gai
     client = gai.Client(api_key=api_key)
     raw    = list(client.models.list())
@@ -531,7 +537,7 @@ def _list_vertex_gemini_models(project: str, location: str) -> list:
 
 def _list_anthropic_models(api_key: str) -> list:
     if not api_key:
-        raise ValueError("Se requiere ANTHROPIC_API_KEY en .env o como parametro.")
+        raise ValueError("Se requiere ANTHROPIC_API_KEY en secrets.env o como parametro.")
     import anthropic
     client = anthropic.Anthropic(api_key=api_key)
     raw    = client.models.list(limit=50)
@@ -546,7 +552,7 @@ def _list_anthropic_models(api_key: str) -> list:
 
 def _list_openai_models(api_key: str) -> list:
     if not api_key:
-        raise ValueError("Se requiere OPENAI_API_KEY en .env o como parametro.")
+        raise ValueError("Se requiere OPENAI_API_KEY en secrets.env o como parametro.")
     from openai import OpenAI
     client = OpenAI(api_key=api_key)
     raw    = client.models.list()
@@ -810,6 +816,8 @@ def _build_arbiter(data: dict, existing: dict = None) -> dict:
             "api_key_env":      p.get("api_key_env", ""),
             "api_key_override": p.get("api_key_override", ""),
             "base_url":         p.get("base_url", ""),
+            "vertex_project":   p.get("vertex_project", ""),
+            "vertex_location":  p.get("vertex_location", "us-central1"),
         }
 
     if "generation_config" in data:
@@ -858,7 +866,7 @@ def api_update_prompt_template():
     if not template:
         return jsonify({"error": "El template no puede estar vacio"}), 400
     if "{claim}" not in template:
-        return jsonify({"error": "El template debe contener {claim}"}), 400
+        return jsonify({"error": "El template debe contener {claim}, que representa el texto de la entrada"}), 400
     cfg["task"]["user_prompt_template"] = template
     if "include_justifications" in data:
         cfg["task"]["include_justifications"] = bool(data.get("include_justifications"))
@@ -1082,10 +1090,10 @@ def _describe_output_csv(path: Path) -> dict:
     except Exception:
         return info
 
-    run_label = f"Run del {info['run_timestamp']}" if info["run_timestamp"] else "Output etiquetado"
+    run_label = f"Ejecucion del {info['run_timestamp']}" if info["run_timestamp"] else "Output etiquetado"
     parts = [run_label]
     if info["row_count"] is not None:
-        parts.append(f"{info['row_count']} claims")
+        parts.append(f"{info['row_count']} entradas")
     else:
         parts.append("archivo grande; conteo no calculado en la vista")
     if info["principles"]:
@@ -1096,7 +1104,7 @@ def _describe_output_csv(path: Path) -> dict:
     if info["has_tokens"] and info["has_latency"]:
         parts.append("incluye tokens y latencia")
     elif info["has_tokens"]:
-        parts.append("incluye tokens; no trae latencia por ser un run anterior")
+        parts.append("incluye tokens; no trae latencia por ser una ejecucion anterior")
     info["description"] = "; ".join(parts) + "."
     return info
 
@@ -1137,23 +1145,6 @@ def api_delete_output(name):
     path.unlink()
     return jsonify({"ok": True})
 
-
-def _safe_int(value, default=None):
-    if value in (None, ""):
-        return default
-    try:
-        return int(float(value))
-    except (ValueError, TypeError):
-        return default
-
-
-def _safe_float(value, default=None):
-    if value in (None, ""):
-        return default
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        return default
 
 
 def _detect_principles(fieldnames: list) -> list:
@@ -1226,11 +1217,14 @@ def _build_result_rows(rows: list, principles: list, arbiter_ids: list, limit: i
     return result_rows
 
 
+
+
+
 @app.route("/api/run/stats", methods=["GET"])
 def api_run_stats():
     """
     Lee el ultimo CSV etiquetado y calcula estadisticas de tokens,
-    latencia acumulada por arbitro y una tabla de resultados por claim.
+    latencia acumulada por arbitro y una tabla de resultados por entrada.
     """
     import csv as _csv
 
@@ -1313,6 +1307,7 @@ def api_run_stats():
         "total_latency_s":     round(total_latency_global, 3),
         "arbiters":            stats,
         "principles":          principles,
+        "agreement":           compute_agreement_metrics(rows, principles, arbiter_ids),
         "results_total":       len(rows),
         "results_count":       min(len(rows), result_limit),
         "results_limit":       result_limit,
