@@ -1385,7 +1385,13 @@ def api_checkpoint_clear():
 
 
 # ---------------------------------------------------------------------------
-# Entry point
+# Entry point  (ejecucion directa: python webapp/app.py)
+# Para produccion / uso normal usa main_webapp.py que acepta --host y --port.
+# Puerto 7860: libre en macOS (5000 ocupado por AirPlay), Windows y Linux.
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    app.run(debug=True, port=5000, threaded=True)
+    import os as _os
+    _host = _os.environ.get("LABELFORGE_HOST", "127.0.0.1")
+    _port = int(_os.environ.get("LABELFORGE_PORT", "7860"))
+    print(f"  LabelForge  →  http://{_host}:{_port}")
+    app.run(debug=True, host=_host, port=_port, threaded=True)

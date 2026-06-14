@@ -3,20 +3,30 @@ main_webapp.py
 --------------
 Entrypoint principal para la webapp de configuracion y lanzamiento del etiquetado.
 
+Puerto por defecto: 7860 (compatible con macOS, Windows y Linux sin conflictos).
+  - macOS: el puerto 5000 esta reservado por AirPlay Receiver desde Monterey.
+  - 7860 es libre en los tres sistemas operativos y no requiere privilegios.
+
 Uso:
     python main_webapp.py [--host HOST] [--port PORT] [--debug]
 
 Ejemplos:
-    # Arrancar en modo desarrollo (localhost:5000)
+    # Arrancar con los valores por defecto (127.0.0.1:7860)
     python main_webapp.py
 
-    # Arrancar en un puerto diferente
+    # Cambiar el puerto
     python main_webapp.py --port 8080
 
-    # Arrancar accesible desde la red local
-    python main_webapp.py --host 0.0.0.0 --port 5000
+    # Accesible desde la red local (ej: para probar desde otro dispositivo)
+    python main_webapp.py --host 0.0.0.0 --port 7860
+
+Variables de entorno (se pueden poner en secrets.env):
+    LABELFORGE_HOST  - host por defecto (ej: 0.0.0.0)
+    LABELFORGE_PORT  - puerto por defecto (ej: 8080)
+    Los argumentos --host y --port tienen precedencia sobre las variables de entorno.
 """
 
+import os
 import sys
 import argparse
 from pathlib import Path
@@ -26,6 +36,14 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Cargar variables de entorno antes de parsear argumentos
+from dotenv import load_dotenv
+load_dotenv(ROOT / "secrets.env")
+
+# Valores por defecto: CLI > env var > hardcoded
+_DEFAULT_HOST = os.environ.get("LABELFORGE_HOST", "127.0.0.1")
+_DEFAULT_PORT = int(os.environ.get("LABELFORGE_PORT", "7860"))
+
 from webapp.app import app
 
 
@@ -34,12 +52,12 @@ def main():
         description="Webapp de configuracion y lanzamiento del etiquetado de principios de persuasion."
     )
     parser.add_argument(
-        "--host", default="127.0.0.1",
-        help="Host en el que escucha la webapp (default: 127.0.0.1)"
+        "--host", default=_DEFAULT_HOST,
+        help=f"Host en el que escucha la webapp (default: {_DEFAULT_HOST}, override con LABELFORGE_HOST)"
     )
     parser.add_argument(
-        "--port", type=int, default=5000,
-        help="Puerto en el que escucha la webapp (default: 5000)"
+        "--port", type=int, default=_DEFAULT_PORT,
+        help=f"Puerto en el que escucha la webapp (default: {_DEFAULT_PORT}, override con LABELFORGE_PORT)"
     )
     parser.add_argument(
         "--debug", action="store_true", default=False,
@@ -47,8 +65,8 @@ def main():
     )
     args = parser.parse_args()
 
-    print(f"Iniciando webapp en http://{args.host}:{args.port}")
-    print("Presiona Ctrl+C para detener.")
+    print(f"  LabelForge  →  http://{args.host}:{args.port}")
+    print("  Presiona Ctrl+C para detener.")
 
     app.run(
         host=args.host,
