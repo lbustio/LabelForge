@@ -27,6 +27,9 @@ import time
 import logging
 import argparse
 import warnings
+import getpass
+import ast
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -46,6 +49,13 @@ from scripts.agreement_metrics import (
     compute_consensus_metrics,
     flatten_consensus_metrics,
 )
+from scripts.arbiters_io import (
+    export_arbiters_to_file,
+    import_arbiters_from_file,
+    merge_arbiters,
+)
+from scripts.secrets_io import provider_api_key_env, secrets_env_path, set_secret_value
+from scripts.provider_preflight import require_provider_preflight
 from scripts.utils import number as _number
 
 # ---------------------------------------------------------------------------
@@ -54,7 +64,8 @@ from scripts.utils import number as _number
 BASE_DIR    = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = Path(__file__).resolve().parent
 
-load_dotenv(BASE_DIR / "secrets.env")
+SECRETS_ENV_PATH = secrets_env_path(BASE_DIR)
+load_dotenv(SECRETS_ENV_PATH)
 
 OUTPUT_DIR     = BASE_DIR / "output"
 LOG_DIR        = BASE_DIR / "logs"
@@ -84,6 +95,8 @@ logging.basicConfig(
     ],
 )
 log = logging.getLogger(__name__)
+for noisy_logger in ("httpx", "httpcore", "anthropic", "openai", "google"):
+    logging.getLogger(noisy_logger).setLevel(logging.WARNING)
 
 METRIC_PREFIX = "__RUN_METRIC__ "
 WEBAPP_METRICS_ENABLED = os.environ.get("DATA_LABELING_WEBAPP_METRICS") == "1"
@@ -116,6 +129,50 @@ def write_json_atomic(path: Path, data: dict):
         f.flush()
         os.fsync(f.fileno())
     tmp.replace(path)
+
+
+def read_config_file(config_path: Path) -> dict:
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config no encontrado: {config_path}")
+    with open(config_path, "r", encoding="utf-8-sig") as f:
+        return json.load(f)
+
+
+def write_config_file(config_path: Path, cfg: dict):
+    tmp = config_path.with_suffix(config_path.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp.replace(config_path)
+
+
+def resolve_arbiters_password(args) -> str:
+    if args.arbiters_password:
+        return args.arbiters_password
+    if args.arbiters_password_file:
+        return Path(args.arbiters_password_file).read_text(encoding="utf-8").strip()
+    return getpass.getpass("Contrasena para arbitros cifrados: ")
+
+
+def verify_provider_key(provider: str, api_key: str, base_url: str = "") -> int:
+    if provider == "gemini":
+        from google import genai as gai
+        client = gai.Client(api_key=api_key)
+        return len(list(client.models.list()))
+    if provider == "anthropic":
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        return len(client.models.list(limit=50).data)
+    if provider == "openai":
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
+        return len(client.models.list().data)
+    if provider == "openai_compat":
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key or "local", base_url=base_url)
+        return len(client.models.list().data)
+    raise ValueError(f"Proveedor sin verificacion de API key: {provider}")
 
 
 def append_jsonl_durable(path: Path, item: dict):
@@ -271,14 +328,14 @@ def load_arbiter_results() -> dict:
 def load_config(config_path: Path) -> dict:
     if not config_path.exists():
         raise FileNotFoundError(f"Config no encontrado: {config_path}")
-    with open(config_path, "r", encoding="utf-8") as f:
+    with open(config_path, "r", encoding="utf-8-sig") as f:
         cfg = json.load(f)
 
     for key in ["task", "arbiters", "processing"]:
         if key not in cfg:
             raise ValueError(f"El config JSON debe tener la clave '{key}'")
     if not cfg["arbiters"]:
-        raise ValueError("Debe haber al menos un arbitro en 'arbiters'")
+        raise ValueError("Sin arbitros no se puede hacer nada. Configura o importa al menos un arbitro antes de ejecutar.")
     for arb in cfg["arbiters"]:
         for key in ["id", "provider", "system_prompt"]:
             if key not in arb:
@@ -469,6 +526,7 @@ def _call_gemini(arbiter: dict, prompt_user: str) -> tuple:
             system_instruction = arbiter["system_prompt"],
             temperature        = float(gen_cfg.get("temperature", 0.1)),
             max_output_tokens  = int(gen_cfg.get("max_output_tokens", 2048)),
+            response_mime_type = "application/json",
         ),
     )
     usage = getattr(response, "usage_metadata", None)
@@ -502,6 +560,7 @@ def _call_vertex_gemini(arbiter: dict, prompt_user: str) -> tuple:
     generation_config = {
         "temperature": float(gen_cfg.get("temperature", 0.1)),
         "max_output_tokens": int(gen_cfg.get("max_output_tokens", 2048)),
+        "response_mime_type": "application/json",
     }
     # Disable thinking for gemini-2.5-flash models (pro doesn't support thinking_budget=0)
     if "gemini-2.5-flash" in provider["model"]:
@@ -559,15 +618,23 @@ def _call_openai_compat(arbiter: dict, prompt_user: str) -> tuple:
 
     client = OpenAI(api_key=api_key, base_url=base_url)
 
-    response = client.chat.completions.create(
-        model       = provider["model"],
-        messages    = [
-            {"role": "system",  "content": arbiter["system_prompt"]},
-            {"role": "user",    "content": prompt_user},
+    request_payload = {
+        "model": provider["model"],
+        "messages": [
+            {"role": "system", "content": arbiter["system_prompt"]},
+            {"role": "user", "content": prompt_user},
         ],
-        temperature = float(gen_cfg.get("temperature", 0.1)),
-        max_tokens  = int(gen_cfg.get("max_output_tokens", 2048)),
-    )
+        "temperature": float(gen_cfg.get("temperature", 0.1)),
+        "max_tokens": int(gen_cfg.get("max_output_tokens", 2048)),
+        "response_format": {"type": "json_object"},
+    }
+    try:
+        response = client.chat.completions.create(**request_payload)
+    except Exception as exc:
+        if "response_format" not in str(exc).lower() and "json_object" not in str(exc).lower():
+            raise
+        request_payload.pop("response_format", None)
+        response = client.chat.completions.create(**request_payload)
     usage = getattr(response, "usage", None)
     usage_dict = {
         "prompt_tokens": usage.prompt_tokens if usage else 0,
@@ -629,6 +696,132 @@ def build_user_prompt(task_cfg: dict, claim: str, max_chars: int) -> str:
     return prompt
 
 
+def strip_markdown_json(raw: str) -> str:
+    raw = (raw or "").strip()
+    if raw.startswith("```"):
+        parts = raw.split("```")
+        raw = parts[1] if len(parts) > 1 else raw
+        if raw.strip().lower().startswith("json"):
+            raw = raw.strip()[4:]
+    return raw.strip()
+
+
+def extract_first_json_object(raw: str) -> str:
+    start = raw.find("{")
+    if start < 0:
+        return raw
+    depth = 0
+    in_string = False
+    escape = False
+    for pos in range(start, len(raw)):
+        ch = raw[pos]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_string:
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return raw[start:pos + 1]
+    return raw[start:]
+
+
+def _coerce_label_value(value) -> Optional[int]:
+    if value in (0, 1):
+        return int(value)
+    text = str(value).strip().lower()
+    if text in {"0", "false", "no", "absent", "none"}:
+        return 0
+    if text in {"1", "true", "yes", "present"}:
+        return 1
+    try:
+        return 1 if int(float(text)) >= 1 else 0
+    except (TypeError, ValueError):
+        return None
+
+
+def _salvage_principle_json(raw: str, principles: list[str]) -> Optional[dict]:
+    """
+    Last-resort parser for malformed LLM JSON. It only accepts a response if every
+    required principle label can be recovered; justifications are best-effort.
+    """
+    if not principles:
+        return None
+
+    text = extract_first_json_object(strip_markdown_json(raw))
+    result = {}
+
+    for p in principles:
+        label_re = re.compile(
+            rf'["\']?{re.escape(p)}["\']?\s*:\s*["\']?(0|1|true|false|yes|no)["\']?',
+            re.IGNORECASE,
+        )
+        match = label_re.search(text)
+        if not match:
+            return None
+        value = _coerce_label_value(match.group(1))
+        if value is None:
+            return None
+        result[p] = value
+
+        why_key = f"{p}_why"
+        why_re = re.compile(
+            rf'["\']?{re.escape(why_key)}["\']?\s*:\s*["\']?'
+            rf'(.*?)'
+            rf'(?=(?:["\']?\s*,\s*["\']?[A-Za-z_][A-Za-z0-9_]*["\']?\s*:)|(?:\s*[}}]\s*$))',
+            re.IGNORECASE | re.DOTALL,
+        )
+        why_match = why_re.search(text)
+        why = why_match.group(1).strip() if why_match else "no cue"
+        why = why.strip().strip('",\'').replace("\r", " ").replace("\n", " ")
+        result[why_key] = why[:240] if why else "no cue"
+
+    return result
+
+
+def parse_llm_json(raw: str, principles: Optional[list[str]] = None) -> tuple[dict, str]:
+    """Parse LLM JSON with conservative repairs for common response drift."""
+    cleaned = extract_first_json_object(strip_markdown_json(raw))
+    no_trailing = re.sub(r",\s*([}\]])", r"\1", cleaned)
+    quoted_keys = re.sub(r'([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)', r'\1"\2"\3', cleaned)
+    quoted_no_trailing = re.sub(r",\s*([}\]])", r"\1", quoted_keys)
+    attempts = [
+        ("direct", cleaned),
+        ("trim_trailing_commas", no_trailing),
+        ("quote_unquoted_keys", quoted_keys),
+        ("quote_keys_trim_commas", quoted_no_trailing),
+    ]
+
+    last_error = None
+    for mode, candidate in attempts:
+        try:
+            return json.loads(candidate), mode
+        except json.JSONDecodeError as exc:
+            last_error = exc
+
+    try:
+        value = ast.literal_eval(cleaned)
+        if isinstance(value, dict):
+            return value, "python_literal"
+    except (ValueError, SyntaxError) as exc:
+        last_error = exc
+
+    salvaged = _salvage_principle_json(raw, principles or [])
+    if salvaged is not None:
+        return salvaged, "salvage_fields"
+
+    raise last_error or ValueError("No se pudo parsear JSON del LLM")
+
+
 # ---------------------------------------------------------------------------
 # Llamada a un arbitro (cualquier proveedor)
 # ---------------------------------------------------------------------------
@@ -659,15 +852,9 @@ def call_arbiter(
         raw = raw.strip()
         arbiter.pop("_last_error", None)
 
-        # Limpiar bloques markdown ```json ... ```
-        if raw.startswith("```"):
-            parts = raw.split("```")
-            raw   = parts[1] if len(parts) > 1 else raw
-            if raw.startswith("json"):
-                raw = raw[4:]
-        raw = raw.strip()
-
-        result = json.loads(raw)
+        result, parse_mode = parse_llm_json(raw, principles)
+        if parse_mode != "direct":
+            log.warning(f"[{arb_id}] JSON recuperado con parser '{parse_mode}'")
         result["_usage"] = usage
         result["_latency_s"] = latency_s
         log.debug(f"[{arb_id}] Latencia: {latency_s:.3f}s")
@@ -686,6 +873,8 @@ def call_arbiter(
                 result[f"{p}_why"] = ""
 
         rate_limiter.on_success()
+        total_tokens = int(usage.get("prompt_tokens", 0) or 0) + int(usage.get("completion_tokens", 0) or 0)
+        log.info(f"[{arb_id}] llamada OK — latencia={latency_s:.3f}s tokens={total_tokens}")
         return result
 
     except Exception as e:
@@ -1293,10 +1482,71 @@ def main():
                         help="Nombre de la columna con el texto a etiquetar. Si no se indica, se usa el valor del config.")
     parser.add_argument("--limit",  type=int, default=None,
                         help="Limitar el numero de entradas (para pruebas)")
+    parser.add_argument("--export-arbiters", default=None,
+                        help="Exportar los arbitros a un archivo .lfarb cifrado y salir")
+    parser.add_argument("--import-arbiters", default=None,
+                        help="Importar arbitros desde un archivo .lfarb cifrado y salir")
+    parser.add_argument("--replace-arbiters", action="store_true",
+                        help="Al importar, reemplazar todos los arbitros actuales en vez de fusionar por ID")
+    parser.add_argument("--arbiters-password", default=None,
+                        help="Contrasena para importar/exportar arbitros cifrados")
+    parser.add_argument("--arbiters-password-file", default=None,
+                        help="Archivo que contiene la contrasena para importar/exportar arbitros cifrados")
+    parser.add_argument("--set-provider-key", default=None,
+                        help="Verificar y guardar API key para proveedor: gemini, anthropic, openai u openai_compat")
+    parser.add_argument("--api-key", default=None,
+                        help="API key para --set-provider-key")
+    parser.add_argument("--api-key-env", default=None,
+                        help="Variable donde guardar la API key en secrets/secrets.env")
+    parser.add_argument("--base-url", default="",
+                        help="Base URL para openai_compat al verificar API key")
     args = parser.parse_args()
+
+    if args.export_arbiters and args.import_arbiters:
+        raise SystemExit("Usa solo una operacion: --export-arbiters o --import-arbiters.")
+
+    if args.set_provider_key:
+        provider = args.set_provider_key.strip()
+        api_key = args.api_key or getpass.getpass(f"API key para {provider}: ")
+        env_var = args.api_key_env or provider_api_key_env(provider)
+        if not env_var:
+            raise SystemExit(f"Proveedor '{provider}' no usa API key en secrets/secrets.env.")
+        try:
+            count = verify_provider_key(provider, api_key, args.base_url)
+        except Exception as exc:
+            raise SystemExit(f"No se pudo verificar la clave: {exc}") from exc
+        set_secret_value(SECRETS_ENV_PATH, env_var, api_key)
+        print(f"Clave verificada y guardada en {env_var}. Modelos detectados: {count}.")
+        return
+
+    if args.export_arbiters:
+        cfg = read_config_file(Path(args.config))
+        password = resolve_arbiters_password(args)
+        out_path = export_arbiters_to_file(
+            cfg.get("arbiters", []),
+            Path(args.export_arbiters),
+            password,
+        )
+        print(f"Arbitros exportados en archivo cifrado: {out_path}")
+        return
+
+    if args.import_arbiters:
+        cfg = read_config_file(Path(args.config))
+        password = resolve_arbiters_password(args)
+        imported = import_arbiters_from_file(Path(args.import_arbiters), password)
+        mode = "replace" if args.replace_arbiters else "merge"
+        cfg["arbiters"], stats = merge_arbiters(cfg.get("arbiters", []), imported, mode)
+        write_config_file(Path(args.config), cfg)
+        print(
+            "Importacion lista: "
+            f"{stats['added']} agregados, {stats['updated']} actualizados, "
+            f"{stats['kept']} conservados, {stats['total']} total."
+        )
+        return
 
     cfg = load_config(Path(args.config))
     validate_safety_policy(cfg)
+    require_provider_preflight(cfg)
     arbiters   = cfg["arbiters"]
     principles = list(cfg["task"]["principles"].keys())
     proc_cfg   = cfg["processing"]

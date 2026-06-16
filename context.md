@@ -55,6 +55,9 @@ LabelForge/
 │   ├── label_persuasion.py    → Pipeline principal: LLM calls, rate limiter, checkpoints, consenso
 │   ├── arbiters_config.json   → Configuración central: árbitros, principios, prompts, parámetros
 │   ├── agreement_metrics.py   → Métricas de acuerdo inter-árbitros (compartido CLI + webapp)
+│   ├── arbiters_io.py         → Export/import cifrado de árbitros (compartido CLI + webapp)
+│   ├── secrets_io.py          → Escritura/lectura controlada de secrets/secrets.env
+│   ├── provider_preflight.py  → Validación previa de credenciales/proveedores
 │   └── utils.py               → Helpers numéricos compartidos (safe_int, safe_float, etc.)
 ├── webapp/
 │   ├── app.py                 → Backend Flask: endpoints REST + SSE
@@ -71,7 +74,7 @@ LabelForge/
 ├── output/                    → CSVs etiquetados generados (no en repo)
 ├── checkpoints/               → ⚠️ PRIVADO — estado de ejecuciones (excluido del repo)
 ├── logs/                      → Logs de ejecuciones (excluidos del repo)
-├── secrets.env                → Variables de entorno locales (NUNCA subir a repo)
+├── secrets/                   → Credenciales locales (NUNCA subir a repo)
 ├── secrets.env.example        → Plantilla pública de variables de entorno
 ├── requirements.txt           → 7 dependencias directas (incluye openpyxl)
 ├── environment.yml            → Entorno Conda
@@ -138,20 +141,37 @@ El pipeline guarda estado de forma granular — **por árbitro y por claim**:
 
 ## 5. Árbitros configurados actualmente
 
-Los tres árbitros actuales usan **Vertex AI** con autenticación ADC (no API key):
+La configuración actual tiene **tres árbitros** (número impar para evitar empates en consenso):
+dos usan **Vertex AI** con autenticación ADC (no API key) y uno usa **Anthropic Claude** con
+`ANTHROPIC_API_KEY` desde `secrets/secrets.env`.
 
 | ID | Nombre | Persona | Modelo | Proveedor |
 |---|---|---|---|---|
-| `arb1` | Psicólogo Clínico | Dr. Viviana Inés Fuentes | `gemini-2.5-pro` | `vertex_gemini` |
-| `arb2` | Especialista Ciberseguridad | MSc. Carlos Doce | `gemini-2.5-flash` | `vertex_gemini` |
-| `arb3` | Investigador Forense | Detective Rodrigo Santana | `gemini-2.5-pro` | `vertex_gemini` |
+| `arb1` | Psicólogo Clínico | Viviana Inés Fuentes | `gemini-2.5-pro` | `vertex_gemini` |
+| `arb3` | Investigador Forense | Rodrigo Santana | `gemini-2.5-flash` | `vertex_gemini` |
+| `arb4` | Psicólogo Forense | Claudio Codencio | `claude-sonnet-4-6` | `anthropic` |
 
-**Proyecto GCP**: `cloud-computing-cybersec-inaoe`  
+**Decisión de diseño — diversidad de modelos:** los tres árbitros usan modelos distintos
+(Pro, Flash, Sonnet) para garantizar independencia real de criterio. Dos árbitros con
+los mismos pesos y temperatura 0.1 producirían acuerdo correlacionado artificialmente,
+lo que inflaría el Fleiss Kappa sin reflejo de consenso genuino.
+
+**Pendiente estratégico:** incorporar un cuarto árbitro de una familia completamente
+distinta (p.ej. GPT-4o, Llama 3) para máxima diversidad de arquitectura. Requiere setup
+adicional de API. Cuando se haga, volver a 4 árbitros implica revisar el sistema de
+consenso (actualmente mayoría simple de 3).
+
+**Proyecto GCP para árbitros Vertex**: `cloud-computing-cybersec-inaoe`  
 **Región Vertex**: `us-central1`  
 **Temperatura**: `0.1` (baja, para clasificación determinista)  
 **max_output_tokens**: `2048` (el JSON binario de salida es muy corto; margen para thinking tokens en gemini-2.5)
 
-> ⚠️ Para que los árbitros Vertex funcionen, se necesita autenticación ADC:
+> ⚠️ Para que los árbitros Vertex funcionen, se necesita autenticación ADC.
+> Vertex AI no usa API key directa. Hay dos rutas:
+>
+> - Sin login interactivo local: usar una service account JSON y definir
+>   `GOOGLE_APPLICATION_CREDENTIALS=secrets\service-account.json`.
+> - Con Google Cloud CLI:
 > ```bash
 > gcloud auth application-default login
 > gcloud auth application-default set-quota-project cloud-computing-cybersec-inaoe
@@ -268,6 +288,32 @@ originales del dataset y agrega:
 }
 ```
 
+**Regla de secretos:** `api_key_override` existe por compatibilidad histórica pero
+no debe usarse para configuraciones nuevas. Las claves reales viven en
+`secrets/secrets.env`; el árbitro solo guarda `api_key_env` apuntando a la variable
+correspondiente (`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.).
+La webapp y el CLI usan `scripts/secrets_io.py` para verificar y guardar claves.
+
+### Export/import cifrado de árbitros
+
+La sección `arbiters` puede exportarse a un archivo `.lfarb` cifrado con contraseña.
+El contenido real (prompts, modelos y posibles secretos heredados) va cifrado con
+AES-256-GCM; el archivo visible solo contiene metadatos técnicos (`salt`, `nonce`,
+`ciphertext`). La lógica vive en `scripts/arbiters_io.py` y se usa desde webapp y CLI.
+
+- Webapp: pestaña `/arbiters`, botones **Importar** y **Exportar**.
+- CLI:
+  ```bash
+  python main_label.py --export-arbiters backup.lfarb
+  python main_label.py --import-arbiters backup.lfarb
+  python main_label.py --import-arbiters backup.lfarb --replace-arbiters
+  ```
+
+La importación por defecto fusiona por ID y conserva los demás árbitros. Con
+`--replace-arbiters` o el modo "Reemplazar" de la webapp se reemplaza toda la lista.
+Se permite eliminar todos los árbitros; en ese estado la UI muestra una advertencia
+y el pipeline CLI aborta con mensaje explícito hasta que se cree o importe al menos uno.
+
 ### Sección `dataset`
 ```json
 {
@@ -298,8 +344,8 @@ Si `text_column` no existe en el archivo, el pipeline termina con error descript
 ### Sección `safety`
 | Parámetro | Default | Descripción |
 |---|---|---|
-| `free_only_mode` | `true` | Bloquea proveedores de pago (Anthropic, OpenAI) |
-| `allowed_provider_types` | `["gemini","vertex_gemini","ollama","openai_compat"]` | Lista blanca de proveedores |
+| `free_only_mode` | `false` | Estado actual para pruebas; si se activa, bloquea proveedores fuera de lista blanca |
+| `allowed_provider_types` | `["gemini","vertex_gemini","anthropic","ollama","openai_compat"]` | Lista blanca de proveedores autorizados |
 | `allow_remote_openai_compat` | `false` | Bloquea endpoints OpenAI-compat remotos |
 | `max_total_tokens` | `0` | Límite global de tokens (0 = sin límite) |
 | `pause_on_quota_error` | `true` | Pausar ante error de cuota |
@@ -327,7 +373,7 @@ python main_webapp.py --host 0.0.0.0
 ### Configuración del servidor
 La jerarquía de precedencia es:
 ```
---host/--port (CLI) > LABELFORGE_HOST/LABELFORGE_PORT (secrets.env) > 127.0.0.1:7860
+--host/--port (CLI) > LABELFORGE_HOST/LABELFORGE_PORT (secrets/secrets.env) > 127.0.0.1:7860
 ```
 
 **Puerto 7860** — libre en macOS (el 5000 está ocupado por AirPlay Receiver desde
@@ -352,6 +398,26 @@ Estos eventos estructurados solo se emiten cuando la variable
 `DATA_LABELING_WEBAPP_METRICS=1` está activa (la webapp la activa automáticamente
 al lanzar el subproceso).
 
+### Semántica de ejecución y UI actual
+
+- **Dataset listo:** `/processing` muestra una tarjeta "Archivo listo para procesar"
+  cuando `dataset.input_file` está guardado en `scripts/arbiters_config.json`.
+  Esa tarjeta enseña ruta, hoja y columna. Subir un archivo nuevo solo lo deja
+  preparado; hay que seleccionar columna y pulsar **Guardar** para que se use.
+- **`--limit` / "Límite de entradas":** es un límite total desde el inicio del
+  dataset, no una cantidad adicional. Ejemplo: con 50 entradas ya persistidas en
+  checkpoint y límite `70`, se consideran las primeras 70 filas y se procesan
+  aproximadamente 20 nuevas. La UI de `/run` explica esto dinámicamente.
+- **Checkpoint:** las entradas con resultado final en `checkpoint/claim_results.jsonl`
+  o `checkpoint.json` se saltan; `arbiter_results.jsonl` evita repetir llamadas de
+  árbitros ya completados para una entrada parcial.
+- **Logs por árbitro:** `/run` colorea líneas que mencionan `arb1`, `arb2`, etc.,
+  usando la misma secuencia de colores de `/arbiters`, para identificar qué árbitro
+  habló o falló.
+- **Preflight:** antes de lanzar el subproceso, WebApp y CLI llaman a
+  `scripts/provider_preflight.py`. Si faltan credenciales/proyecto/base_url/API key,
+  el run no empieza y se muestran instrucciones accionables.
+
 ### Frontera backend/frontend
 La regla actual del proyecto es: **todo cálculo de procesamiento y métricas vive en
 Python; la interfaz solo presenta datos**.
@@ -361,14 +427,22 @@ Python; la interfaz solo presenta datos**.
 - `scripts/agreement_metrics.py` calcula métricas globales y por principio
   (Fleiss/Cohen/Krippendorff/acuerdo observado/tasa positiva), porcentajes e
   interpretación del kappa.
+- `scripts/arbiters_io.py` centraliza export/import cifrado de árbitros, validación
+  de formato y merge/reemplazo.
+- `scripts/secrets_io.py` centraliza el mapeo proveedor→variable y la escritura
+  controlada de `secrets/secrets.env`.
+- `scripts/provider_preflight.py` centraliza validación previa de proveedores:
+  ADC de Vertex, API keys de Gemini/Anthropic/OpenAI y `base_url` para
+  OpenAI-compatible/Ollama.
 - `webapp/app.py` adapta CSV/eventos a JSON para la interfaz y mantiene compatibilidad
   con CSV anteriores calculando faltantes en backend.
-- `webapp/templates/*.html` no debe decidir resultados ni métricas: solo renderiza,
-  formatea números/segundos/porcentajes y maneja interacción visual.
+- `webapp/templates/*.html` no debe decidir resultados, métricas, cifrado ni escritura
+  de secretos: solo renderiza, formatea números/segundos/porcentajes y dispara
+  acciones contra APIs backend.
 
 ---
 
-## 10. Variables de entorno (`secrets.env`)
+## 10. Variables de entorno (`secrets/secrets.env`)
 
 ```env
 # API Keys de LLM
@@ -385,8 +459,46 @@ VERTEX_LOCATION=us-central1
 # LABELFORGE_PORT=7860
 ```
 
-**El archivo `secrets.env` NUNCA va al repositorio.** Solo existe `secrets.env.example`
+**El archivo `secrets/secrets.env` NUNCA va al repositorio.** Solo existe `secrets.env.example`
 (plantilla pública) versionado en el repo.
+
+Las claves pueden editarse manualmente o guardarse desde las interfaces:
+
+- Webapp `/arbiters`: seleccionar proveedor, pegar la clave en **Clave de API**,
+  pulsar verificar. Si la clave lista modelos correctamente, se guarda en
+  `secrets/secrets.env` y se refresca la grilla de modelos.
+- CLI:
+  ```bash
+  python main_label.py --set-provider-key gemini
+  python main_label.py --set-provider-key anthropic
+  python main_label.py --set-provider-key openai
+  python main_label.py --set-provider-key openai_compat --base-url http://localhost:11434/v1
+  ```
+
+Mapa de variables por proveedor:
+
+| Proveedor | Variable en `secrets/secrets.env` |
+|---|---|
+| `gemini` | `GEMINI_API_KEY` |
+| `anthropic` | `ANTHROPIC_API_KEY` |
+| `openai` | `OPENAI_API_KEY` |
+| `openai_compat` | `OPENAI_API_KEY` |
+| `vertex_gemini` | No usa API key directa; usa ADC/GCP |
+| `ollama` | Normalmente no usa API key |
+
+### Rate limits por proveedor/modelo
+
+La fuente compartida para recomendaciones de espera es `scripts/rate_limits.py`.
+La WebApp consulta `/api/rate-limits` y `/api/rate-limits/summary`; los frontends
+no deben duplicar tablas ni reglas de throttling.
+
+- `gemini`: usa perfiles publicados de Gemini API/AI Studio cuando hay match por
+  modelo o familia (`limit_kind="published"`).
+- `vertex_gemini`, `anthropic`, `openai`, `openai_compat` y `ollama`: usan perfiles
+  por modelo/familia como fallback conservador (`limit_kind="account_dependent"`).
+  Sus cuotas reales dependen de cuenta, proyecto, región, tier, organización,
+  proveedor compatible o hardware local, por lo que la UI debe mostrarlas como
+  orientativas y ajustables.
 
 ---
 
@@ -408,10 +520,14 @@ source .venv/bin/activate   # Linux/macOS
 pip install -r requirements.txt
 
 # 3. Configurar variables de entorno
-cp secrets.env.example secrets.env
-# Editar secrets.env con las API keys correspondientes
+cp secrets.env.example secrets/secrets.env
+# Editar secrets/secrets.env con las API keys correspondientes
 
 # 4. Autenticar Vertex AI (si se usan árbitros vertex_gemini)
+# Opción A: service account JSON, sin login interactivo local
+set GOOGLE_APPLICATION_CREDENTIALS=secrets\service-account.json
+
+# Opción B: Google Cloud CLI
 gcloud auth application-default login
 gcloud auth application-default set-quota-project cloud-computing-cybersec-inaoe
 
@@ -436,7 +552,7 @@ google-cloud-aiplatform==1.157.0  # Vertex AI
 anthropic==0.109.1              # Claude
 openai==2.41.1                  # GPT + endpoints compatibles (Ollama, etc.)
 flask==3.1.3                    # Webapp
-python-dotenv==1.2.2            # Carga de secrets.env
+python-dotenv==1.2.2            # Carga de secrets/secrets.env
 ```
 
 No hay dependencias de análisis de datos (numpy, pandas, etc.) — las métricas de
@@ -453,7 +569,7 @@ puro para mantener el entorno mínimo.
 | `checkpoints/` | Estado de ejecuciones locales (no reproducible en otro equipo) |
 | `output/` | CSVs etiquetados (resultados de ejecuciones locales) |
 | `logs/` | Logs de corridas locales |
-| `secrets.env` | API keys y credenciales |
+| `secrets/secrets.env` | API keys y credenciales |
 
 Todos están cubiertos por `.gitignore`. Los datos se harán públicos al concluir
 el estudio y publicar el paper.
@@ -538,8 +654,10 @@ pero puede usarse cualquier nombre de columna existente en el archivo.
 ### Por qué `vertex_gemini` en vez de `gemini`
 Los árbitros actuales usan Vertex AI (proyecto GCP `cloud-computing-cybersec-inaoe`)
 porque ofrece mayor cuota de requests para producción. Requiere ADC en lugar de
-API key directa. El `free_only_mode` debe tener `vertex_gemini` en la lista blanca
-`allowed_provider_types` para no bloquearse a sí mismo.
+API key directa. Si `free_only_mode` se reactiva, debe tener `vertex_gemini` y
+`anthropic` en `allowed_provider_types` para no bloquear la configuración actual.
+En el estado actual de pruebas, `free_only_mode=false`, pero el preflight de
+credenciales sigue bloqueando runs imposibles.
 
 ### Por qué el puerto 7860
 El puerto 5000 está ocupado por AirPlay Receiver en macOS 12+ Monterey. El 7860 es
@@ -586,10 +704,15 @@ respuestas en versiones recientes de Gemini.
 - Pestaña `/processing` corregida tras mezcla de JS legacy: ya no muestra código
   como texto y usa solo el flujo actual de drag & drop/upload
 - Webapp Flask con 38 endpoints, 5 páginas y streaming SSE
-- 3 árbitros configurados con Vertex AI (gemini-2.5-pro y gemini-2.5-flash)
+- 4 árbitros configurados: 3 con Vertex AI (`gemini-2.5-pro`, `gemini-2.5-flash`)
+  y 1 con Anthropic Claude (`claude-haiku-4-5-20251001`)
 - JSONDecodeError solucionado: `max_output_tokens` 256→2048 y thinking desactivado
   en gemini-2.5-flash (gemini-2.5-pro no soporta `thinking_budget=0`)
 - Controles de ejecución deshabilitados durante proceso activo en `/run`
+- Preflight de proveedores antes de iniciar runs, con instrucciones por proveedor
+- `/processing` muestra el archivo realmente listo para procesar
+- `/run` aclara que el límite de entradas es total desde el inicio del dataset
+- Logs de `/run` coloreados por árbitro
 - Métricas de acuerdo inter-árbitros (Fleiss/Cohen/Krippendorff) en CLI y webapp
 - Diagnóstico de consenso por entrada y estadísticas de tokens/latencia por entrada
   calculados en backend y persistidos en CSV
@@ -626,3 +749,4 @@ respuestas en versiones recientes de Gemini.
 ---
 
 *Última actualización: 2026-06-13 — métricas por entrada, frontera backend/frontend, colores unificados y badges separados para acuerdo observado + Fleiss Kappa.*
+

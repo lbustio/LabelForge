@@ -4,9 +4,30 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
   <div class="page-title mb-0">Arbitros</div>
-  <button class="btn btn-primary btn-sm" onclick="openModal()">
-    <i class="bi bi-plus-lg me-1"></i>Nuevo arbitro
-  </button>
+  <div class="d-flex gap-2 flex-wrap justify-content-end">
+    <button class="btn btn-outline-secondary btn-sm" onclick="openImportModal()" title="Importar arbitros cifrados">
+      <i class="bi bi-upload me-1"></i>Importar
+    </button>
+    <button class="btn btn-outline-secondary btn-sm" onclick="openExportModal()" title="Exportar arbitros cifrados">
+      <i class="bi bi-download me-1"></i>Exportar
+    </button>
+    <button class="btn btn-primary btn-sm" onclick="openModal()">
+      <i class="bi bi-plus-lg me-1"></i>Nuevo arbitro
+    </button>
+  </div>
+</div>
+
+<div id="arbiters-preflight" class="card-dark accent-card accent-blue mb-3 p-3">
+  <div class="d-flex align-items-center gap-2">
+    <span class="spinner-border spinner-border-sm text-info" id="preflight-spinner"></span>
+    <div>
+      <div class="fw-semibold" id="preflight-title">Verificando árbitros...</div>
+      <div class="text-secondary small" id="preflight-body">Revisando configuración, credenciales y acceso básico a proveedores.</div>
+    </div>
+    <button class="btn btn-outline-secondary btn-sm ms-auto" onclick="loadArbiterPreflight()" title="Revisar de nuevo">
+      <i class="bi bi-arrow-clockwise"></i>
+    </button>
+  </div>
 </div>
 
 <div id="arbiters-list"></div>
@@ -71,15 +92,16 @@
 
           <!-- Clave de API (no aplica para Ollama) -->
           <div class="row g-3 mb-3" id="apikey-section">
-            <div class="col-md-6">
-              <label class="form-label small text-secondary">Variable de entorno de la clave de API</label>
-              <input type="text" id="arb-api-key-env" class="form-control" placeholder="ej: GEMINI_API_KEY">
-              <div class="form-text text-secondary">Nombre de la variable en tu archivo secrets.env</div>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label small text-secondary">Clave de API directa (opcional)</label>
-              <input type="password" id="arb-api-key-override" class="form-control" placeholder="Solo si quieres sobrescribir secrets.env">
-              <div class="form-text text-secondary">Si se rellena, tiene prioridad sobre secrets.env</div>
+            <input type="hidden" id="arb-api-key-env">
+            <div class="col-md-8">
+              <label class="form-label small text-secondary">Clave de API</label>
+              <div class="input-group">
+                <input type="password" id="arb-api-key-override" class="form-control" placeholder="Pega la clave y verifica">
+                <button class="btn btn-outline-secondary" type="button" onclick="verifyProviderKey()" title="Verificar, guardar y refrescar modelos">
+                  <i class="bi bi-shield-check"></i>
+                </button>
+              </div>
+              <div class="form-text text-secondary" id="api-key-help">Se verifica, se guarda en secrets/secrets.env y luego se limpia de este formulario</div>
             </div>
           </div>
 
@@ -97,7 +119,7 @@
             <div class="col-md-6">
               <label class="form-label small text-secondary">Identificador del proyecto en Google Cloud <span class="text-danger">*</span></label>
               <input type="text" id="arb-vertex-project" class="form-control" placeholder="ej: mi-proyecto-gcp">
-              <div class="form-text text-secondary">También puede venir de GOOGLE_CLOUD_PROJECT en secrets.env.</div>
+              <div class="form-text text-secondary">También puede venir de GOOGLE_CLOUD_PROJECT en secrets/secrets.env.</div>
             </div>
             <div class="col-md-4">
               <label class="form-label small text-secondary">Región de Vertex AI</label>
@@ -139,7 +161,7 @@
               <span id="selected-model-chip" class="text-secondary small fst-italic">ninguno</span>
             </div>
 
-            <!-- Información de limites de peticiones (solo para Gemini) -->
+            <!-- Información de limites de peticiones por proveedor/modelo -->
             <div id="rate-limit-box" class="mt-2 p-2 rounded" style="display:none;font-size:.8rem">
             </div>
           </div>
@@ -169,6 +191,65 @@
         <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
         <button class="btn btn-primary btn-sm" onclick="saveArbiter()">
           <i class="bi bi-floppy me-1"></i>Guardar
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== MODAL EXPORTAR ===================== -->
+<div class="modal fade" id="exportModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content" style="background:#1a1d27;border:1px solid #2d3148;color:#e2e8f0">
+      <div class="modal-header border-0 pb-0">
+        <h5 class="modal-title">Exportar arbitros</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body pt-3">
+        <div class="p-3 rounded mb-3" style="background:#12141e;border:1px solid rgba(var(--tone-cyan), .25)">
+          <div class="small text-secondary">
+            El archivo se guarda cifrado. Necesitaras esta misma contrasena para importarlo.
+          </div>
+        </div>
+        <label class="form-label small text-secondary">Contrasena de cifrado</label>
+        <input type="password" id="export-password" class="form-control" autocomplete="new-password" minlength="8">
+        <div class="form-text text-secondary">Minimo 8 caracteres. No se guarda en LabelForge.</div>
+      </div>
+      <div class="modal-footer border-0">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="exportArbiters()">
+          <i class="bi bi-download me-1"></i>Exportar
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== MODAL IMPORTAR ===================== -->
+<div class="modal fade" id="importModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content" style="background:#1a1d27;border:1px solid #2d3148;color:#e2e8f0">
+      <div class="modal-header border-0 pb-0">
+        <h5 class="modal-title">Importar arbitros</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body pt-3">
+        <label class="form-label small text-secondary">Archivo cifrado</label>
+        <input type="file" id="import-file" class="form-control mb-3" accept=".lfarb,application/json">
+
+        <label class="form-label small text-secondary">Contrasena</label>
+        <input type="password" id="import-password" class="form-control mb-3" autocomplete="current-password" minlength="8">
+
+        <label class="form-label small text-secondary">Modo</label>
+        <select id="import-mode" class="form-select">
+          <option value="merge" selected>Fusionar por ID y conservar los demas</option>
+          <option value="replace">Reemplazar todos los arbitros actuales</option>
+        </select>
+      </div>
+      <div class="modal-footer border-0">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary btn-sm" onclick="importArbiters()">
+          <i class="bi bi-upload me-1"></i>Importar
         </button>
       </div>
     </div>
@@ -245,6 +326,8 @@ TIER_LABELS['mid']   = 'Flash';
 TIER_LABELS['lite']  = 'Lite';
 TIER_LABELS['other'] = 'Otro';
 let arbiters       = [];
+let preflightByArbiter = {};
+let preflightIssues = [];
 let geminiModels   = [];
 let currentModels  = [];   // modelos cargados para el proveedor actual
 let selectedModel  = "";
@@ -262,6 +345,44 @@ const DEFAULT_ENV = {
   ollama:        "",
 };
 
+const API_KEY_HELP = {
+  gemini:        "Gemini: se verificara y guardara como GEMINI_API_KEY en secrets/secrets.env.",
+  anthropic:     "Claude/Anthropic: se verificara y guardara como ANTHROPIC_API_KEY en secrets/secrets.env.",
+  openai:        "OpenAI: se verificara y guardara como OPENAI_API_KEY en secrets/secrets.env.",
+  openai_compat: "Compatible con OpenAI: se verificara contra la direccion base y se guardara como OPENAI_API_KEY en secrets/secrets.env.",
+  vertex_gemini: "Vertex AI usa credenciales de Google Cloud, no una API key directa aqui.",
+  ollama:        "Ollama local no necesita API key.",
+};
+
+function updateApiKeyHelp() {
+  const help = document.getElementById('api-key-help');
+  if (!help) return;
+  help.textContent = API_KEY_HELP[activeProvider] || "Se verifica, se guarda en secrets/secrets.env y luego se limpia de este formulario.";
+}
+
+function looksLikeApiKey(value) {
+  return /^(sk-|sk-ant-|AIza|ya29\.|xox|ghp_)/.test((value || '').trim());
+}
+
+function normalizeApiKeyInputs() {
+  const envInp = document.getElementById('arb-api-key-env');
+  const keyInp = document.getElementById('arb-api-key-override');
+  const envVal = envInp.value.trim();
+  if (looksLikeApiKey(envVal) && !keyInp.value.trim()) {
+    keyInp.value = envVal;
+  }
+  envInp.value = DEFAULT_ENV[activeProvider] || '';
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 // ---------------------------------------------------------------------------
 // Proveedor
 // ---------------------------------------------------------------------------
@@ -278,12 +399,11 @@ function selectProvider(p) {
   document.getElementById('apikey-section').style.setProperty('display', needKey  ? '' : 'none', 'important');
   document.getElementById('baseurl-section').style.setProperty('display', needUrl ? '' : 'none', 'important');
   document.getElementById('vertex-section').style.setProperty('display', needVertex ? '' : 'none', 'important');
+  updateApiKeyHelp();
 
   // Default env var
   const envInp = document.getElementById('arb-api-key-env');
-  if (!envInp.value || Object.values(DEFAULT_ENV).includes(envInp.value)) {
-    envInp.value = DEFAULT_ENV[p] || "";
-  }
+  envInp.value = DEFAULT_ENV[p] || "";
 
   // Reset modelo seleccionado y cargar modelos
   selectedModel = "";
@@ -296,24 +416,31 @@ function selectProvider(p) {
 // Cargar modelos del proveedor actual
 // ---------------------------------------------------------------------------
 async function loadModels() {
+  normalizeApiKeyInputs();
   const grid = document.getElementById('model-grid');
   grid.innerHTML = `<div class="col-12 text-center text-secondary py-4">
     <div class="spinner-border spinner-border-sm me-2"></div>Cargando modelos...
   </div>`;
 
   const apiKey  = document.getElementById('arb-api-key-override').value.trim();
+  const apiKeyEnv = DEFAULT_ENV[activeProvider] || '';
   const baseUrl = document.getElementById('arb-base-url').value.trim();
   const project = document.getElementById('arb-vertex-project').value.trim();
   const location = document.getElementById('arb-vertex-location').value.trim();
 
-  let url = `/api/models?provider=${activeProvider}`;
-  if (apiKey)  url += `&api_key=${encodeURIComponent(apiKey)}`;
-  if (baseUrl) url += `&base_url=${encodeURIComponent(baseUrl)}`;
-  if (project) url += `&project=${encodeURIComponent(project)}`;
-  if (location) url += `&location=${encodeURIComponent(location)}`;
+  const payload = { provider: activeProvider };
+  if (apiKey)    payload.api_key     = apiKey;
+  if (apiKeyEnv) payload.api_key_env = apiKeyEnv;
+  if (baseUrl)   payload.base_url    = baseUrl;
+  if (project)   payload.project     = project;
+  if (location)  payload.location    = location;
 
   try {
-    const res  = await fetch(url);
+    const res  = await fetch('/api/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || "Error desconocido");
     currentModels = data;
@@ -332,8 +459,64 @@ async function loadModels() {
 }
 
 async function reloadModels() {
-  // Invalida el cache del lado servidor para este proveedor
+  // Si hay una clave pegada, primero se verifica y guarda en secrets/secrets.env.
+  if (document.getElementById('arb-api-key-override').value.trim()) {
+    await verifyProviderKey();
+    return;
+  }
   await loadModels();
+}
+
+async function verifyProviderKey() {
+  normalizeApiKeyInputs();
+  const keyInp = document.getElementById('arb-api-key-override');
+  const envInp = document.getElementById('arb-api-key-env');
+  const apiKey = keyInp.value.trim();
+  const apiKeyEnv = DEFAULT_ENV[activeProvider] || '';
+  const baseUrl = document.getElementById('arb-base-url').value.trim();
+  const grid = document.getElementById('model-grid');
+
+  if (!apiKey) {
+    showToast('Pega una clave de API para verificarla', 'error');
+    return;
+  }
+  if (!apiKeyEnv) {
+    showToast('Indica la variable donde se guardara la clave', 'error');
+    return;
+  }
+
+  grid.innerHTML = `<div class="col-12 text-center text-secondary py-4">
+    <div class="spinner-border spinner-border-sm me-2"></div>Verificando clave y cargando modelos...
+  </div>`;
+
+  const res = await fetch('/api/provider-key', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      provider: activeProvider,
+      api_key: apiKey,
+      api_key_env: apiKeyEnv,
+      base_url: baseUrl,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.error) {
+    grid.innerHTML = `<div class="col-12 py-3">
+      <div class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>${data.error || 'No se pudo verificar la clave'}</div>
+    </div>`;
+    showToast(data.error || 'No se pudo verificar la clave', 'error');
+    return;
+  }
+
+  envInp.value = data.api_key_env || apiKeyEnv;
+  keyInp.value = '';
+  currentModels = data.models || [];
+  activeFilter = 'all';
+  ['all','pro','mid','lite'].forEach(f =>
+    document.getElementById('filter-'+f)?.classList.toggle('active', f === 'all')
+  );
+  renderModelGrid();
+  showToast(`Clave verificada y guardada en ${envInp.value}. Modelos: ${data.count}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -414,23 +597,30 @@ function hideRateLimitInfo() {
 async function loadRateLimitInfo() {
   const box = document.getElementById('rate-limit-box');
   if (!box) return;
-  if (!["gemini", "vertex_gemini"].includes(activeProvider) || !selectedModel) {
+  if (!selectedModel) {
     hideRateLimitInfo();
     return;
   }
 
   const nArbiters = Math.max(arbiters.length || 1, 1);
-  const url = `/api/rate-limits?model=${encodeURIComponent(selectedModel)}&tier=free&arbiters=${nArbiters}`;
+  const url = `/api/rate-limits?provider=${encodeURIComponent(activeProvider)}&model=${encodeURIComponent(selectedModel)}&tier=free&arbiters=${nArbiters}`;
   try {
     const data = await fetch(url).then(r => r.json());
     const tone = data.alert_level === 'danger' ? 'danger' : (data.alert_level === 'warning' ? 'warning' : 'info');
-    const rpd = data.rpd === null ? 'sin límite diario' : `${data.rpd} RPD`;
+    const fmt = (value) => value === null || value === undefined ? null : Number(value).toLocaleString('es-ES');
+    const metrics = [`${fmt(data.rpm)} RPM`];
+    if (data.tpm !== undefined) metrics.push(data.tpm === null ? 'TPM dependiente de cuenta' : `${fmt(data.tpm)} TPM`);
+    if (data.itpm !== undefined) metrics.push(data.itpm === null ? 'ITPM dependiente de cuenta' : `${fmt(data.itpm)} ITPM`);
+    if (data.otpm !== undefined) metrics.push(data.otpm === null ? 'OTPM dependiente de cuenta' : `${fmt(data.otpm)} OTPM`);
+    metrics.push(data.rpd === null || data.rpd === undefined ? 'RPD dependiente de cuenta' : `${fmt(data.rpd)} RPD`);
+    const kind = data.limit_kind === 'published' ? 'publicados' : 'dependientes de cuenta';
+    const source = data.source_label ? ` · ${data.source_label}` : '';
     box.className = `mt-2 p-2 rounded border border-${tone} text-${tone}`;
     box.style.display = '';
     box.style.fontSize = '.8rem';
     box.innerHTML = `
-      <div class="fw-semibold mb-1"><i class="bi bi-speedometer2 me-1"></i>Límites orientativos de Gemini</div>
-      <div>${data.rpm} RPM · ${Number(data.tpm).toLocaleString('es-ES')} TPM · ${rpd}</div>
+      <div class="fw-semibold mb-1"><i class="bi bi-speedometer2 me-1"></i>Límites ${kind}${source}</div>
+      <div>${metrics.join(' · ')}</div>
       <div class="mt-1">Espera mínima recomendada con ${data.n_arbiters} árbitro(s): <strong>${data.min_delay_s}s</strong></div>
       <div class="mt-1 text-secondary">${data.alert_msg}</div>
     `;
@@ -447,7 +637,43 @@ async function loadRateLimitInfo() {
 // ---------------------------------------------------------------------------
 async function loadArbiters() {
   arbiters = await fetch('/api/arbiters').then(r => r.json());
+  await loadArbiterPreflight(false);
   renderList();
+}
+
+async function loadArbiterPreflight(shouldRender = true) {
+  const box = document.getElementById('arbiters-preflight');
+  const spinner = document.getElementById('preflight-spinner');
+  const title = document.getElementById('preflight-title');
+  const body = document.getElementById('preflight-body');
+  if (spinner) spinner.style.display = '';
+  try {
+    const data = await fetch('/api/arbiters/preflight').then(r => r.json());
+    preflightIssues = data.issues || [];
+    preflightByArbiter = {};
+    (data.arbiters || []).forEach(s => { preflightByArbiter[s.id] = s; });
+    if (box && title && body) {
+      box.classList.toggle('accent-emerald', !!data.ok);
+      box.classList.toggle('accent-rose', !data.ok);
+      box.classList.toggle('accent-blue', false);
+      title.innerHTML = data.ok
+        ? '<i class="bi bi-check2-circle text-success me-1"></i>Árbitros listos'
+        : '<i class="bi bi-exclamation-triangle text-warning me-1"></i>Hay árbitros que necesitan atención';
+      body.innerHTML = data.ok
+        ? 'Configuración y credenciales básicas verificadas. Puedes ejecutar cuando quieras.'
+        : `${preflightIssues.length} problema(s) detectado(s). Revisa las tarjetas marcadas abajo.`;
+    }
+  } catch (e) {
+    if (box && title && body) {
+      box.classList.remove('accent-emerald');
+      box.classList.add('accent-rose');
+      title.innerHTML = '<i class="bi bi-x-circle text-danger me-1"></i>No se pudo verificar';
+      body.textContent = e.message || 'Error consultando el preflight de árbitros.';
+    }
+  } finally {
+    if (spinner) spinner.style.display = 'none';
+    if (shouldRender) renderList();
+  }
 }
 
 const PROVIDER_ICONS = {
@@ -459,10 +685,40 @@ const PROVIDER_LABELS = {
   ollama:'Ollama', openai_compat:'Compatible con OpenAI'
 };
 
+
+function arbiterPreflightBadge(arbId) {
+  const status = preflightByArbiter[arbId];
+  if (!status) {
+    return `<span class="text-secondary small"><i class="bi bi-hourglass-split me-1"></i>verificación pendiente</span>`;
+  }
+  if (status.ok) {
+    const access = status.access_checked ? ' y acceso básico verificado' : '';
+    return `<span class="small" style="color:#34d399"><i class="bi bi-check2-circle me-1"></i>configuración${access}</span>`;
+  }
+  const details = (status.issues || []).map(i => `<div class="mt-1">${escapeHtml(i)}</div>`).join('');
+  return `<div class="small text-warning">
+    <div class="fw-semibold"><i class="bi bi-exclamation-triangle me-1"></i>requiere atención antes de ejecutar</div>
+    <div class="text-secondary" style="font-size:.76rem">${details}</div>
+  </div>`;
+}
+
 function renderList() {
   const el = document.getElementById('arbiters-list');
   if (!arbiters.length) {
-    el.innerHTML = '<div class="text-secondary text-center py-5">No hay arbitros configurados.</div>';
+    el.innerHTML = `
+      <div class="card-dark accent-card accent-amber text-center py-5">
+        <i class="bi bi-exclamation-triangle text-warning fs-1 mb-3 d-block"></i>
+        <div class="fw-semibold mb-2">Sin arbitros no se puede hacer nada.</div>
+        <div class="text-secondary small mb-3">Crea un arbitro nuevo o importa una configuracion cifrada para poder ejecutar el etiquetado.</div>
+        <div class="d-flex gap-2 justify-content-center flex-wrap">
+          <button class="btn btn-primary btn-sm" onclick="openModal()">
+            <i class="bi bi-plus-lg me-1"></i>Nuevo arbitro
+          </button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="openImportModal()">
+            <i class="bi bi-upload me-1"></i>Importar
+          </button>
+        </div>
+      </div>`;
     return;
   }
   const tones = ['accent-cyan', 'accent-violet', 'accent-emerald', 'accent-amber', 'accent-rose'];
@@ -504,8 +760,11 @@ function renderList() {
         </div>
       </div>
       <div class="d-flex gap-3 mt-3 pt-2 border-top border-dark">
-        <span class="text-secondary small"><i class="bi bi-thermometer me-1"></i>temperatura: ${a.generation_config?.temperature ?? 0.1}</span>
+        ${temperatureBadge(a.generation_config?.temperature ?? 0.1)}
         <span class="text-secondary small"><i class="bi bi-hash me-1"></i>máximo de tokens: ${a.generation_config?.max_output_tokens ?? 600}</span>
+      </div>
+      <div class="mt-2 pt-2 border-top border-dark">
+        ${arbiterPreflightBadge(a.id)}
       </div>
     </div>`;
   }).join('');
@@ -537,8 +796,8 @@ function openModal(arbId = null) {
     document.getElementById('arb-temp').value                = a.generation_config?.temperature ?? 0.1;
     document.getElementById('arb-tokens').value              = a.generation_config?.max_output_tokens ?? 600;
     document.getElementById('arb-system-prompt').value       = a.system_prompt;
-    document.getElementById('arb-api-key-env').value         = a.provider?.api_key_env || '';
-    document.getElementById('arb-api-key-override').value    = a.provider?.api_key_override || '';
+    document.getElementById('arb-api-key-env').value         = DEFAULT_ENV[a.provider?.type || 'gemini'] || '';
+    document.getElementById('arb-api-key-override').value    = '';
     document.getElementById('arb-base-url').value            = a.provider?.base_url || '';
     document.getElementById('arb-vertex-project').value      = a.provider?.vertex_project || '';
     document.getElementById('arb-vertex-location').value     = a.provider?.vertex_location || 'us-central1';
@@ -554,6 +813,7 @@ function openModal(arbId = null) {
     document.getElementById('apikey-section').style.setProperty('display', needKey ? '' : 'none', 'important');
     document.getElementById('baseurl-section').style.setProperty('display', needUrl ? '' : 'none', 'important');
     document.getElementById('vertex-section').style.setProperty('display', needVertex ? '' : 'none', 'important');
+    updateApiKeyHelp();
     // Cargar modelos y mostrar el seleccionado
     loadModels().then(() => {
       renderSelectedChip();
@@ -579,6 +839,7 @@ function openModal(arbId = null) {
     document.getElementById('apikey-section').style.removeProperty('display');
     document.getElementById('baseurl-section').style.setProperty('display','none','important');
     document.getElementById('vertex-section').style.setProperty('display','none','important');
+    updateApiKeyHelp();
     hideRateLimitInfo();
   }
 
@@ -598,8 +859,8 @@ async function saveArbiter() {
     provider: {
       type:             activeProvider,
       model:            selectedModel,
-      api_key_env:      document.getElementById('arb-api-key-env').value.trim(),
-      api_key_override: document.getElementById('arb-api-key-override').value.trim(),
+      api_key_env:      DEFAULT_ENV[activeProvider] || '',
+      api_key_override: '',
       base_url:         document.getElementById('arb-base-url').value.trim(),
       vertex_project:   document.getElementById('arb-vertex-project').value.trim(),
       vertex_location:  document.getElementById('arb-vertex-location').value.trim() || 'us-central1',
@@ -645,6 +906,93 @@ async function confirmDelete() {
   bootstrap.Modal.getOrCreateInstance(document.getElementById('deleteModal')).hide();
   if (!res.ok) { showToast(data.error || 'Error', 'error'); return; }
   showToast('Arbitro eliminado');
+  await loadArbiters();
+}
+
+// ---------------------------------------------------------------------------
+// Importar / exportar cifrado
+// ---------------------------------------------------------------------------
+function openExportModal() {
+  document.getElementById('export-password').value = '';
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('exportModal')).show();
+}
+
+function openImportModal() {
+  document.getElementById('import-file').value = '';
+  document.getElementById('import-password').value = '';
+  document.getElementById('import-mode').value = 'merge';
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('importModal')).show();
+}
+
+function filenameFromDisposition(disposition) {
+  const match = (disposition || '').match(/filename="?([^"]+)"?/i);
+  return match ? match[1] : `labelforge-arbiters-${Date.now()}.lfarb`;
+}
+
+async function exportArbiters() {
+  const password = document.getElementById('export-password').value;
+  if (!password || password.length < 8) {
+    showToast('Usa una contrasena de al menos 8 caracteres', 'error');
+    return;
+  }
+
+  const res = await fetch('/api/arbiters/export', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({password}),
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    showToast(data.error || 'Error al exportar', 'error');
+    return;
+  }
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filenameFromDisposition(res.headers.get('Content-Disposition'));
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('exportModal')).hide();
+  showToast('Arbitros exportados en archivo cifrado');
+}
+
+async function importArbiters() {
+  const file = document.getElementById('import-file').files[0];
+  const password = document.getElementById('import-password').value;
+  const mode = document.getElementById('import-mode').value;
+
+  if (!file) {
+    showToast('Selecciona el archivo exportado', 'error');
+    return;
+  }
+  if (!password || password.length < 8) {
+    showToast('Escribe la contrasena del archivo', 'error');
+    return;
+  }
+  if (mode === 'replace' && !confirm('Esto reemplazara todos los arbitros actuales. Continuar?')) {
+    return;
+  }
+
+  const form = new FormData();
+  form.append('file', file);
+  form.append('password', password);
+  form.append('mode', mode);
+
+  const res = await fetch('/api/arbiters/import', {method: 'POST', body: form});
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    showToast(data.error || 'Error al importar', 'error');
+    return;
+  }
+
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('importModal')).hide();
+  showToast(`Importacion lista: ${data.added} agregados, ${data.updated} actualizados, ${data.kept} conservados`);
   await loadArbiters();
 }
 

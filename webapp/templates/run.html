@@ -1,6 +1,27 @@
 {% extends "base.html" %}
 {% block title %}Ejecutar — LabelForge{% endblock %}
 {% block content %}
+<style>
+  .log-arbiter-line {
+    border-left: 3px solid var(--arb-color);
+    background: linear-gradient(90deg, color-mix(in srgb, var(--arb-color) 18%, transparent), transparent 72%);
+    padding-left: .55rem;
+  }
+  .log-arbiter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: .25rem;
+    border: 1px solid color-mix(in srgb, var(--arb-color) 56%, transparent);
+    background: color-mix(in srgb, var(--arb-color) 16%, transparent);
+    color: var(--arb-color);
+    border-radius: 999px;
+    padding: .05rem .42rem;
+    margin-right: .35rem;
+    font-size: .74rem;
+    font-weight: 700;
+  }
+</style>
+
 <div class="page-title">
   <i class="bi bi-play-circle me-2" style="color:#34d399"></i>Ejecutar etiquetado
 </div>
@@ -16,8 +37,13 @@
         <label class="form-label small text-secondary">
           <i class="bi bi-sliders me-1"></i>Límite de entradas
         </label>
-        <input type="number" id="limit-input" class="form-control" min="1" value="10" placeholder="Vacío = procesar todo">
-        <div class="form-text text-secondary">Útil para pruebas rápidas. Deja vacío para procesar todo el conjunto de datos.</div>
+        <input type="number" id="limit-input" class="form-control" min="1" value="10" placeholder="Vacío = procesar todo" oninput="updateLimitExplanation()">
+        <div class="form-text text-secondary">
+          Es un límite total desde el inicio del dataset, no una cantidad adicional.
+        </div>
+        <div class="form-text text-info" id="limit-explanation">
+          Si hay checkpoint, las entradas ya guardadas se saltan.
+        </div>
       </div>
     </div>
     <div class="col-md-7">
@@ -220,6 +246,10 @@
     <div class="card-header-label mb-0"><i class="bi bi-table me-1"></i>Resultados obtenidos</div>
     <span class="badge bg-info-subtle text-info border border-info" id="stats-results-count"></span>
   </div>
+  <div class="text-secondary small mb-2">
+    Mostrando entradas procesadas, con las más recientes arriba.
+  </div>
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-3" id="results-controls"></div>
   <div id="stats-results-table"></div>
 </div>
 
@@ -240,6 +270,65 @@ let runErrors = [];
 let queuedClaims = [];
 let lastArbErrors = {};
 let latestLiveStats = null;
+let checkpointProcessedRows = 0;
+let checkpointTotalRows = 0;
+let resultsOffset = 0;
+let resultsPageSize = 'all';
+let statsRefreshTimer = null;
+const ARBITER_LOG_COLORS = ['#22d3ee', '#8b5cf6', '#34d399', '#f59e0b', '#fb7185'];
+let arbiterLogMeta = {};
+
+function configureArbiterLogColors(arbiters) {
+  arbiterLogMeta = {};
+  (arbiters || []).forEach((arb, idx) => {
+    const id = String(arb.id || '').trim();
+    if (!id) return;
+    arbiterLogMeta[id] = {
+      color: ARBITER_LOG_COLORS[idx % ARBITER_LOG_COLORS.length],
+      label: id,
+      name: arb.name || id,
+    };
+  });
+}
+
+function detectArbiterInLog(line) {
+  const text = String(line || '');
+  for (const [id, meta] of Object.entries(arbiterLogMeta)) {
+    const escapedId = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const patterns = [
+      new RegExp(`\\[${escapedId}\\]`, 'i'),
+      new RegExp(`\\bArbitro\\s+${escapedId}\\b`, 'i'),
+      new RegExp(`\\b${escapedId}\\s*\\(`, 'i'),
+      new RegExp(`\\b${escapedId}\\b`, 'i'),
+    ];
+    if (patterns.some(re => re.test(text))) return meta;
+  }
+  return null;
+}
+
+function updateLimitExplanation() {
+  const el = document.getElementById('limit-explanation');
+  const input = document.getElementById('limit-input');
+  if (!el || !input) return;
+
+  const raw = input.value.trim();
+  if (!raw) {
+    if (checkpointProcessedRows > 0) {
+      el.textContent = `Procesara todo el dataset, saltando las ${formatNumber(checkpointProcessedRows)} entradas ya guardadas.`;
+    } else {
+      el.textContent = 'Procesara todo el dataset desde el inicio.';
+    }
+    return;
+  }
+
+  const limit = Math.max(parseInt(raw, 10) || 0, 0);
+  if (checkpointProcessedRows > 0) {
+    const newRows = Math.max(limit - checkpointProcessedRows, 0);
+    el.textContent = `Con checkpoint: limite ${formatNumber(limit)} = considerar las primeras ${formatNumber(limit)} entradas del dataset; nuevas por procesar aprox.: ${formatNumber(newRows)}.`;
+  } else {
+    el.textContent = `Sin checkpoint: procesara como maximo las primeras ${formatNumber(limit)} entradas.`;
+  }
+}
 
 // ---------- punto de control ----------
 async function loadCheckpoint() {
@@ -248,11 +337,30 @@ async function loadCheckpoint() {
   const runState = cp.run_state;
 
   if (!cp.exists || !runState) {
+    checkpointProcessedRows = 0;
+    checkpointTotalRows = 0;
+    updateLimitExplanation();
     area.innerHTML = '<span class="text-secondary small"><i class="bi bi-bookmark-x me-1"></i>Sin punto de control: se procesará desde el inicio</span>';
     return;
   }
 
+  checkpointProcessedRows = Number(runState.processed_rows || 0);
+  checkpointTotalRows = Number(runState.total_rows || 0);
+  updateLimitExplanation();
+
   const isPaused = runState.status === 'paused';
+  const isCompleted = runState.status === 'completed';
+  const stateIcon = isPaused
+    ? 'bi-pause-circle text-warning'
+    : isCompleted
+      ? 'bi-check-circle text-success'
+      : 'bi-bookmark-check text-info';
+  const stateLabel = isPaused
+    ? 'Ejecucion pausada'
+    : isCompleted
+      ? 'Resultado final generado'
+      : 'Punto de control disponible';
+  const stateLabelClass = isPaused ? 'text-warning' : isCompleted ? 'text-success' : 'text-info';
   const resumeBtn = isPaused
     ? `<button class="btn btn-sm btn-primary mt-2" onclick="document.getElementById(\'btn-start\').click()">
          <i class="bi bi-play-fill me-1"></i>Reanudar esta ejecución
@@ -266,8 +374,8 @@ async function loadCheckpoint() {
       <div class="d-flex justify-content-between align-items-start">
         <div>
           <div class="d-flex align-items-center gap-2 mb-2">
-            <i class="bi ${icon}"></i>
-            <span class="fw-semibold ${isPaused ? 'text-warning' : 'text-info'}">${label}</span>
+            <i class="bi ${stateIcon}"></i>
+            <span class="fw-semibold ${stateLabelClass}">${stateLabel}</span>
             <span class="text-secondary small">${escapeHtml(runState.run_id || '')}</span>
           </div>
           <div class="small" style="color:#94a3b8">
@@ -275,7 +383,7 @@ async function loadCheckpoint() {
             <div class="mb-1"><span class="text-secondary">Exitosos:</span> ${formatNumber(runState.successful_rows || 0)} · <span class="text-secondary">Fallidos:</span> ${formatNumber(runState.failed_rows || 0)}</div>
             ${runState.pause_kind ? `<div class="mb-1"><span class="text-secondary">Motivo pausa:</span> <span class="text-danger">${escapeHtml(runState.pause_kind)}</span> — ${escapeHtml(runState.pause_reason || '')}</div>` : ''}
             <div><span class="text-secondary">Ultima actualizacion:</span> ${escapeHtml(runState.updated_at || '')}</div>
-            ${runState.output_file ? `<div class="mt-1"><span class="text-secondary">Resultado:</span> ${escapeHtml(runState.output_file)}</div>` : ''}
+            ${runState.output_file ? `<div class="mt-1"><span class="text-secondary">CSV final:</span> ${escapeHtml(runState.output_file)}</div>` : ''}
           </div>
           ${resumeBtn}
         </div>
@@ -294,12 +402,35 @@ async function clearCheckpoint() {
 }
 
 // ---------- resumen de configuración ----------
+function datasetSummaryText(dataset = {}, runState = null) {
+  const inputFile = (dataset.input_file || runState?.input_file || '').trim();
+  const sheet = (dataset.sheet || runState?.sheet || '').trim();
+  const textColumn = (dataset.text_column || runState?.text_column || 'claim').trim();
+
+  if (!inputFile) return 'sin archivo seleccionado';
+
+  const filename = inputFile.split(/[\\/]/).pop() || inputFile;
+  const details = [
+    `archivo: ${filename}`,
+    `ruta: ${inputFile}`,
+    sheet ? `hoja: ${sheet}` : '',
+    `columna: ${textColumn}`,
+  ].filter(Boolean);
+  return details.join(' - ');
+}
+
 async function loadConfigSummary() {
   try {
     const cfg = await fetch('/api/config').then(r => r.json());
+    const cp = await fetch('/api/checkpoint/status').then(r => r.json()).catch(() => ({}));
+    const runState = cp.run_state || null;
     document.getElementById('config-arbiters').textContent = cfg.arbiters.length;
     document.getElementById('config-principles').textContent = Object.keys(cfg.task?.principles || {}).length;
-    // Extrae el nombre del conjunto de datos si existe en el estado de ejecución.
+    const datasetText = datasetSummaryText(cfg.dataset || {}, runState);
+    const datasetEl = document.getElementById('config-dataset');
+    datasetEl.textContent = datasetText;
+    datasetEl.title = datasetText;
+    configureArbiterLogColors(cfg.arbiters || []);
   } catch(e) { /* silencio */ }
 }
 
@@ -374,6 +505,9 @@ async function loadFailedQueue() {
 
 // ---------- run ----------
 async function startRun() {
+  if (!Object.keys(arbiterLogMeta).length) {
+    await loadConfigSummary();
+  }
   const limit = document.getElementById('limit-input').value.trim();
 
   statsOK = 0; statsFailed = 0; statsErrors = 0;
@@ -381,6 +515,7 @@ async function startRun() {
   queuedClaims = [];
   lastArbErrors = {};
   latestLiveStats = null;
+  resultsOffset = 0;
   updateStats();
   renderRunLists();
   resetLiveStats();
@@ -394,7 +529,19 @@ async function startRun() {
     body: JSON.stringify(body),
   });
   const data = await res.json();
-  if (!res.ok) { showToast(data.error || 'Error al iniciar', 'error'); return; }
+  if (!res.ok) {
+    const issues = Array.isArray(data.issues) ? data.issues : [];
+    showToast(data.error || 'Error al iniciar', 'error');
+    appendLog(`[ERROR] ${data.error || 'Error al iniciar'}`, 'error');
+    issues.forEach(issue => {
+      const line = `[preflight] ${issue}`;
+      appendLog(line, 'error');
+      runErrors.push(line);
+    });
+    renderRunLists();
+    updateStats();
+    return;
+  }
 
   setRunning(true);
   startSSE();
@@ -446,6 +593,7 @@ function startSSE() {
 function appendLog(line, type = null) {
   const box = document.getElementById('log-box');
   const div = document.createElement('div');
+  const arbMeta = detectArbiterInLog(line);
   if (!type) {
     if (line.includes('[WARNING]') || line.includes('Fallo') || line.includes('fallido')) type = 'warn';
     else if (line.includes('[ERROR]') || line.includes('Error') || line.includes('FAILED')) type = 'error';
@@ -453,7 +601,14 @@ function appendLog(line, type = null) {
     else type = 'info';
   }
   div.className = `log-${type}`;
-  div.textContent = line;
+  if (arbMeta) {
+    div.classList.add('log-arbiter-line');
+    div.style.setProperty('--arb-color', arbMeta.color);
+    div.title = arbMeta.name;
+    div.innerHTML = `<span class="log-arbiter-chip">[${escapeHtml(arbMeta.label)}]</span> ${escapeHtml(line)}`;
+  } else {
+    div.textContent = line;
+  }
   box.appendChild(div);
   box.scrollTop = box.scrollHeight;
 }
@@ -770,6 +925,64 @@ function renderArbiterResult(arb, principles) {
     </div>`;
 }
 
+function resultPageLimitParam() {
+  return resultsPageSize === 'all' ? 'all' : String(resultsPageSize);
+}
+
+function resultPageSizeNumber(total) {
+  return resultsPageSize === 'all' ? Math.max(total, 1) : Number(resultsPageSize || 50);
+}
+
+function setResultsPageSize(value) {
+  resultsPageSize = value === 'all' ? 'all' : Math.max(parseInt(value, 10) || 50, 1);
+  resultsOffset = 0;
+  loadRunStats();
+}
+
+function moveResultsPage(direction) {
+  const total = Number(document.getElementById('results-range')?.max || 0) + 1;
+  const step = resultPageSizeNumber(total);
+  resultsOffset = Math.max(0, resultsOffset + (direction * step));
+  loadRunStats();
+}
+
+function jumpResultsOffset(value) {
+  resultsOffset = Math.max(parseInt(value, 10) || 0, 0);
+  loadRunStats();
+}
+
+function renderResultsControls(data) {
+  const controls = document.getElementById('results-controls');
+  if (!controls) return;
+
+  const total = Number(data.results_total || 0);
+  const offset = Number(data.results_offset || 0);
+  const count = Number(data.results_count || 0);
+  const from = total ? offset + 1 : 0;
+  const to = total ? offset + count : 0;
+  const maxOffset = Math.max(total - 1, 0);
+  const pageSizeValue = resultsPageSize === 'all' ? 'all' : String(resultsPageSize);
+
+  controls.innerHTML = `
+    <button class="btn btn-sm btn-outline-secondary" onclick="moveResultsPage(-1)" ${data.results_has_prev ? '' : 'disabled'} title="Pagina anterior">
+      <i class="bi bi-chevron-left"></i>
+    </button>
+    <button class="btn btn-sm btn-outline-secondary" onclick="moveResultsPage(1)" ${data.results_has_next ? '' : 'disabled'} title="Pagina siguiente">
+      <i class="bi bi-chevron-right"></i>
+    </button>
+    <select class="form-select form-select-sm" style="width:130px" onchange="setResultsPageSize(this.value)" title="Resultados por pagina">
+      <option value="25" ${pageSizeValue === '25' ? 'selected' : ''}>25</option>
+      <option value="50" ${pageSizeValue === '50' ? 'selected' : ''}>50</option>
+      <option value="100" ${pageSizeValue === '100' ? 'selected' : ''}>100</option>
+      <option value="250" ${pageSizeValue === '250' ? 'selected' : ''}>250</option>
+      <option value="all" ${pageSizeValue === 'all' ? 'selected' : ''}>Todos</option>
+    </select>
+    <input id="results-range" type="range" class="form-range flex-grow-1" min="0" max="${maxOffset}" value="${offset}" step="1" oninput="document.getElementById('results-range-label').textContent = '#' + this.value" onchange="jumpResultsOffset(this.value)" title="Saltar a una entrada">
+    <span class="small text-secondary text-nowrap" id="results-range-label">#${offset}</span>
+    <span class="small text-secondary text-nowrap">${formatNumber(from)}-${formatNumber(to)} de ${formatNumber(total)}</span>
+  `;
+}
+
 function renderResultsTable(data) {
   const panel = document.getElementById('results-panel');
   const target = document.getElementById('stats-results-table');
@@ -782,6 +995,7 @@ function renderResultsTable(data) {
   }
 
   panel.style.display = '';
+  renderResultsControls(data);
   document.getElementById('stats-results-count').textContent = data.results_truncated
     ? `Mostrando ${formatNumber(data.results_count)} de ${formatNumber(data.results_total)}`
     : `${formatNumber(data.results_total)} entradas`;
@@ -844,24 +1058,24 @@ function renderRunLists() {
   if (!runErrors.length) {
     errorsEl.innerHTML = 'Sin errores detectados.';
   } else {
-    errorsEl.innerHTML = `<div style="max-height:260px;overflow:auto">${runErrors.slice(-30).reverse().map(e => `
+    errorsEl.innerHTML = `${runErrors.slice(-30).reverse().map(e => `
       <div class="p-2 mb-2 rounded" style="background:#130b10;border:1px solid #3f1f2a">
         <div class="text-danger fw-semibold">${escapeHtml(e.kind)}</div>
         <div class="text-secondary" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.76rem">${escapeHtml(e.detail)}</div>
       </div>
-    `).join('')}</div>`;
+    `).join('')}`;
   }
 
   const queuedEl = document.getElementById('queued-list');
   if (!queuedClaims.length) {
     queuedEl.innerHTML = 'Sin entradas encoladas.';
   } else {
-    queuedEl.innerHTML = `<div style="max-height:260px;overflow:auto">${queuedClaims.slice(-30).reverse().map(q => `
+    queuedEl.innerHTML = `${queuedClaims.slice(-30).reverse().map(q => `
       <div class="p-2 mb-2 rounded" style="background:#151107;border:1px solid #49350e">
         <div class="text-warning fw-semibold">Entrada ${escapeHtml(q.claim)} · ${escapeHtml(q.arbiter)}</div>
         <div class="text-secondary" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.76rem">${escapeHtml(q.reason)}</div>
       </div>
-    `).join('')}</div>`;
+    `).join('')}`;
   }
 }
 
@@ -884,14 +1098,31 @@ function setRunning(running) {
   // Bloquear boton de limpiar checkpoint (dinamico)
   const clearBtn = document.querySelector('#checkpoint-area button');
   if (clearBtn) clearBtn.disabled = running;
+
+  if (running) {
+    if (!statsRefreshTimer) {
+      statsRefreshTimer = setInterval(() => loadRunStats(true), 8000);
+    }
+  } else if (statsRefreshTimer) {
+    clearInterval(statsRefreshTimer);
+    statsRefreshTimer = null;
+  }
 }
 
 // ---------- estadisticas de tokens y tiempos ----------
-async function loadRunStats() {
-  const res = await fetch('/api/run/stats?limit=250');
+async function loadRunStats(keepPosition = false) {
+  if (!keepPosition && resultsPageSize !== 'all') {
+    resultsOffset = Math.max(resultsOffset, 0);
+  }
+  const params = new URLSearchParams({
+    limit: resultPageLimitParam(),
+    offset: String(resultsOffset),
+  });
+  const res = await fetch(`/api/run/stats?${params.toString()}`);
   if (!res.ok) return;
   const data = await res.json();
   if (data.error) return;
+  resultsOffset = Number(data.results_offset || 0);
 
   const panel = document.getElementById('stats-panel');
   panel.style.display = '';

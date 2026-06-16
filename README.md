@@ -86,6 +86,8 @@ El sistema analiza y evalúa la presencia (1) o ausencia (0) de cinco tácticas 
 *   **Política de Seguridad (`free_only_mode`)**: Bloquea proveedores con riesgo de cargo (Vertex AI, Anthropic, OpenAI) cuando el modo seguro está activo, evitando consumo accidental de tokens de pago durante pruebas.
 *   **Dataset Configurable (CSV y Excel)**: El archivo de entrada, la hoja de cálculo (solo Excel) y la columna de texto son configurables desde la webapp o la CLI sin tocar código. Soporta `.csv`, `.xlsx` y `.xls`.
 *   **Soporte Multimodelo y Multiproveedor**: Integra los SDKs oficiales de Google GenAI (`google-genai`), Vertex AI (`google-cloud-aiplatform`), Anthropic (`anthropic`) y OpenAI (`openai`), además de APIs locales u open-source compatibles con el protocolo de OpenAI (Ollama, LM Studio, vLLM).
+*   **Gestión Segura de Árbitros y Secretos**: Los árbitros pueden exportarse/importarse en archivos `.lfarb` cifrados con contraseña. Las API keys se verifican antes de guardarse en `secrets/secrets.env`, y la lógica de cifrado/secretos está centralizada en módulos Python compartidos por WebApp y CLI.
+*   **Preflight de Proveedores**: Antes de iniciar un run, el backend valida credenciales/configuración de cada proveedor y devuelve instrucciones accionables (WebApp, CLI, `secrets/secrets.env`, service account o `gcloud`) sin esperar a que falle una entrada a mitad del procesamiento.
 *   **Logs Interactivos en la WebApp**: Utiliza Server-Sent Events (SSE) para transmitir la salida de consola de Python directamente a la pantalla de ejecución web en tiempo real (incluyendo el reporte de tokens y latencia al final).
 
 ---
@@ -98,6 +100,9 @@ El sistema analiza y evalúa la presencia (1) o ausencia (0) de cinco tácticas 
     *   **[`label_persuasion.py`](file:///e:/Code/python/OpenCode/LabelForge/scripts/label_persuasion.py)**: Contiene la lógica central del pipeline: controladores de API por proveedor, limitador dinámico de peticiones, procesamiento de checkpoints, consenso, **medición de tokens y latencia por llamada y por entrada**, diagnóstico de consenso por entrada y generación del reporte final.
     *   **[`arbiters_config.json`](file:///e:/Code/python/OpenCode/LabelForge/scripts/arbiters_config.json)**: Archivo JSON central que almacena la configuración de los principios, los árbitros, los prompts del sistema y los parámetros del limitador de velocidad.
     *   **[`agreement_metrics.py`](file:///e:/Code/python/OpenCode/LabelForge/scripts/agreement_metrics.py)**: Módulo compartido de cálculo de métricas de acuerdo inter-árbitros (Fleiss Kappa, Cohen's Kappa, Krippendorff's Alpha).
+    *   **[`arbiters_io.py`](file:///e:/Code/python/OpenCode/LabelForge/scripts/arbiters_io.py)**: Módulo compartido para exportar/importar árbitros en archivos `.lfarb` cifrados, validar el formato y fusionar/reemplazar configuraciones.
+    *   **[`secrets_io.py`](file:///e:/Code/python/OpenCode/LabelForge/scripts/secrets_io.py)**: Módulo compartido para mapear proveedores a variables de entorno y escribir `secrets/secrets.env` de forma controlada.
+    *   **[`provider_preflight.py`](file:///e:/Code/python/OpenCode/LabelForge/scripts/provider_preflight.py)**: Módulo compartido para validar credenciales/configuración de proveedores antes de ejecutar el pipeline.
     *   **[`utils.py`](file:///e:/Code/python/OpenCode/LabelForge/scripts/utils.py)**: Helper utilitario para parseo numérico y tipos de datos seguros.
 *   **`webapp/`**:
     *   **[`app.py`](file:///e:/Code/python/OpenCode/LabelForge/webapp/app.py)**: Backend Flask de la aplicación web que gestiona los servicios API, el renderizado de plantillas, la ejecución del subproceso CLI de etiquetado y los endpoints de métricas. Lee datos ya calculados por el pipeline y solo calcula respaldos para CSV antiguos.
@@ -136,8 +141,8 @@ Alternativamente, si utilizas un entorno de Python estándar (`venv`), instala l
 pip install -r requirements.txt
 ```
 
-### 3. Configuración de Variables de Entorno (`secrets.env`)
-Crea el archivo [`secrets.env`](file:///e:/Code/python/OpenCode/LabelForge/secrets.env) en la raíz del proyecto copiando la plantilla [`secrets.env.example`](file:///e:/Code/python/OpenCode/LabelForge/secrets.env.example) y edítalo para incluir tus credenciales y claves API de los diferentes proveedores que desees utilizar:
+### 3. Configuración de Variables de Entorno (`secrets/secrets.env`)
+Crea el archivo [`secrets/secrets.env`](file:///e:/Code/python/OpenCode/LabelForge/secrets/secrets.env) dentro de la carpeta local `secrets/`, copiando la plantilla [`secrets.env.example`](file:///e:/Code/python/OpenCode/LabelForge/secrets.env.example), y edítalo para incluir tus credenciales y claves API de los diferentes proveedores que desees utilizar:
 
 ```env
 # Google Gemini (API Key estándar)
@@ -161,18 +166,30 @@ VERTEX_LOCATION=us-central1
 > **Nota sobre macOS**: el puerto `5000` está ocupado por el servicio AirPlay
 > Receiver desde macOS 12 Monterey. LabelForge usa `7860` por defecto para
 > evitar ese conflicto. Si necesitas otro puerto, define `LABELFORGE_PORT` en
-> `secrets.env` o usa el argumento `--port` en la línea de comandos.
+> `secrets/secrets.env` o usa el argumento `--port` en la línea de comandos.
 
 ### 4. Autenticación para Vertex AI (Google Cloud)
 
-Si usas `vertex_gemini` como proveedor, debes autenticarte con Application Default Credentials (ADC). Ejecuta **una sola vez** en la máquina donde corre el pipeline:
+Si usas `vertex_gemini` como proveedor, debes autenticarte con Application Default Credentials (ADC). Vertex AI no usa API key directa como Gemini AI Studio, Claude u OpenAI.
+
+Opción sin login interactivo local: usa una service account JSON creada en Google Cloud Console y define la ruta en `secrets/secrets.env`:
+
+```env
+GOOGLE_APPLICATION_CREDENTIALS=secrets\service-account.json
+GOOGLE_CLOUD_PROJECT=TU_PROJECT_ID
+VERTEX_LOCATION=us-central1
+```
+
+Opción con Google Cloud CLI: ejecuta **una sola vez** en la máquina donde corre el pipeline:
 
 ```bash
 gcloud auth application-default login
 gcloud auth application-default set-quota-project TU_PROJECT_ID
 ```
 
-Esto guarda las credenciales localmente para que el SDK de Vertex AI las use de forma automática sin necesidad de una API Key en `secrets.env`.
+Esto guarda las credenciales localmente para que el SDK de Vertex AI las use de forma automática sin necesidad de una API Key en `secrets/secrets.env`.
+
+Para proveedores con API key (`gemini`, `anthropic`, `openai`, `openai_compat`), la ruta recomendada es la WebApp: pestaña **Arbitros**, pega la clave en **Clave de API** y pulsa verificar. Si prefieres CLI: `python main_label.py --set-provider-key anthropic` (cambia el proveedor según corresponda). Ollama no usa key, pero debe tener `base_url`, por ejemplo `http://localhost:11434/v1`.
 
 ### 5. Ejecución de Pruebas Unitarias
 
@@ -205,10 +222,10 @@ Puedes especificar argumentos adicionales en consola:
 
 #### Flujo de trabajo en la Webapp:
 1.  **Panel de Inicio**: Observa el estado actual del dataset, los árbitros activos y el último checkpoint.
-2.  **Gestionar Árbitros**: Ve a la pestaña **Arbitros** para agregar nuevos perfiles o modificar los modelos de lenguaje utilizados por cada uno (p. ej., cambiar de `gemini-2.5-pro` a `gemini-2.5-flash`).
-3.  **Configurar Dataset**: En **Procesamiento**, usa el panel "Dataset de Entrada" para seleccionar el archivo de datos (CSV o Excel) mediante **drag & drop** o haciendo click en la zona o el botón "Seleccionar archivo". El botón **Inspeccionar** rellena automáticamente los dropdowns de sheets y columnas.
+2.  **Gestionar Árbitros**: Ve a la pestaña **Arbitros** para agregar nuevos perfiles o modificar los modelos de lenguaje utilizados por cada uno (p. ej., cambiar de `gemini-2.5-pro` a `gemini-2.5-flash`). Para proveedores con API key (Gemini AI Studio, Anthropic, OpenAI y OpenAI-compatible), pega la clave en **Clave de API** y pulsa verificar: si la clave lista modelos correctamente, se guarda en `secrets/secrets.env` bajo la variable correspondiente y se refresca la grilla de modelos. La pestaña también permite **Importar** y **Exportar** árbitros en formato `.lfarb` cifrado. Se puede dejar la lista de árbitros vacía; en ese caso la UI muestra una advertencia y no se puede ejecutar etiquetado hasta crear o importar al menos uno.
+3.  **Configurar Dataset**: En **Procesamiento**, usa el panel "Dataset de Entrada" para seleccionar el archivo de datos (CSV o Excel) mediante **drag & drop** o haciendo click en la zona o el botón "Seleccionar archivo". Al guardar, `dataset.input_file`, `dataset.sheet` y `dataset.text_column` quedan persistidos en `scripts/arbiters_config.json`. La pestaña muestra una tarjeta **Archivo listo para procesar** con la ruta/hoja/columna que se usarán en la próxima ejecución.
 4.  **Configurar Parámetros**: En la misma pestaña **Procesamiento**, selecciona tu nivel de facturación (Free o Paid) para recibir recomendaciones automáticas de delay seguro.
-5.  **Ejecutar**: En la pestaña **Ejecutar**, define una cantidad límite de entradas para probar (ej. `10` o `50`) y presiona **Iniciar Etiquetado**. Verás el progreso detallado y los reportes directamente en el visor de logs. Mientras el proceso corre, todos los controles (límite, limpiar checkpoint) se deshabilitan automáticamente para evitar cambios accidentales.
+5.  **Ejecutar**: En la pestaña **Ejecutar**, define un **límite total desde el inicio del dataset** (ej. `70` = considerar las primeras 70 filas, no 70 nuevas). Si hay checkpoint con 50 entradas ya persistidas y pones `70`, se procesarán aproximadamente 20 entradas nuevas. La UI muestra esta explicación dinámicamente. Antes de arrancar, el backend ejecuta un preflight de credenciales/proveedores; si algo falta, el run no empieza y el log muestra instrucciones claras.
 6.  **Panel de Métricas**: Al finalizar la ejecución, el resumen del resultado guardado se actualiza automáticamente mostrando las estadísticas completas de consumo calculadas por el backend.
 
 ---
@@ -232,6 +249,15 @@ python main_label.py --input data/otro_dataset.csv --column texto
 
 # Archivo Excel: indicar sheet y columna
 python main_label.py --input data/dataset.xlsx --sheet "Datos" --column "Noticia"
+
+# Verificar y guardar una API key en secrets/secrets.env
+python main_label.py --set-provider-key anthropic
+python main_label.py --set-provider-key openai --api-key "sk-..."
+
+# Exportar/importar árbitros cifrados
+python main_label.py --export-arbiters backup.lfarb
+python main_label.py --import-arbiters backup.lfarb
+python main_label.py --import-arbiters backup.lfarb --replace-arbiters
 ```
 
 #### Argumentos soportados en CLI:
@@ -239,7 +265,15 @@ python main_label.py --input data/dataset.xlsx --sheet "Datos" --column "Noticia
 *   `--input`: Ruta al archivo de entrada — CSV (`.csv`) o Excel (`.xlsx`/`.xls`). Si se omite, se usa el valor de `dataset.input_file` en el config.
 *   `--sheet`: Nombre o índice de la hoja de cálculo (solo para Excel). Si se omite, se usa la primera hoja.
 *   `--column`: Nombre de la columna que contiene el texto a etiquetar. Si se omite, se usa `dataset.text_column` del config.
-*   `--limit`: Limita la cantidad de filas a procesar (entero). Si se omite, se procesará todo el archivo.
+*   `--limit`: Límite total de filas consideradas desde el inicio del dataset. Con checkpoint, las filas ya finalizadas dentro de ese rango se saltan; no es una cantidad adicional.
+*   `--set-provider-key`: Verifica y guarda una API key para `gemini`, `anthropic`, `openai` u `openai_compat`.
+*   `--api-key`: API key para `--set-provider-key`. Si se omite, se solicita de forma interactiva.
+*   `--api-key-env`: Variable destino en `secrets/secrets.env`; si se omite, se usa la variable estándar del proveedor.
+*   `--base-url`: Dirección base para verificar proveedores `openai_compat`.
+*   `--export-arbiters`: Exporta la lista de árbitros a un archivo `.lfarb` cifrado y sale.
+*   `--import-arbiters`: Importa árbitros desde un archivo `.lfarb` cifrado y sale.
+*   `--replace-arbiters`: Al importar, reemplaza toda la lista actual en vez de fusionar por ID.
+*   `--arbiters-password` / `--arbiters-password-file`: Contraseña para import/export cifrado. Si se omite, se solicita de forma interactiva.
 
 ---
 
@@ -293,6 +327,14 @@ La pestaña **Ejecutar** incluye paneles de métricas en vivo y de resumen del r
 *   **Tabla por árbitro**: Tokens de entrada, salida y total; número de llamadas; latencia promedio, mínima/máxima y latencia total acumulada.
 
 El panel también se carga al abrir la página si ya existe un CSV previo, gracias al endpoint `GET /api/run/stats`.
+
+El visor de logs colorea las líneas asociadas a árbitros con la misma secuencia visual usada en la pestaña **Arbitros** (`arb1`, `arb2`, etc.). Esto ayuda a identificar rápidamente qué árbitro produjo una respuesta, warning o error.
+
+Antes de lanzar el subproceso, `/api/run/start` ejecuta `scripts/provider_preflight.py`. Este preflight bloquea el inicio si detecta credenciales o configuración incompletas:
+
+*   `vertex_gemini`: valida proyecto y credenciales ADC. Si falta ADC, explica si `gcloud` está instalado o propone service account JSON + `GOOGLE_APPLICATION_CREDENTIALS`.
+*   `gemini`, `anthropic`, `openai`: valida API key por variable/env y sugiere WebApp, CLI `--set-provider-key` o edición de `secrets/secrets.env`.
+*   `openai_compat` y `ollama`: valida `base_url` y muestra ejemplos locales como `http://localhost:11434/v1`.
 
 ---
 
@@ -354,7 +396,9 @@ Si una entrada falla permanentemente después de la cola de reintentos, el conse
 | `POST` | `/api/arbiters` | Crea un nuevo árbitro |
 | `GET` | `/api/arbiters/<arb_id>` | Obtiene un árbitro por ID |
 | `PUT` | `/api/arbiters/<arb_id>` | Actualiza un árbitro existente |
-| `DELETE` | `/api/arbiters/<arb_id>` | Elimina un árbitro |
+| `DELETE` | `/api/arbiters/<arb_id>` | Elimina un árbitro; puede dejar la lista vacía |
+| `POST` | `/api/arbiters/export` | Exporta los árbitros a un archivo `.lfarb` cifrado |
+| `POST` | `/api/arbiters/import` | Importa árbitros desde un `.lfarb` cifrado (merge o replace) |
 
 ### Principios y configuración
 
@@ -373,8 +417,11 @@ Si una entrada falla permanentemente después de la cola de reintentos, el conse
 | Método | Endpoint | Descripción |
 |---|---|---|
 | `GET` | `/api/models` | Lista modelos disponibles para un proveedor (`?provider=gemini\|anthropic\|openai\|ollama`) |
-| `GET` | `/api/rate-limits` | Límites de velocidad y delay mínimo recomendado para un modelo |
+| `POST` | `/api/provider-key` | Verifica una API key, la guarda en `secrets/secrets.env` y devuelve modelos disponibles |
+| `GET` | `/api/rate-limits` | Límites de velocidad y delay mínimo recomendado para un proveedor/modelo (`provider`, `model`, `tier`, `arbiters`) |
 | `GET` | `/api/rate-limits/summary` | Resumen de rate limits y delay global para todos los árbitros configurados |
+
+Los perfiles de rate limit viven en `scripts/rate_limits.py` y se consumen desde el backend. Para `gemini` se usan límites publicados de Gemini API/AI Studio cuando el modelo coincide con la tabla conocida. Para `vertex_gemini`, `anthropic`, `openai`, `openai_compat` y `ollama`, la UI muestra perfiles por modelo o familia como fallback conservador y los marca como `account_dependent`, porque las cuotas reales dependen de cuenta, proyecto, región, tier, organización o hardware local.
 
 ### Dataset de entrada
 
@@ -425,21 +472,43 @@ La regla actual es que **todo cálculo de procesamiento y métricas vive en Pyth
 
 - `scripts/label_persuasion.py` calcula consenso, diagnóstico de consenso por entrada, tokens, latencia y columnas `entry_*`.
 - `scripts/agreement_metrics.py` calcula métricas globales y por principio, porcentajes e interpretación del kappa.
+- `scripts/arbiters_io.py` centraliza el formato `.lfarb`, cifrado AES-GCM, validación y merge/reemplazo de árbitros.
+- `scripts/secrets_io.py` centraliza el mapeo proveedor→variable (`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) y la escritura de `secrets/secrets.env`.
 - `webapp/app.py` expone esos datos por API y solo calcula respaldos para CSV antiguos.
-- Las plantillas en `webapp/templates/` solo renderizan datos, formatean valores y manejan interacción visual.
+- Las plantillas en `webapp/templates/` solo renderizan datos, formatean valores y manejan interacción visual. No deben implementar cifrado, escritura de secretos ni reglas de negocio.
+
+### Gestión de secretos y exportación de árbitros
+
+Las API keys reales viven en `secrets/secrets.env`, no en `scripts/arbiters_config.json`.
+El archivo de configuración de árbitros solo debe guardar `provider.api_key_env`.
+Para configuraciones nuevas, `provider.api_key_override` debe permanecer vacío.
+
+| Proveedor | Variable usada |
+|---|---|
+| `gemini` | `GEMINI_API_KEY` |
+| `anthropic` | `ANTHROPIC_API_KEY` |
+| `openai` | `OPENAI_API_KEY` |
+| `openai_compat` | `OPENAI_API_KEY` |
+| `vertex_gemini` | ADC/Google Cloud, sin API key directa |
+| `ollama` | Sin API key por defecto |
+
+Los árbitros se pueden exportar como `.lfarb`, un JSON técnico que contiene un
+`ciphertext` cifrado con contraseña. El contenido sensible (prompts, modelos y
+posibles secretos heredados) no queda visible en claro.
 
 ### Política de Seguridad (`free_only_mode`)
 
-Cuando `safety.free_only_mode = true` en `scripts/arbiters_config.json`, el pipeline bloquea en el arranque cualquier árbitro que use un proveedor con riesgo de costo:
+Estado actual de `scripts/arbiters_config.json`: `safety.free_only_mode = false` para permitir pruebas con Vertex/Claude sin bloqueos de política. Si se vuelve a poner en `true`, el pipeline bloquea en el arranque cualquier árbitro cuyo proveedor no esté en `allowed_provider_types`. Esto evita costos accidentales, pero permite declarar excepciones explícitas cuando quieres usar un proveedor pagado como Claude.
 
-| Permitidos por defecto | Bloqueados por defecto |
+| Permitidos en la configuración actual | Bloqueados salvo autorización explícita |
 |---|---|
-| `gemini` (AI Studio) | `vertex_gemini` |
-| `ollama` | `anthropic` |
-| `openai_compat` local (`127.0.0.1`, `localhost`) | `openai` |
-| | `openai_compat` remoto |
+| `gemini` (AI Studio) | `openai` |
+| `vertex_gemini` | `openai_compat` remoto |
+| `anthropic` | otros proveedores no listados |
+| `ollama` | |
+| `openai_compat` local (`127.0.0.1`, `localhost`) | |
 
-Para desactivarlo, cambia `free_only_mode` a `false` o añade el proveedor a `allowed_provider_types` en la configuración.
+Para modo seguro, cambia `free_only_mode` a `true` y revisa `allowed_provider_types`. Para pruebas amplias, puede mantenerse en `false`; el preflight de credenciales seguirá activo.
 
 ### Módulo de Utilidades Compartidas (`scripts/utils.py`)
 
@@ -468,7 +537,7 @@ Jerarquía de precedencia para host y puerto del servidor Flask:
 ```
 
 - **Puerto por defecto `7860`**: libre en macOS (donde el `5000` está ocupado por AirPlay Receiver desde Monterey), Windows y Linux.
-- **Las variables de entorno** pueden definirse en `secrets.env` sin necesidad de tocar el código fuente.
+- **Las variables de entorno** pueden definirse en `secrets/secrets.env` sin necesidad de tocar el código fuente.
 
 ### Configuración del Dataset de Entrada
 
@@ -497,3 +566,4 @@ El logger de Python usa `logging.basicConfig` con dos handlers simultáneos:
 - `StreamHandler` → stdout (capturado por el SSE de la webapp)
 
 Esto garantiza que **toda la salida visible en consola**, incluyendo el reporte final de tokens y latencia, quede también persistida en el archivo de log.
+

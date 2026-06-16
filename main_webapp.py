@@ -20,7 +20,7 @@ Ejemplos:
     # Accesible desde la red local (ej: para probar desde otro dispositivo)
     python main_webapp.py --host 0.0.0.0 --port 7860
 
-Variables de entorno (se pueden poner en secrets.env):
+Variables de entorno (se pueden poner en secrets/secrets.env):
     LABELFORGE_HOST  - host por defecto (ej: 0.0.0.0)
     LABELFORGE_PORT  - puerto por defecto (ej: 8080)
     Los argumentos --host y --port tienen precedencia sobre las variables de entorno.
@@ -38,7 +38,8 @@ if str(ROOT) not in sys.path:
 
 # Cargar variables de entorno antes de parsear argumentos
 from dotenv import load_dotenv
-load_dotenv(ROOT / "secrets.env")
+from scripts.secrets_io import secrets_env_path
+load_dotenv(secrets_env_path(ROOT))
 
 # Valores por defecto: CLI > env var > hardcoded
 _DEFAULT_HOST = os.environ.get("LABELFORGE_HOST", "127.0.0.1")

@@ -6,6 +6,7 @@ de principios de persuasion de Ana Ferreira.
 import json
 import os
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -19,6 +20,18 @@ from flask import Flask, Response, jsonify, render_template, request, send_from_
 # Módulo compartido de métricas de acuerdo y utilidades
 # ---------------------------------------------------------------------------
 from scripts.agreement_metrics import compute_agreement_metrics
+from scripts.arbiters_io import (
+    build_arbiters_export_payload,
+    decrypt_arbiters_export,
+    encrypt_arbiters_export,
+    merge_arbiters,
+    normalize_arbiter,
+    require_export_password,
+    validate_imported_arbiters,
+)
+from scripts.secrets_io import provider_api_key_env, secrets_env_path, set_secret_value
+from scripts.rate_limits import compute_min_delay
+from scripts.provider_preflight import validate_provider_preflight
 from scripts.utils import safe_int as _safe_int, safe_float as _safe_float
 
 # ---------------------------------------------------------------------------
@@ -31,7 +44,8 @@ SCRIPTS_DIR     = BASE_DIR / "scripts"
 OUTPUT_DIR      = BASE_DIR / "output"
 CHECKPOINTS_DIR = BASE_DIR / "checkpoints"
 
-load_dotenv(BASE_DIR / "secrets.env")
+SECRETS_ENV_PATH = secrets_env_path(BASE_DIR)
+load_dotenv(SECRETS_ENV_PATH)
 
 app = Flask(__name__)
 
@@ -83,128 +97,6 @@ OPENAI_MODEL_DESCRIPTIONS = {
 # Cache por proveedor {provider_type: {data, ts}}
 _models_cache: dict = {}
 MODELS_CACHE_TTL = 300
-
-# ---------------------------------------------------------------------------
-# Limites de rate por modelo y tier (fuente: documentacion oficial Google AI)
-# Estructura: { model_pattern: { tier: { rpm, tpm, rpd } } }
-# Se usa pattern matching: si el model_id contiene el patron, aplican esos limites.
-# ---------------------------------------------------------------------------
-
-# Gemini free tier (sin tarjeta de credito / sin facturacion activada)
-# Gemini paid tier (pay-as-you-go con facturacion activada)
-GEMINI_RATE_LIMITS = {
-    # --- Gemini 2.5 ---
-    "gemini-2.5-pro": {
-        "free": {"rpm": 5,    "tpm": 250_000,    "rpd": 25},
-        "paid": {"rpm": 150,  "tpm": 2_000_000,  "rpd": None},
-    },
-    "gemini-2.5-flash": {
-        "free": {"rpm": 10,   "tpm": 250_000,    "rpd": 500},
-        "paid": {"rpm": 1000, "tpm": 4_000_000,  "rpd": None},
-    },
-    "gemini-2.5-flash-lite": {
-        "free": {"rpm": 30,   "tpm": 1_000_000,  "rpd": 1500},
-        "paid": {"rpm": 2000, "tpm": 4_000_000,  "rpd": None},
-    },
-    # --- Gemini 2.0 ---
-    "gemini-2.0-flash": {
-        "free": {"rpm": 15,   "tpm": 1_000_000,  "rpd": 1500},
-        "paid": {"rpm": 2000, "tpm": 4_000_000,  "rpd": None},
-    },
-    "gemini-2.0-flash-lite": {
-        "free": {"rpm": 30,   "tpm": 1_000_000,  "rpd": 1500},
-        "paid": {"rpm": 4000, "tpm": 4_000_000,  "rpd": None},
-    },
-    # --- Gemini 1.5 (referencia historica) ---
-    "gemini-1.5-pro": {
-        "free": {"rpm": 2,    "tpm": 32_000,     "rpd": 50},
-        "paid": {"rpm": 360,  "tpm": 4_000_000,  "rpd": None},
-    },
-    "gemini-1.5-flash": {
-        "free": {"rpm": 15,   "tpm": 1_000_000,  "rpd": 1500},
-        "paid": {"rpm": 1000, "tpm": 4_000_000,  "rpd": None},
-    },
-    # --- Gemini 3.x / nuevos (sin limites publicados aun, estimacion conservadora) ---
-    "gemini-3": {
-        "free": {"rpm": 5,    "tpm": 250_000,    "rpd": 25},
-        "paid": {"rpm": 150,  "tpm": 2_000_000,  "rpd": None},
-    },
-    # --- Gemma (open models via API) ---
-    "gemma": {
-        "free": {"rpm": 30,   "tpm": 1_000_000,  "rpd": 1500},
-        "paid": {"rpm": 1000, "tpm": 4_000_000,  "rpd": None},
-    },
-    # --- Fallback generico ---
-    "_default": {
-        "free": {"rpm": 10,   "tpm": 250_000,    "rpd": 500},
-        "paid": {"rpm": 500,  "tpm": 2_000_000,  "rpd": None},
-    },
-}
-
-
-def get_rate_limits(model_id: str, tier: str = "free") -> dict:
-    """
-    Devuelve los limites de rate para un modelo dado.
-    Busca por coincidencia de prefijo, de mas especifico a menos.
-    """
-    model_id = model_id.lower()
-    # Ordenar por longitud descendente para que los patrones mas especificos tengan prioridad
-    for pattern in sorted(GEMINI_RATE_LIMITS.keys(), key=len, reverse=True):
-        if pattern == "_default":
-            continue
-        if model_id.startswith(pattern) or pattern in model_id:
-            limits = GEMINI_RATE_LIMITS[pattern].get(tier, GEMINI_RATE_LIMITS[pattern]["free"])
-            return {**limits, "pattern_matched": pattern}
-    # Fallback
-    limits = GEMINI_RATE_LIMITS["_default"].get(tier, GEMINI_RATE_LIMITS["_default"]["free"])
-    return {**limits, "pattern_matched": "_default"}
-
-
-def compute_min_delay(model_id: str, tier: str, n_arbiters: int = 1) -> dict:
-    """
-    Calcula el delay minimo recomendado en segundos dado:
-      - Los limites RPM del modelo
-      - El numero de arbitros (cada entrada genera N llamadas, una por arbitro)
-
-    Formula: delay_min = (60 / RPM) * n_arbiters
-    Se agrega un 20% de margen de seguridad.
-    """
-    limits = get_rate_limits(model_id, tier)
-    rpm    = limits.get("rpm", 10)
-
-    # Segundos por request a este RPM
-    secs_per_req = 60.0 / rpm
-    # Con N arbitros por entrada, el delay entre entradas debe ser al menos:
-    delay_min = secs_per_req * n_arbiters * 1.2  # 20% de margen
-
-    # Nivel de alerta
-    if rpm <= 5:
-        alert_level = "danger"
-        alert_msg   = (f"Modelo muy restrictivo en nivel gratuito ({rpm} RPM). "
-                       f"Con {n_arbiters} arbitros necesitas al menos {delay_min:.1f}s entre entradas. "
-                       f"Considera activar facturacion o usar un modelo Flash.")
-    elif rpm <= 15:
-        alert_level = "warning"
-        alert_msg   = (f"Limite moderado ({rpm} RPM). "
-                       f"Espera minima recomendada: {delay_min:.1f}s con {n_arbiters} arbitros.")
-    else:
-        alert_level = "info"
-        alert_msg   = (f"Limite adecuado ({rpm} RPM). "
-                       f"Espera minima recomendada: {delay_min:.1f}s con {n_arbiters} arbitros.")
-
-    return {
-        "model":           model_id,
-        "tier":            tier,
-        "rpm":             rpm,
-        "tpm":             limits.get("tpm"),
-        "rpd":             limits.get("rpd"),
-        "n_arbiters":      n_arbiters,
-        "min_delay_s":     round(delay_min, 1),
-        "safe_delay_s":    round(delay_min * 1.5, 1),  # margen extra para produccion
-        "alert_level":     alert_level,
-        "alert_msg":       alert_msg,
-    }
-
 
 # ---------------------------------------------------------------------------
 # Estado global del proceso
@@ -421,7 +313,7 @@ def _apply_run_metric_event(event: dict) -> dict:
 # Helpers de config
 # ---------------------------------------------------------------------------
 def read_config() -> dict:
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+    with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
         return json.load(f)
 
 
@@ -439,37 +331,34 @@ def write_config(cfg: dict):
 def _get_api_key(provider_type: str, override: str = "") -> str:
     if override:
         return override
-    env_map = {
-        "gemini":        "GEMINI_API_KEY",
-        "anthropic":     "ANTHROPIC_API_KEY",
-        "openai":        "OPENAI_API_KEY",
-        "openai_compat": "OPENAI_API_KEY",
-        "ollama":        "",
-    }
-    env_var = env_map.get(provider_type, "")
+    env_var = provider_api_key_env(provider_type)
     return os.environ.get(env_var, "") if env_var else ""
 
 
-@app.route("/api/models", methods=["GET"])
+@app.route("/api/models", methods=["POST"])
 def api_models():
     """
     Devuelve los modelos disponibles para un proveedor dado.
-    Query params:
+    Body JSON:
       - provider : gemini | vertex_gemini | anthropic | openai | ollama | openai_compat
-      - api_key  : opcional, reemplazo directo de la clave en secrets.env
+      - api_key  : opcional, reemplazo directo de la clave en secrets/secrets.env
       - base_url : para ollama / openai_compat
       - project  : Google Cloud project para vertex_gemini
       - location : region Vertex AI para vertex_gemini
     """
-    provider = request.args.get("provider", "gemini")
-    api_key  = request.args.get("api_key", "").strip() or _get_api_key(provider)
-    base_url = request.args.get("base_url", "").strip()
-    project  = request.args.get("project", "").strip() or os.environ.get("GOOGLE_CLOUD_PROJECT", "").strip()
-    location = request.args.get("location", "").strip() or os.environ.get("VERTEX_LOCATION", "us-central1").strip()
+    body     = request.get_json(silent=True) or {}
+    provider = body.get("provider", "gemini")
+    env_var  = (body.get("api_key_env") or "").strip() or provider_api_key_env(provider)
+    override = (body.get("api_key") or "").strip()
+    api_key  = override or (os.environ.get(env_var, "").strip() if env_var else "") or _get_api_key(provider)
+    base_url = (body.get("base_url") or "").strip()
+    project  = (body.get("project") or "").strip() or os.environ.get("GOOGLE_CLOUD_PROJECT", "").strip()
+    location = (body.get("location") or "").strip() or os.environ.get("VERTEX_LOCATION", "us-central1").strip()
+    force    = body.get("force") == "1"
 
-    cache_key = f"{provider}:{base_url}:{project}:{location}"
+    cache_key = f"{provider}:{env_var}:{base_url}:{project}:{location}"
     now = time.time()
-    if cache_key in _models_cache and (now - _models_cache[cache_key]["ts"]) < MODELS_CACHE_TTL:
+    if not force and cache_key in _models_cache and (now - _models_cache[cache_key]["ts"]) < MODELS_CACHE_TTL:
         return jsonify(_models_cache[cache_key]["data"])
 
     try:
@@ -492,9 +381,53 @@ def api_models():
     return jsonify(result)
 
 
+@app.route("/api/provider-key", methods=["POST"])
+def api_provider_key():
+    data = request.get_json() or {}
+    provider = data.get("provider", "").strip()
+    api_key = data.get("api_key", "").strip()
+    env_var = data.get("api_key_env", "").strip() or provider_api_key_env(provider)
+    base_url = data.get("base_url", "").strip()
+
+    if provider in {"ollama", "vertex_gemini"}:
+        return jsonify({"error": "Este proveedor no usa clave de API directa en secrets/secrets.env."}), 400
+    if not env_var:
+        return jsonify({"error": "Proveedor sin variable de API key configurada."}), 400
+    if not api_key:
+        return jsonify({"error": "Pega una clave de API para verificarla."}), 400
+
+    try:
+        if provider == "gemini":
+            models = _list_gemini_models(api_key)
+        elif provider == "anthropic":
+            models = _list_anthropic_models(api_key)
+        elif provider == "openai":
+            models = _list_openai_models(api_key)
+        elif provider == "openai_compat":
+            models = _list_openai_compat_models(api_key, base_url)
+        else:
+            return jsonify({"error": f"Proveedor desconocido: {provider}"}), 400
+    except Exception as exc:
+        return jsonify({"error": f"No se pudo verificar la clave: {str(exc)[:260]}"}), 400
+
+    set_secret_value(SECRETS_ENV_PATH, env_var, api_key)
+    load_dotenv(SECRETS_ENV_PATH, override=True)
+    for key in list(_models_cache.keys()):
+        if key.startswith(f"{provider}:"):
+            _models_cache.pop(key, None)
+
+    return jsonify({
+        "ok": True,
+        "provider": provider,
+        "api_key_env": env_var,
+        "models": models,
+        "count": len(models),
+    })
+
+
 def _list_gemini_models(api_key: str) -> list:
     if not api_key:
-        raise ValueError("Se requiere GEMINI_API_KEY en secrets.env o como parametro.")
+        raise ValueError("Se requiere GEMINI_API_KEY en secrets/secrets.env o como parametro.")
     from google import genai as gai
     client = gai.Client(api_key=api_key)
     raw    = list(client.models.list())
@@ -542,7 +475,7 @@ def _list_vertex_gemini_models(project: str, location: str) -> list:
 
 def _list_anthropic_models(api_key: str) -> list:
     if not api_key:
-        raise ValueError("Se requiere ANTHROPIC_API_KEY en secrets.env o como parametro.")
+        raise ValueError("Se requiere ANTHROPIC_API_KEY en secrets/secrets.env o como parametro.")
     import anthropic
     client = anthropic.Anthropic(api_key=api_key)
     raw    = client.models.list(limit=50)
@@ -557,7 +490,7 @@ def _list_anthropic_models(api_key: str) -> list:
 
 def _list_openai_models(api_key: str) -> list:
     if not api_key:
-        raise ValueError("Se requiere OPENAI_API_KEY en secrets.env o como parametro.")
+        raise ValueError("Se requiere OPENAI_API_KEY en secrets/secrets.env o como parametro.")
     from openai import OpenAI
     client = OpenAI(api_key=api_key)
     raw    = client.models.list()
@@ -608,10 +541,12 @@ def api_rate_limits():
     """
     Devuelve los limites de rate y el delay minimo recomendado para un modelo dado.
     Query params:
+      - provider: proveedor (gemini, vertex_gemini, anthropic, openai, ...)
       - model   : id del modelo (ej: gemini-2.5-pro)
       - tier    : free | paid (default: free)
       - arbiters: numero de arbitros configurados (default: cuenta los del config actual)
     """
+    provider = request.args.get("provider", "gemini").strip() or "gemini"
     model  = request.args.get("model", "").strip()
     tier   = request.args.get("tier", "free").strip()
     if tier not in ("free", "paid"):
@@ -629,20 +564,23 @@ def api_rate_limits():
     if not model:
         # Devolver los limites del modelo mas restrictivo de los configurados (worst case)
         cfg    = read_config()
-        models = [a["provider"].get("model", "") for a in cfg["arbiters"]
-                  if a.get("provider", {}).get("type") in ("gemini", "vertex_gemini")]
-        if not models:
-            return jsonify({"error": "No hay arbitros Gemini configurados"}), 400
+        providers_models = [
+            (a.get("provider", {}).get("type", "gemini"), a.get("provider", {}).get("model", ""))
+            for a in cfg["arbiters"]
+            if a.get("provider", {}).get("model")
+        ]
+        if not providers_models:
+            return jsonify({"error": "No hay arbitros con modelo configurado"}), 400
 
         # Calcular para cada modelo y devolver el mas restrictivo (menor RPM)
-        results   = [compute_min_delay(m, tier, n_arbiters) for m in models if m]
+        results   = [compute_min_delay(p, m, tier, n_arbiters) for p, m in providers_models if m]
         worst     = min(results, key=lambda r: r["rpm"]) if results else None
         if not worst:
-            return jsonify({"error": "Ningun modelo Gemini configurado tiene limites disponibles"}), 400
+            return jsonify({"error": "Ningun modelo configurado tiene limites disponibles"}), 400
         worst["all_models"] = results
         return jsonify(worst)
 
-    return jsonify(compute_min_delay(model, tier, n_arbiters))
+    return jsonify(compute_min_delay(provider, model, tier, n_arbiters))
 
 
 @app.route("/api/rate-limits/summary", methods=["GET"])
@@ -666,13 +604,12 @@ def api_rate_limits_summary():
         p     = arb.get("provider", {})
         model = p.get("model", "")
         ptype = p.get("type", "")
-        if ptype in ("gemini", "vertex_gemini") and model:
-            r = compute_min_delay(model, tier, n_arbiters)
+        if model:
+            r = compute_min_delay(ptype, model, tier, n_arbiters)
             r["arb_id"]   = arb["id"]
             r["arb_name"] = arb["name"]
             results.append(r)
         else:
-            # Proveedor no-Gemini: no tenemos limites conocidos, informamos
             results.append({
                 "arb_id":      arb["id"],
                 "arb_name":    arb["name"],
@@ -684,24 +621,24 @@ def api_rate_limits_summary():
                 "min_delay_s": None,
                 "safe_delay_s": None,
                 "alert_level": "info",
-                "alert_msg":   f"Proveedor '{ptype}': consulta la documentacion de su API para conocer los limites.",
+                "alert_msg":   f"Proveedor '{ptype}': sin modelo configurado.",
             })
 
     # Delay global recomendado = el mayor de todos los delays minimos
-    gemini_results = [r for r in results if r.get("min_delay_s") is not None]
-    if gemini_results:
-        global_min_delay  = max(r["min_delay_s"]  for r in gemini_results)
-        global_safe_delay = max(r["safe_delay_s"] for r in gemini_results)
-        worst             = max(gemini_results, key=lambda r: r["min_delay_s"])
+    provider_results = [r for r in results if r.get("min_delay_s") is not None]
+    if provider_results:
+        global_min_delay  = max(r["min_delay_s"]  for r in provider_results)
+        global_safe_delay = max(r["safe_delay_s"] for r in provider_results)
+        worst             = max(provider_results, key=lambda r: r["min_delay_s"])
         global_alert      = worst["alert_level"]
         global_msg        = (f"Espera minima global: {global_min_delay}s "
-                             f"(limitado por {worst['model']} a {worst['rpm']} RPM). "
+                             f"(limitado por {worst.get('provider')} / {worst['model']} a {worst['rpm']} RPM). "
                              f"Espera segura para produccion: {global_safe_delay}s.")
     else:
         global_min_delay  = 1.5
         global_safe_delay = 3.0
         global_alert      = "info"
-        global_msg        = "Sin arbitros Gemini configurados. Se usan valores por defecto."
+        global_msg        = "Sin arbitros con modelo configurado. Se usan valores por defecto."
 
     return jsonify({
         "tier":              tier,
@@ -769,8 +706,14 @@ def api_update_dataset_config():
     if errors:
         return jsonify({"error": "; ".join(errors)}), 400
 
-    if not updated.get("input_file", cfg.get("dataset", {}).get("input_file", "")):
+    raw_input = updated.get("input_file", cfg.get("dataset", {}).get("input_file", ""))
+    if not raw_input:
         return jsonify({"error": "El archivo de entrada es obligatorio"}), 400
+    resolved = Path(raw_input)
+    if not resolved.is_absolute():
+        resolved = BASE_DIR / resolved
+    if not str(resolved.resolve()).startswith(str(BASE_DIR.resolve())):
+        return jsonify({"error": "La ruta del dataset debe estar dentro del directorio del proyecto"}), 400
 
     if "dataset" not in cfg:
         cfg["dataset"] = {}
@@ -794,6 +737,9 @@ def api_dataset_inspect():
     path = Path(raw_path)
     if not path.is_absolute():
         path = BASE_DIR / path
+    path = path.resolve()
+    if not str(path).startswith(str(BASE_DIR.resolve())):
+        return jsonify({"error": "Ruta fuera del directorio del proyecto"}), 403
 
     if not path.exists():
         return jsonify({"error": f"Archivo no encontrado: {raw_path}"}), 404
@@ -850,14 +796,21 @@ def api_dataset_upload():
     if not f.filename:
         return jsonify({"error": "Nombre de archivo vacio"}), 400
 
-    suffix = Path(f.filename).suffix.lower()
+    from werkzeug.utils import secure_filename
+    safe_name = secure_filename(f.filename)
+    if not safe_name:
+        return jsonify({"error": "Nombre de archivo no valido"}), 400
+
+    suffix = Path(safe_name).suffix.lower()
     if suffix not in (".csv", ".xlsx", ".xls"):
         return jsonify({"error": f"Formato '{suffix}' no soportado. Usa .csv, .xlsx o .xls."}), 400
 
     upload_dir = BASE_DIR / "data" / "uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    save_path = upload_dir / f.filename
+    save_path = (upload_dir / safe_name).resolve()
+    if not str(save_path).startswith(str(upload_dir.resolve())):
+        return jsonify({"error": "Ruta de destino no permitida"}), 400
     f.save(str(save_path))
 
     # Reutilizar logica de inspect
@@ -898,6 +851,93 @@ def api_get_config():
 @app.route("/api/arbiters", methods=["GET"])
 def api_get_arbiters():
     return jsonify(read_config()["arbiters"])
+
+
+def _preflight_status_by_arbiter(cfg: dict) -> dict:
+    arbiters = cfg.get("arbiters", [])
+    statuses = {
+        a.get("id", ""): {
+            "id": a.get("id", ""),
+            "ok": True,
+            "issues": [],
+            "access_checked": False,
+        }
+        for a in arbiters
+        if a.get("id")
+    }
+    global_issues = []
+
+    for issue in validate_provider_preflight(cfg):
+        matched = False
+        for arb_id in statuses:
+            if issue.startswith(f"{arb_id}:"):
+                statuses[arb_id]["ok"] = False
+                statuses[arb_id]["issues"].append(issue)
+                matched = True
+        vertex_match = re.search(r"Vertex AI \(([^)]+)\):", issue)
+        if vertex_match:
+            for arb_id in [x.strip() for x in vertex_match.group(1).split(",")]:
+                if arb_id in statuses:
+                    statuses[arb_id]["ok"] = False
+                    statuses[arb_id]["issues"].append(issue)
+                    matched = True
+        if not matched:
+            global_issues.append(issue)
+
+    for arb in arbiters:
+        arb_id = arb.get("id", "")
+        status = statuses.get(arb_id)
+        if not status or not status["ok"]:
+            continue
+        provider = arb.get("provider", {})
+        ptype = provider.get("type", "")
+        model = provider.get("model", "")
+        try:
+            if ptype == "gemini":
+                models = _list_gemini_models(_get_api_key("gemini"))
+            elif ptype == "anthropic":
+                models = _list_anthropic_models(_get_api_key("anthropic"))
+            elif ptype == "openai":
+                models = _list_openai_models(_get_api_key("openai"))
+            elif ptype in {"ollama", "openai_compat"}:
+                models = _list_openai_compat_models(_get_api_key(ptype), provider.get("base_url", ""))
+            elif ptype == "vertex_gemini":
+                # validate_provider_preflight already checks ADC/project. Vertex model discovery
+                # is curated locally to avoid extra provider calls in this screen.
+                models = _list_vertex_gemini_models(
+                    provider.get("vertex_project", "") or os.environ.get("GOOGLE_CLOUD_PROJECT", ""),
+                    provider.get("vertex_location", "") or os.environ.get("VERTEX_LOCATION", "us-central1"),
+                )
+            else:
+                models = []
+            status["access_checked"] = True
+            ids = {m.get("id") for m in models if isinstance(m, dict)}
+            if model and ids and model not in ids:
+                status["ok"] = False
+                status["issues"].append(
+                    f"{arb_id}: el modelo seleccionado '{model}' no aparece en la lista disponible de {ptype}."
+                )
+        except Exception as exc:
+            status["ok"] = False
+            status["issues"].append(
+                f"{arb_id}: no se pudo verificar acceso a {ptype}: {str(exc)[:260]}"
+            )
+
+    return {
+        "ok": not global_issues and all(s["ok"] for s in statuses.values()),
+        "issues": global_issues + [
+            issue
+            for status in statuses.values()
+            for issue in status["issues"]
+        ],
+        "arbiters": list(statuses.values()),
+    }
+
+
+@app.route("/api/arbiters/preflight", methods=["GET"])
+def api_arbiters_preflight():
+    """Estado de configuracion/credenciales de arbitros antes de ejecutar."""
+    return jsonify(_preflight_status_by_arbiter(read_config()))
 
 
 @app.route("/api/arbiters", methods=["POST"])
@@ -945,39 +985,61 @@ def api_delete_arbiter(arb_id):
     cfg["arbiters"] = [a for a in cfg["arbiters"] if a["id"] != arb_id]
     if len(cfg["arbiters"]) == before:
         return jsonify({"error": f"Arbitro '{arb_id}' no encontrado"}), 404
-    if not cfg["arbiters"]:
-        return jsonify({"error": "Debe quedar al menos un arbitro"}), 400
     write_config(cfg)
     return jsonify({"ok": True})
 
 
+@app.route("/api/arbiters/export", methods=["POST"])
+def api_export_arbiters():
+    data = request.get_json() or {}
+    try:
+        password = require_export_password(data.get("password", ""))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    cfg = read_config()
+    payload = build_arbiters_export_payload(cfg.get("arbiters", []))
+    encrypted = encrypt_arbiters_export(payload, password)
+    filename = f"labelforge-arbiters-{time.strftime('%Y%m%d-%H%M%S')}.lfarb"
+    return Response(
+        encrypted,
+        mimetype="application/vnd.labelforge.arbiters+json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.route("/api/arbiters/import", methods=["POST"])
+def api_import_arbiters():
+    password = request.form.get("password", "")
+    mode = request.form.get("mode", "merge")
+    if mode not in {"merge", "replace"}:
+        return jsonify({"error": "Modo de importacion invalido."}), 400
+    if "file" not in request.files:
+        return jsonify({"error": "Selecciona un archivo de exportacion."}), 400
+    f = request.files["file"]
+    if not f.filename:
+        return jsonify({"error": "Selecciona un archivo de exportacion."}), 400
+
+    try:
+        password = require_export_password(password)
+        payload = decrypt_arbiters_export(f.read(), password)
+        imported = validate_imported_arbiters(payload)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    cfg = read_config()
+    cfg["arbiters"], stats = merge_arbiters(cfg.get("arbiters", []), imported, mode)
+
+    write_config(cfg)
+    return jsonify({
+        "ok": True,
+        **stats,
+    })
+
+
 def _build_arbiter(data: dict, existing: dict = None) -> dict:
     """Construye un dict de arbitro limpio desde los datos del request."""
-    base = existing.copy() if existing else {}
-    if "name"          in data: base["name"]    = data["name"].strip()
-    if "persona"       in data: base["persona"] = data.get("persona", "").strip()
-    if "system_prompt" in data: base["system_prompt"] = data["system_prompt"].strip()
-    if "id"            in data and not existing: base["id"] = data["id"].strip()
-
-    if "provider" in data:
-        p = data["provider"]
-        base["provider"] = {
-            "type":             p.get("type", "gemini"),
-            "model":            p.get("model", ""),
-            "api_key_env":      p.get("api_key_env", ""),
-            "api_key_override": p.get("api_key_override", ""),
-            "base_url":         p.get("base_url", ""),
-            "vertex_project":   p.get("vertex_project", ""),
-            "vertex_location":  p.get("vertex_location", "us-central1"),
-        }
-
-    if "generation_config" in data:
-        gc = data["generation_config"]
-        base["generation_config"] = {
-            "temperature":       float(gc.get("temperature", 0.1)),
-            "max_output_tokens": int(gc.get("max_output_tokens", 600)),
-        }
-    return base
+    return normalize_arbiter(data, existing=existing)
 
 
 # ---------------------------------------------------------------------------
@@ -1055,21 +1117,28 @@ def api_update_processing():
 
     if "base_delay_seconds" in updated:
         n_arbiters = len(cfg.get("arbiters", [])) or 1
-        gemini_delays = []
+        provider_delays = []
         for arb in cfg.get("arbiters", []):
             provider = arb.get("provider", {})
-            if provider.get("type") in ("gemini", "vertex_gemini") and provider.get("model"):
-                gemini_delays.append(compute_min_delay(provider["model"], "free", n_arbiters))
-        if gemini_delays:
-            min_delay = max(r["min_delay_s"] for r in gemini_delays)
+            if provider.get("model"):
+                provider_delays.append(
+                    compute_min_delay(
+                        provider.get("type", "gemini"),
+                        provider["model"],
+                        "free",
+                        n_arbiters,
+                    )
+                )
+        if provider_delays:
+            min_delay = max(r["min_delay_s"] for r in provider_delays)
             if updated["base_delay_seconds"] < min_delay:
-                worst = max(gemini_delays, key=lambda r: r["min_delay_s"])
+                worst = max(provider_delays, key=lambda r: r["min_delay_s"])
                 return jsonify({
-                    "error": (f"La espera base es demasiado baja para el nivel gratuito de Gemini. "
+                    "error": (f"La espera base es demasiado baja para los limites del proveedor/modelo. "
                               f"Minimo recomendado: {min_delay}s "
-                              f"(limitado por {worst['model']} a {worst['rpm']} RPM)."),
+                              f"(limitado por {worst.get('provider')} / {worst['model']} a {worst['rpm']} RPM)."),
                     "min_delay_seconds": min_delay,
-                    "safe_delay_seconds": max(r["safe_delay_s"] for r in gemini_delays),
+                    "safe_delay_seconds": max(r["safe_delay_s"] for r in provider_delays),
                 }), 400
 
     cfg["processing"].update(updated)
@@ -1090,6 +1159,13 @@ def api_run_start():
 
     # Leer configuracion de dataset desde el config central
     cfg_data    = read_config()
+    preflight_issues = validate_provider_preflight(cfg_data)
+    if preflight_issues:
+        return jsonify({
+            "error": "No se puede iniciar: hay problemas de credenciales o proveedores.",
+            "issues": preflight_issues,
+        }), 400
+
     dataset_cfg = cfg_data.get("dataset", {})
     input_file  = dataset_cfg.get("input_file", "")
     sheet       = dataset_cfg.get("sheet", "")
@@ -1404,9 +1480,28 @@ def _entry_usage_metrics_from_row(row: dict, arbiter_ids: list) -> dict:
     }
 
 
-def _build_result_rows(rows: list, principles: list, arbiter_ids: list, limit: int) -> list:
+def _build_result_rows(
+    rows: list,
+    principles: list,
+    arbiter_ids: list,
+    limit: int,
+    newest_first: bool = True,
+    offset: int = 0,
+) -> list:
     result_rows = []
-    for idx, row in enumerate(rows[:limit]):
+    indexed_rows = list(enumerate(rows))
+    if newest_first:
+        indexed_rows = [
+            item for item in indexed_rows
+            if _row_processing_status(item[1], principles) != "pending"
+        ]
+        indexed_rows.sort(key=lambda item: item[0], reverse=True)
+    else:
+        indexed_rows = indexed_rows[:limit]
+
+    offset = max(0, offset)
+    limit = max(0, limit)
+    for idx, row in indexed_rows[offset:offset + limit]:
         usage_metrics = _entry_usage_metrics_from_row(row, arbiter_ids)
         arbiter_results = []
 
@@ -1458,6 +1553,91 @@ def _build_result_rows(rows: list, principles: list, arbiter_ids: list, limit: i
 
 
 
+def _resolve_project_path(path_value: str | None) -> Path | None:
+    if not path_value:
+        return None
+    path = Path(path_value)
+    if not path.is_absolute():
+        path = BASE_DIR / path
+    resolved = path.resolve()
+    if not str(resolved).startswith(str(BASE_DIR.resolve())):
+        return None
+    return resolved
+
+
+def _load_input_rows_for_run_state(run_state: dict) -> tuple[list[dict], list[str]]:
+    import csv as _csv
+
+    input_path = _resolve_project_path(run_state.get("input_file"))
+    if not input_path or not input_path.exists():
+        return [], []
+
+    suffix = input_path.suffix.lower()
+    if suffix in {".xlsx", ".xlsm", ".xls"}:
+        try:
+            from openpyxl import load_workbook
+        except Exception:
+            return [], []
+
+        wb = load_workbook(input_path, read_only=True, data_only=True)
+        try:
+            sheet_name = run_state.get("sheet") or wb.sheetnames[0]
+            ws = wb[sheet_name] if sheet_name in wb.sheetnames else wb[wb.sheetnames[0]]
+            iterator = ws.iter_rows(values_only=True)
+            headers = [str(value or "").strip() for value in next(iterator, [])]
+            rows = []
+            for values in iterator:
+                rows.append({
+                    headers[idx]: "" if value is None else value
+                    for idx, value in enumerate(values[:len(headers)])
+                    if headers[idx]
+                })
+            return rows, [header for header in headers if header]
+        finally:
+            wb.close()
+
+    with open(input_path, "r", encoding="utf-8-sig", newline="") as f:
+        reader = _csv.DictReader(f)
+        return list(reader), reader.fieldnames or []
+
+
+def _load_checkpoint_result_rows() -> tuple[list[dict], list[str], str]:
+    run_state_path = CHECKPOINTS_DIR / "run_state.json"
+    claim_results_path = CHECKPOINTS_DIR / "claim_results.jsonl"
+    if not run_state_path.exists() or not claim_results_path.exists():
+        return [], [], ""
+
+    try:
+        with open(run_state_path, "r", encoding="utf-8") as f:
+            run_state = json.load(f)
+        input_rows, input_fields = _load_input_rows_for_run_state(run_state)
+        merged_by_index: dict[int, dict] = {}
+        fieldnames = list(input_fields)
+
+        with open(claim_results_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                item = json.loads(line)
+                idx = _safe_int(item.get("row_index"))
+                if idx is None or idx < 0:
+                    continue
+                base_row = dict(input_rows[idx]) if idx < len(input_rows) else {}
+                record = item.get("record") if isinstance(item.get("record"), dict) else {}
+                merged_row = {**base_row, **record}
+                merged_by_index[idx] = merged_row
+                for key in merged_row.keys():
+                    if key not in fieldnames:
+                        fieldnames.append(key)
+
+        rows = [merged_by_index[idx] for idx in sorted(merged_by_index)]
+        source = f"checkpoint:{run_state.get('run_id') or claim_results_path.name}"
+        return rows, fieldnames, source
+    except Exception:
+        return [], [], ""
+
+
 @app.route("/api/run/stats", methods=["GET"])
 def api_run_stats():
     """
@@ -1481,12 +1661,28 @@ def api_run_stats():
             rows = list(reader)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    source_file = latest.name
 
+    checkpoint_rows, checkpoint_fieldnames, checkpoint_source = _load_checkpoint_result_rows()
+    if len(checkpoint_rows) > len(rows):
+        rows = checkpoint_rows
+        fieldnames = checkpoint_fieldnames
+        source_file = checkpoint_source or "checkpoint"
+
+    raw_limit = str(request.args.get("limit", "250")).strip().lower()
     try:
-        result_limit = int(request.args.get("limit", 250))
+        result_offset = int(request.args.get("offset", 0))
     except (ValueError, TypeError):
-        result_limit = 250
-    result_limit = max(1, min(result_limit, 500))
+        result_offset = 0
+    result_offset = max(0, result_offset)
+
+    result_limit = None if raw_limit in {"all", "todo", "todos", "0"} else 250
+    if result_limit is not None:
+        try:
+            result_limit = int(raw_limit)
+        except (ValueError, TypeError):
+            result_limit = 250
+        result_limit = max(1, min(result_limit, 1000))
 
     # Detectar arbitros desde columnas prompt_tokens_*
     arbiter_ids = [
@@ -1536,9 +1732,13 @@ def api_run_stats():
         total_tokens_global += usage_metrics["total_tokens"]
         if usage_metrics["latency_s"] is not None:
             total_latency_global += usage_metrics["latency_s"]
+    processed_result_rows = status_counts["ok"] + status_counts["failed"]
+    effective_result_limit = processed_result_rows if result_limit is None else result_limit
+    result_offset = min(result_offset, max(processed_result_rows - 1, 0)) if processed_result_rows else 0
+    result_count = min(max(processed_result_rows - result_offset, 0), effective_result_limit)
 
     return jsonify({
-        "source_file":         latest.name,
+        "source_file":         source_file,
         "total_rows":          len(rows),
         "successful_rows":     status_counts["ok"],
         "failed_rows":         status_counts["failed"],
@@ -1550,11 +1750,20 @@ def api_run_stats():
         "arbiters":            stats,
         "principles":          principles,
         "agreement":           compute_agreement_metrics(rows, principles, arbiter_ids),
-        "results_total":       len(rows),
-        "results_count":       min(len(rows), result_limit),
-        "results_limit":       result_limit,
-        "results_truncated":   len(rows) > result_limit,
-        "results":             _build_result_rows(rows, principles, arbiter_ids, result_limit),
+        "results_total":       processed_result_rows,
+        "results_count":       result_count,
+        "results_offset":      result_offset,
+        "results_limit":       effective_result_limit,
+        "results_truncated":   result_offset + result_count < processed_result_rows,
+        "results_has_prev":    result_offset > 0,
+        "results_has_next":    result_offset + result_count < processed_result_rows,
+        "results":             _build_result_rows(
+            rows,
+            principles,
+            arbiter_ids,
+            effective_result_limit,
+            offset=result_offset,
+        ),
     })
 
 

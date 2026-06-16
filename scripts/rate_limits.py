@@ -1,0 +1,256 @@
+"""
+Provider/model rate-limit profiles used by the WebApp.
+
+Important distinction:
+- Gemini API / AI Studio publishes model/tier RPM, TPM and RPD style limits.
+- Vertex AI, Anthropic and OpenAI limits are account/project/tier dependent.
+  For those providers we keep conservative UI guidance and clearly mark the
+  source as account-dependent instead of presenting the numbers as exact quotas.
+"""
+
+from __future__ import annotations
+
+
+GEMINI_API_RATE_LIMITS = {
+    "gemini-2.5-pro": {
+        "free": {"rpm": 5, "tpm": 250_000, "rpd": 25},
+        "paid": {"rpm": 150, "tpm": 2_000_000, "rpd": None},
+    },
+    "gemini-2.5-flash": {
+        "free": {"rpm": 10, "tpm": 250_000, "rpd": 500},
+        "paid": {"rpm": 1000, "tpm": 4_000_000, "rpd": None},
+    },
+    "gemini-2.5-flash-lite": {
+        "free": {"rpm": 30, "tpm": 1_000_000, "rpd": 1500},
+        "paid": {"rpm": 2000, "tpm": 4_000_000, "rpd": None},
+    },
+    "gemini-2.0-flash": {
+        "free": {"rpm": 15, "tpm": 1_000_000, "rpd": 1500},
+        "paid": {"rpm": 2000, "tpm": 4_000_000, "rpd": None},
+    },
+    "gemini-2.0-flash-lite": {
+        "free": {"rpm": 30, "tpm": 1_000_000, "rpd": 1500},
+        "paid": {"rpm": 4000, "tpm": 4_000_000, "rpd": None},
+    },
+    "gemini-1.5-pro": {
+        "free": {"rpm": 2, "tpm": 32_000, "rpd": 50},
+        "paid": {"rpm": 360, "tpm": 4_000_000, "rpd": None},
+    },
+    "gemini-1.5-flash": {
+        "free": {"rpm": 15, "tpm": 1_000_000, "rpd": 1500},
+        "paid": {"rpm": 1000, "tpm": 4_000_000, "rpd": None},
+    },
+    "gemini-3": {
+        "free": {"rpm": 5, "tpm": 250_000, "rpd": 25},
+        "paid": {"rpm": 150, "tpm": 2_000_000, "rpd": None},
+    },
+    "gemma": {
+        "free": {"rpm": 30, "tpm": 1_000_000, "rpd": 1500},
+        "paid": {"rpm": 1000, "tpm": 4_000_000, "rpd": None},
+    },
+    "_default": {
+        "free": {"rpm": 10, "tpm": 250_000, "rpd": 500},
+        "paid": {"rpm": 500, "tpm": 2_000_000, "rpd": None},
+    },
+}
+
+
+ACCOUNT_DEPENDENT_DEFAULTS = {
+    # Conservative UI guidance for account-dependent providers. These are not
+    # vendor-published hard limits; users should override with their console/API
+    # quotas when needed.
+    "vertex_gemini": {
+        "pro": {"rpm": 60, "tpm": None, "rpd": None},
+        "mid": {"rpm": 120, "tpm": None, "rpd": None},
+        "lite": {"rpm": 240, "tpm": None, "rpd": None},
+        "other": {"rpm": 60, "tpm": None, "rpd": None},
+    },
+    "anthropic": {
+        "pro": {"rpm": 20, "itpm": None, "otpm": None, "rpd": None},
+        "mid": {"rpm": 40, "itpm": None, "otpm": None, "rpd": None},
+        "lite": {"rpm": 60, "itpm": None, "otpm": None, "rpd": None},
+        "other": {"rpm": 30, "itpm": None, "otpm": None, "rpd": None},
+    },
+    "openai": {
+        "pro": {"rpm": 60, "tpm": None, "rpd": None},
+        "mid": {"rpm": 120, "tpm": None, "rpd": None},
+        "lite": {"rpm": 240, "tpm": None, "rpd": None},
+        "other": {"rpm": 60, "tpm": None, "rpd": None},
+    },
+    "openai_compat": {
+        "pro": {"rpm": 60, "tpm": None, "rpd": None},
+        "mid": {"rpm": 120, "tpm": None, "rpd": None},
+        "lite": {"rpm": 240, "tpm": None, "rpd": None},
+        "other": {"rpm": 60, "tpm": None, "rpd": None},
+    },
+    "ollama": {
+        "pro": {"rpm": 30, "tpm": None, "rpd": None},
+        "mid": {"rpm": 60, "tpm": None, "rpd": None},
+        "lite": {"rpm": 120, "tpm": None, "rpd": None},
+        "other": {"rpm": 60, "tpm": None, "rpd": None},
+    },
+}
+
+ACCOUNT_DEPENDENT_MODEL_LIMITS = {
+    "vertex_gemini": {
+        "gemini-3.1-pro-preview": {"rpm": 30, "tpm": None, "rpd": None},
+        "gemini-3-pro-preview": {"rpm": 30, "tpm": None, "rpd": None},
+        "gemini-2.5-pro": {"rpm": 60, "tpm": None, "rpd": None},
+        "gemini-1.5-pro": {"rpm": 60, "tpm": None, "rpd": None},
+        "gemini-pro-latest": {"rpm": 60, "tpm": None, "rpd": None},
+        "gemini-3.5-flash": {"rpm": 120, "tpm": None, "rpd": None},
+        "gemini-3-flash-preview": {"rpm": 120, "tpm": None, "rpd": None},
+        "gemini-2.5-flash": {"rpm": 120, "tpm": None, "rpd": None},
+        "gemini-2.0-flash": {"rpm": 120, "tpm": None, "rpd": None},
+        "gemini-1.5-flash": {"rpm": 120, "tpm": None, "rpd": None},
+        "gemini-flash-latest": {"rpm": 120, "tpm": None, "rpd": None},
+        "gemini-3.1-flash-lite": {"rpm": 240, "tpm": None, "rpd": None},
+        "gemini-2.5-flash-lite": {"rpm": 240, "tpm": None, "rpd": None},
+        "gemini-2.0-flash-lite": {"rpm": 240, "tpm": None, "rpd": None},
+        "gemini-flash-lite-latest": {"rpm": 240, "tpm": None, "rpd": None},
+    },
+    "anthropic": {
+        "claude-opus-4-5": {"rpm": 20, "itpm": None, "otpm": None, "rpd": None},
+        "claude-opus-4-0": {"rpm": 20, "itpm": None, "otpm": None, "rpd": None},
+        "claude-3-opus": {"rpm": 20, "itpm": None, "otpm": None, "rpd": None},
+        "claude-sonnet-4-5": {"rpm": 40, "itpm": None, "otpm": None, "rpd": None},
+        "claude-sonnet-4-0": {"rpm": 40, "itpm": None, "otpm": None, "rpd": None},
+        "claude-3-5-sonnet": {"rpm": 40, "itpm": None, "otpm": None, "rpd": None},
+        "claude-haiku-4-5": {"rpm": 60, "itpm": None, "otpm": None, "rpd": None},
+        "claude-3-5-haiku": {"rpm": 60, "itpm": None, "otpm": None, "rpd": None},
+    },
+    "openai": {
+        "o1-mini": {"rpm": 120, "tpm": None, "rpd": None},
+        "o3-mini": {"rpm": 120, "tpm": None, "rpd": None},
+        "o1": {"rpm": 30, "tpm": None, "rpd": None},
+        "o3": {"rpm": 30, "tpm": None, "rpd": None},
+        "o4": {"rpm": 30, "tpm": None, "rpd": None},
+        "gpt-4o-mini": {"rpm": 240, "tpm": None, "rpd": None},
+        "gpt-4o": {"rpm": 60, "tpm": None, "rpd": None},
+        "gpt-4-turbo": {"rpm": 60, "tpm": None, "rpd": None},
+        "gpt-4": {"rpm": 60, "tpm": None, "rpd": None},
+        "gpt-3.5-turbo": {"rpm": 240, "tpm": None, "rpd": None},
+    },
+    "openai_compat": {},
+    "ollama": {},
+}
+
+
+def model_tier(model_id: str) -> str:
+    model_id = (model_id or "").lower()
+    if any(k in model_id for k in ("lite", "haiku")) or "-mini" in model_id or model_id.endswith("mini"):
+        return "lite"
+    if "opus" in model_id or ("pro" in model_id and "lite" not in model_id) or model_id.startswith(("gpt-4", "o1", "o3")):
+        return "pro"
+    if any(k in model_id for k in ("flash", "sonnet", "gpt-")):
+        return "mid"
+    return "other"
+
+
+def _match_gemini_limits(model_id: str, tier: str) -> tuple[dict, str]:
+    model_id = (model_id or "").lower()
+    tier = tier if tier in {"free", "paid"} else "free"
+    for pattern in sorted(GEMINI_API_RATE_LIMITS.keys(), key=len, reverse=True):
+        if pattern == "_default":
+            continue
+        if model_id.startswith(pattern) or pattern in model_id:
+            return dict(GEMINI_API_RATE_LIMITS[pattern][tier]), pattern
+    return dict(GEMINI_API_RATE_LIMITS["_default"][tier]), "_default"
+
+
+def _match_account_limits(provider: str, model_id: str) -> tuple[dict, str]:
+    provider = provider or "openai_compat"
+    model_id = (model_id or "").lower()
+    model_limits = ACCOUNT_DEPENDENT_MODEL_LIMITS.get(provider, {})
+    for pattern in sorted(model_limits.keys(), key=len, reverse=True):
+        if model_id.startswith(pattern) or pattern in model_id:
+            return dict(model_limits[pattern]), pattern
+
+    model_class = model_tier(model_id)
+    defaults = ACCOUNT_DEPENDENT_DEFAULTS.get(provider, ACCOUNT_DEPENDENT_DEFAULTS["openai_compat"])
+    return dict(defaults.get(model_class, defaults["other"])), model_class
+
+
+def get_rate_limit_profile(provider: str, model_id: str, tier: str = "free") -> dict:
+    provider = provider or "gemini"
+    if provider == "gemini":
+        limits, matched = _match_gemini_limits(model_id, tier)
+        return {
+            **limits,
+            "provider": provider,
+            "model": model_id,
+            "tier": tier if tier in {"free", "paid"} else "free",
+            "pattern_matched": matched,
+            "limit_kind": "published",
+            "source_label": "Gemini API / AI Studio",
+            "source_url": "https://ai.google.dev/gemini-api/docs/rate-limits",
+            "note": "Limites publicados por Google para Gemini API; pueden variar por proyecto/tier.",
+        }
+
+    model_class = model_tier(model_id)
+    limits, matched = _match_account_limits(provider, model_id)
+    source_label = {
+        "vertex_gemini": "Google Cloud Vertex AI quotas",
+        "anthropic": "Claude Console / Anthropic rate limits",
+        "openai": "OpenAI dashboard rate limits",
+        "openai_compat": "Proveedor OpenAI-compatible",
+        "ollama": "Servidor local",
+    }.get(provider, "Proveedor")
+    source_url = {
+        "vertex_gemini": "https://cloud.google.com/vertex-ai/generative-ai/docs/quotas",
+        "anthropic": "https://docs.anthropic.com/en/api/rate-limits",
+        "openai": "https://platform.openai.com/docs/guides/rate-limits",
+    }.get(provider, "")
+    return {
+        **limits,
+        "provider": provider,
+        "model": model_id,
+        "tier": "account",
+        "model_class": model_class,
+        "pattern_matched": matched,
+        "limit_kind": "account_dependent",
+        "source_label": source_label,
+        "source_url": source_url,
+        "note": "Limite real dependiente de cuenta/proyecto/region/tier; se usa fallback conservador para recomendar delays.",
+    }
+
+
+def compute_min_delay(provider: str, model_id: str, tier: str = "free", n_arbiters: int = 1) -> dict:
+    profile = get_rate_limit_profile(provider, model_id, tier)
+    rpm = profile.get("rpm") or 10
+    n_arbiters = max(int(n_arbiters or 1), 1)
+    delay_min = (60.0 / rpm) * n_arbiters * 1.2
+
+    if profile["limit_kind"] == "account_dependent":
+        alert_level = "warning"
+        if provider == "ollama":
+            alert_msg = (
+                f"{profile['source_label']}: throughput dependiente de hardware/modelo local. "
+                f"Fallback conservador: {rpm} RPM; ajusta segun tu servidor."
+            )
+        else:
+            alert_msg = (
+                f"{profile['source_label']}: limites reales dependientes de cuenta/proyecto. "
+                f"Fallback conservador: {rpm} RPM; ajusta si tu consola indica otra cuota."
+            )
+    elif rpm <= 5:
+        alert_level = "danger"
+        alert_msg = (
+            f"Modelo restrictivo ({rpm} RPM). Con {n_arbiters} arbitro(s), "
+            f"usa al menos {delay_min:.1f}s entre entradas."
+        )
+    elif rpm <= 15:
+        alert_level = "warning"
+        alert_msg = f"Limite moderado ({rpm} RPM). Espera minima recomendada: {delay_min:.1f}s."
+    else:
+        alert_level = "info"
+        alert_msg = f"Limite adecuado ({rpm} RPM). Espera minima recomendada: {delay_min:.1f}s."
+
+    return {
+        **profile,
+        "n_arbiters": n_arbiters,
+        "min_delay_s": round(delay_min, 1),
+        "safe_delay_s": round(delay_min * 1.5, 1),
+        "alert_level": alert_level,
+        "alert_msg": alert_msg,
+    }

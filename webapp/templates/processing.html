@@ -78,11 +78,52 @@
   }
   .ds-file-info .ds-fname { font-weight: 600; color: #e2e8f0; }
   .ds-file-info .ds-fsize { color: #64748b; font-size: .78rem; }
+  .ds-ready-card {
+    display: none;
+    background: linear-gradient(135deg, rgba(var(--tone-emerald,16,185,129), .11), rgba(var(--tone-cyan,34,211,238), .08));
+    border: 1px solid rgba(var(--tone-emerald,16,185,129), .34);
+    border-radius: .65rem;
+    padding: .85rem 1rem;
+    margin-bottom: 1rem;
+  }
+  .ds-ready-title {
+    color: #d1fae5;
+    font-weight: 700;
+    font-size: .92rem;
+  }
+  .ds-ready-path {
+    color: #e2e8f0;
+    font-size: .86rem;
+    word-break: break-word;
+  }
+  .ds-ready-meta {
+    color: #94a3b8;
+    font-size: .78rem;
+  }
 </style>
 
 <div class="card-dark accent-panel accent-cyan mb-4">
   <div class="card-header-label">
     <i class="bi bi-database me-2"></i>Conjunto de datos de entrada
+  </div>
+
+  <!-- Estado del archivo que ya quedo guardado para ejecucion -->
+  <div class="ds-ready-card" id="ds-ready-card">
+    <div class="d-flex align-items-start gap-3">
+      <div class="rounded-circle d-flex align-items-center justify-content-center flex-shrink-0"
+           style="width:38px;height:38px;background:rgba(var(--tone-emerald,16,185,129),.16);border:1px solid rgba(var(--tone-emerald,16,185,129),.34);color:#34d399">
+        <i class="bi bi-check2-circle"></i>
+      </div>
+      <div style="min-width:0;flex:1">
+        <div class="ds-ready-title">Archivo listo para procesar</div>
+        <div class="ds-ready-path" id="ds-ready-path">—</div>
+        <div class="ds-ready-meta mt-1" id="ds-ready-meta"></div>
+      </div>
+      <button type="button" class="btn btn-outline-info btn-sm flex-shrink-0"
+              onclick="document.getElementById('ds-file-input').click()">
+        <i class="bi bi-arrow-repeat me-1"></i>Cambiar
+      </button>
+    </div>
   </div>
 
   <!-- Selector de archivo oculto -->
@@ -346,7 +387,7 @@ function renderRateLimitSummary() {
   }
   const tone = rateLimitSummary.global_alert === 'danger' ? 'text-danger' : (rateLimitSummary.global_alert === 'warning' ? 'text-warning' : 'text-info');
   el.className = `form-text ${tone} mt-2`;
-  el.innerHTML = `${rateLimitSummary.global_msg} <button type="button" class="btn btn-link btn-sm p-0 align-baseline" onclick="useSafeDelay()">Usar espera segura</button>`;
+  el.innerHTML = `${escapeHtml(rateLimitSummary.global_msg)} <button type="button" class="btn btn-link btn-sm p-0 align-baseline" onclick="useSafeDelay()">Usar espera segura</button>`;
 }
 
 function useSafeDelay() {
@@ -396,7 +437,8 @@ document.addEventListener('DOMContentLoaded', function() {
    Conjunto de datos: arrastrar, soltar, seleccionar y subir
 ----------------------------------------------------------------------- */
 
-let _currentServerPath = '';   // ruta en el servidor del archivo subido
+let _currentServerPath = '';   // ruta en el servidor del archivo subido o configurado
+let _savedDatasetConfig = null;
 
 /* --- Arrastrar y soltar ------------------------------------------------- */
 function onDragOver(e) {
@@ -465,7 +507,20 @@ function setUploadStatus(text, spinning) {
 function setFeedback(msg, type) {
   const fb = document.getElementById('ds-file-feedback');
   const icon = type === 'success' ? 'bi-check-circle' : 'bi-exclamation-circle';
-  fb.innerHTML = `<span class="text-${type}"><i class="bi ${icon} me-1"></i>${msg}</span>`;
+  fb.innerHTML = `<span class="text-${type}"><i class="bi ${icon} me-1"></i>${escapeHtml(msg)}</span>`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function basename(path) {
+  return String(path || '').split(/[\\/]/).pop();
 }
 
 /* --- Subir e inspeccionar ---------------------------------------------- */
@@ -490,7 +545,8 @@ async function uploadAndInspect(file) {
     setUploadStatus('✓ Listo', false);
     setFeedback(
       `${data.columns.length} columnas detectadas` +
-      (data.is_excel ? ` &mdash; ${data.sheets.length} hoja(s)` : ''),
+      (data.is_excel ? ` &mdash; ${data.sheets.length} hoja(s)` : '') +
+      `. Selecciona la columna y pulsa Guardar para usar este archivo.`,
       'success'
     );
 
@@ -543,8 +599,7 @@ function populateColumnDropdown(columns, current) {
 
 /* --- Guardar configuración --------------------------------------------- */
 async function saveDatasetConfig() {
-  const inputFile  = _currentServerPath ||
-                     document.getElementById('ds-current-text').textContent.split(' ')[0];
+  const inputFile  = _currentServerPath || _savedDatasetConfig?.input_file || '';
   const sheet      = document.getElementById('ds-sheet').value;
   const textColumn = document.getElementById('ds-column').value;
 
@@ -558,8 +613,10 @@ async function saveDatasetConfig() {
   });
   const data = await res.json();
   if (!res.ok) { showToast(data.error || 'Error al guardar', 'error'); return; }
+  _savedDatasetConfig = data;
   showToast('Configuración guardada ✓');
   renderDatasetBanner(data);
+  renderDatasetReady(data);
 }
 
 /* --- Cargar configuración existente ------------------------------------ */
@@ -568,8 +625,10 @@ async function loadDatasetConfig() {
     const res = await fetch('/api/dataset/config');
     const data = await res.json();
     if (!res.ok || !data.input_file) return;
+    _savedDatasetConfig = data;
     _currentServerPath = data.input_file;
     renderDatasetBanner(data);
+    renderDatasetReady(data);
 
     // Intenta inspeccionar el archivo ya configurado para mostrar información.
     const res2 = await fetch('/api/dataset/inspect', {
@@ -580,7 +639,7 @@ async function loadDatasetConfig() {
     if (res2.ok) {
       const info = await res2.json();
       // Muestra información del archivo previamente configurado.
-      document.getElementById('ds-fname').textContent = data.input_file.split('/').pop();
+      document.getElementById('ds-fname').textContent = basename(data.input_file);
       document.getElementById('ds-fsize').textContent = `ya configurado en el servidor`;
       document.getElementById('ds-file-info').style.display = '';
       setFeedback(
@@ -602,6 +661,22 @@ async function loadDatasetConfig() {
       selectors.style.removeProperty('display');
     }
   } catch (_) {}
+}
+
+function renderDatasetReady(data) {
+  const card = document.getElementById('ds-ready-card');
+  const path = document.getElementById('ds-ready-path');
+  const meta = document.getElementById('ds-ready-meta');
+  if (!data || !data.input_file) {
+    card.style.display = 'none';
+    return;
+  }
+
+  const sheet = data.sheet ? `Hoja: ${escapeHtml(data.sheet)}` : 'Hoja: primera/disponible';
+  const col = data.text_column ? `Columna: ${escapeHtml(data.text_column)}` : 'Columna: pendiente';
+  path.innerHTML = `<i class="bi bi-file-earmark-spreadsheet me-1 text-info"></i>${escapeHtml(data.input_file)}`;
+  meta.innerHTML = `${sheet} <span class="mx-2">·</span> ${col} <span class="mx-2">·</span> Se usara en la proxima ejecucion`;
+  card.style.display = '';
 }
 
 function renderDatasetBanner(data) {

@@ -1,0 +1,8 @@
+
+
+En la parte de Ejecutar, hay que ir diciendo que claim del limite voy y que claim del total voy. POr ejemplo, para un limite de 90 hay que decir> voy en 10 de 90 para un x% y en 10 de 49352 para un y%. No tiene que ser necesariamente en esre formato, pero si es importante que se diga el porcentaje de avance tanto del limite como del total.
+
+
+A Ejecutar hat que agregar un boton para eliminar todos los resultados parciales. Es decir, moverlos a la csarpeta archive con un nombre que indique la fecha y hora de la eliminación. Esto es para evitar que se acumulen resultados parciales que no se van a usar y que ocupan espacio en el disco.
+
+En Ejecutar, en las Métricas en vivo, hay que annadir graficas para poder ver en tiempo real que esta pasando, ademas de los valores en tablas que ya se tienen. esos estan bien y no se tocan pero si hay que annadir algunas graficas que se actualicen en tiempo real y permitan interaccion y que Métricas en vivo sea un verdadero dashboard de monitoreo del proceso de etiquetado. Por ejemplo, se pueden agregar graficas de barras para mostrar el avance del proceso en términos de porcentaje de claims procesados, graficas de pastel para mostrar la distribución de los tipos de errores encontrados, y graficas de líneas para mostrar la evolución del tiempo de respuesta de los arbitros a lo largo del proceso. Estas graficas deben actualizarse en tiempo real a medida que se procesan los claims y se generan los resultados parciales, etc.

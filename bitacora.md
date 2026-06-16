@@ -1748,3 +1748,320 @@ Crear `scripts/__init__.py` vacío para que Python trate `scripts/` como paquete
 
 - `scripts/__init__.py` (nuevo)
 - `bitacora.md`
+
+### 2026-06-15 - Gestión segura de árbitros, secretos y paridad WebApp/CLI
+
+**Objetivo:** permitir experimentar con distintas configuraciones de árbitros sin
+perder las existentes, proteger prompts/API keys al exportar, permitir borrar todos
+los árbitros cuando el usuario lo necesite, y asegurar que la lógica viva en backend
+compartido en vez de quedar duplicada en la interfaz web.
+
+**Contexto observado:**
+
+- La pestaña `Arbitros` permitía editar proveedores/modelos, pero no había forma de
+  respaldar/restaurar configuraciones de árbitros.
+- Los árbitros contienen información sensible: prompts, proveedores, modelos y, en
+  configuraciones heredadas, posibles `api_key_override`.
+- La UI bloqueaba eliminar el último árbitro, aunque es válido querer dejar la lista
+  vacía para probar otra configuración.
+- El formulario de API key era confuso: separaba "variable de entorno" y "clave de
+  API", lo que llevaba a pegar claves reales en el campo equivocado.
+- El cambio debía aplicar tanto a la WebApp como al CLI. La WebApp debe ser interfaz;
+  cifrado, merge, validación y escritura de secretos deben vivir en Python.
+
+**Decisión tomada:**
+
+1. **Nuevo backend compartido para árbitros (`scripts/arbiters_io.py`)**:
+   - Exporta/importa la sección `arbiters` en archivos `.lfarb`.
+   - Cifra con contraseña usando PBKDF2-HMAC-SHA256 + AES-256-GCM.
+   - Valida formato, normaliza árbitros y aplica merge por ID o reemplazo total.
+   - La importación por defecto fusiona; `replace` debe pedirse explícitamente.
+
+2. **Nuevo backend compartido para secretos (`scripts/secrets_io.py`)**:
+   - Mapea proveedor → variable estándar:
+     `gemini → GEMINI_API_KEY`, `anthropic → ANTHROPIC_API_KEY`,
+     `openai/openai_compat → OPENAI_API_KEY`.
+   - Escribe `secrets.env` de forma controlada y actualiza `os.environ`.
+   - Soporta lectura con BOM (`utf-8-sig`) para evitar fallos por editores Windows.
+
+3. **WebApp (`webapp/app.py` + `webapp/templates/arbiters.html`)**:
+   - Agregados botones **Importar** y **Exportar** en la pestaña `Arbitros`.
+   - Agregado endpoint `POST /api/arbiters/export`.
+   - Agregado endpoint `POST /api/arbiters/import`.
+   - Agregado endpoint `POST /api/provider-key`: verifica la key listando modelos,
+     guarda en `secrets.env` y devuelve modelos si funciona.
+   - El formulario ahora muestra un solo campo visible **Clave de API** para Gemini,
+     Anthropic, OpenAI y OpenAI-compatible. El backend decide la variable destino.
+   - Vertex AI no muestra API key directa porque usa ADC/GCP; Ollama no la necesita.
+   - Se permite eliminar todos los árbitros. Si la lista queda vacía, la UI muestra:
+     "Sin arbitros no se puede hacer nada." y ofrece crear/importar.
+
+4. **CLI (`scripts/label_persuasion.py`)**:
+   - `--export-arbiters archivo.lfarb`
+   - `--import-arbiters archivo.lfarb`
+   - `--replace-arbiters`
+   - `--arbiters-password` / `--arbiters-password-file`
+   - `--set-provider-key proveedor`
+   - `--api-key`, `--api-key-env`, `--base-url`
+   - Ejecutar el pipeline sin árbitros ahora falla con mensaje explícito:
+     "Sin arbitros no se puede hacer nada..."
+
+5. **Documentación**:
+   - Actualizados `README.md` y `context.md` para reflejar los módulos compartidos,
+     comandos CLI, endpoints nuevos, formato `.lfarb`, gestión de API keys y frontera
+     backend/frontend.
+
+**Razon práctica:**
+
+La configuración de árbitros es parte del experimento; debe poder respaldarse,
+restaurarse y transportarse sin exponer secretos. Además, una sola fuente de verdad
+para export/import y secretos evita que WebApp y CLI diverjan. La UI debe disparar
+acciones, no implementar reglas de seguridad ni cifrado.
+
+**Verificación realizada:**
+
+- `conda run -n LabelForge python -m py_compile webapp\app.py scripts\label_persuasion.py scripts\arbiters_io.py scripts\secrets_io.py`
+- Prueba de export/import CLI sobre una copia temporal del config.
+- Verificación de que el archivo `.lfarb` no contiene en claro `system_prompt`,
+  `api_key_override`, `provider` ni `arbiters`.
+- Verificación de endpoint `/api/provider-key` sin key real: error controlado.
+- Reinicio de la WebApp y respuesta `200` en `/arbiters`.
+
+**Archivos tocados:**
+
+- `scripts/arbiters_io.py`
+- `scripts/secrets_io.py`
+- `scripts/label_persuasion.py`
+- `webapp/app.py`
+- `webapp/templates/arbiters.html`
+- `README.md`
+- `context.md`
+- `bitacora.md`
+
+---
+
+### 2026-06-15 - Rate limits por proveedor/modelo para todos los LLMs
+
+**Objetivo:** que el tab de árbitros y el backend calculen delays no solo para
+Gemini, sino para todos los proveedores soportados por el sistema.
+
+**Cambios realizados:**
+
+1. Agregado `scripts/rate_limits.py` como fuente compartida de perfiles de rate
+   limit y cálculo de espera mínima.
+2. `webapp/app.py` ahora usa `compute_min_delay(provider, model, tier, n_arbiters)`
+   en `/api/rate-limits`, `/api/rate-limits/summary` y validación de parámetros
+   de procesamiento.
+3. `webapp/templates/arbiters.html` consulta límites con `provider + model` y
+   muestra si el dato es publicado (`published`) o dependiente de cuenta
+   (`account_dependent`).
+4. Se agregaron perfiles por modelo/familia para:
+   - Gemini API / AI Studio
+   - Vertex Gemini
+   - Anthropic Claude
+   - OpenAI
+   - OpenAI-compatible
+   - Ollama/local
+
+**Decisión importante:**
+
+Solo `gemini` se presenta como perfil publicado cuando coincide con la tabla
+conocida de Gemini API/AI Studio. Vertex, Anthropic y OpenAI exponen límites que
+dependen de proyecto/cuenta/región/tier/organización, por lo que sus valores se
+marcan como fallback conservador y no como cuota oficial fija.
+
+**Verificación realizada:**
+
+- `conda run -n LabelForge python -m py_compile webapp\app.py scripts\rate_limits.py`
+- Prueba directa de `compute_min_delay()` para `gemini`, `vertex_gemini`,
+  `anthropic`, `openai` y `ollama`.
+
+---
+
+### 2026-06-15 - Autorización explícita de Claude en `free_only_mode`
+
+**Problema:** la ejecución fallaba porque `arb4` usa `provider.type="anthropic"`
+y `safety.free_only_mode=true` bloquea cualquier proveedor que no esté en
+`allowed_provider_types`.
+
+**Cambio:** agregado `anthropic` a `safety.allowed_provider_types` en
+`scripts/arbiters_config.json`, manteniendo `free_only_mode=true`.
+
+**Razon práctica:** Claude sigue siendo un proveedor con riesgo de costo, pero en
+esta configuración se está usando conscientemente como cuarto árbitro. La política
+de seguridad queda activa para bloquear proveedores no autorizados, sin bloquear
+`arb4`.
+
+**Verificación realizada:**
+
+- `validate_safety_policy()` pasa con:
+  `arb1:vertex_gemini`, `arb2:vertex_gemini`, `arb3:vertex_gemini`,
+  `arb4:anthropic`.
+
+---
+
+### 2026-06-15 - Preflight con instrucciones accionables por proveedor
+
+**Problema:** ante falta de credenciales de Vertex AI, el sistema sugería
+directamente `gcloud auth application-default login`, asumiendo que Google Cloud
+CLI estaba instalado. Eso no cubre máquinas sin `gcloud` ni explicaba alternativas
+equivalentes para otros proveedores.
+
+**Cambio:** `scripts/provider_preflight.py` ahora:
+
+- Detecta si `gcloud` existe en `PATH`.
+- Para Vertex AI, explica que no se usa API key directa y ofrece:
+  - service account JSON + `GOOGLE_APPLICATION_CREDENTIALS` como ruta sin login
+    interactivo local;
+  - Google Cloud CLI como ruta de login interactivo si está disponible o se instala.
+- Para Gemini, Anthropic y OpenAI, indica tres caminos: WebApp (`Arbitros` →
+  `Clave de API` → verificar), CLI `--set-provider-key`, o `secrets.env`.
+- Para OpenAI-compatible/Ollama, valida `base_url` y muestra ejemplos locales.
+
+**Documentación:** actualizados `README.md` y `context.md` para reflejar que Vertex
+tiene dos rutas de autenticación y que las API keys se gestionan por WebApp/CLI o
+`secrets.env`.
+
+---
+
+### 2026-06-15 - Claridad operativa de procesamiento, ejecución y logs
+
+**Objetivo:** cerrar ambigüedades detectadas al correr pruebas reales y dejar la
+interfaz alineada con lo que el backend realmente hace.
+
+**Problemas observados:**
+
+1. En `/processing`, aunque `dataset.input_file` ya estaba guardado, la interfaz
+   seguía pareciendo vacía porque el dropzone era el elemento dominante.
+2. En `/run`, "Límite de entradas = 70" era ambiguo: podía interpretarse como
+   70 entradas nuevas o como hasta la entrada 70 del dataset.
+3. En los logs de ejecución, no era fácil identificar visualmente qué árbitro estaba
+   hablando o fallando.
+4. El preflight de proveedores necesitaba instrucciones más accionables y no asumir
+   que `gcloud` estaba instalado.
+
+**Cambios aplicados:**
+
+- `/processing`:
+  - Agregada tarjeta **Archivo listo para procesar** con ruta, hoja y columna
+    persistidas en `scripts/arbiters_config.json`.
+  - El flujo de upload ahora aclara que subir archivo no basta: hay que seleccionar
+    columna y pulsar **Guardar** para que ese archivo sea el usado por el run.
+
+- `/run`:
+  - El campo **Límite de entradas** ahora explica que es un límite total desde el
+    inicio del dataset, no una cantidad adicional.
+  - Con checkpoint, la UI calcula una aproximación de entradas nuevas a procesar.
+    Ejemplo: checkpoint con 50 entradas + límite 70 ⇒ ~20 nuevas.
+  - Los logs detectan menciones a `arb1`, `arb2`, etc. y pintan la línea con el
+    color correspondiente al árbitro en la pestaña `Arbitros`.
+
+- `scripts/provider_preflight.py`:
+  - Detecta si `gcloud` existe en `PATH`.
+  - Para Vertex AI, propone service account JSON + `GOOGLE_APPLICATION_CREDENTIALS`
+    cuando no hay Google Cloud CLI.
+  - Para Gemini/Claude/OpenAI, indica WebApp, CLI `--set-provider-key` o `secrets.env`.
+  - Para Ollama/OpenAI-compatible, valida `base_url`.
+
+- Configuración:
+  - `scripts/arbiters_config.json` queda con `safety.free_only_mode=false` para
+    permitir pruebas con Vertex/Claude.
+  - La lista `allowed_provider_types` conserva `gemini`, `vertex_gemini`,
+    `anthropic`, `ollama` y `openai_compat` por si se reactiva `free_only_mode`.
+
+**Regla operativa que queda documentada:**
+
+El backend manda. La UI no debe inventar estado de procesamiento: muestra el dataset
+guardado, consulta checkpoints, dispara APIs y presenta mensajes del preflight. La
+semántica de `--limit` vive en el pipeline: es total desde el inicio del dataset.
+
+**Verificación realizada:**
+
+- Render de Flask para `/processing` contiene `ds-ready-card` y `renderDatasetReady`.
+- Render de Flask para `/run` contiene `updateLimitExplanation`, `detectArbiterInLog`
+  y estilos `log-arbiter-line`.
+- `python -m py_compile` sobre módulos tocados durante el preflight.
+- `/api/run/start` devuelve `400` con instrucciones accionables cuando faltan ADC
+  de Vertex, antes de arrancar el subproceso.
+# 2026-06-15 — Centralizacion de secretos en `secrets/`
+
+**Objetivo:** evitar que credenciales reales queden sueltas en la raiz del proyecto.
+
+**Cambios realizados:**
+- Se creo la carpeta local `secrets/` para archivos sensibles.
+- Se movio `secrets.env` a `secrets/secrets.env`.
+- Se movio el JSON de service account de Vertex AI a `secrets/cloud-computing-cybersec-inaoe-dd4d83318111.json`.
+- Se actualizo `GOOGLE_APPLICATION_CREDENTIALS` dentro de `secrets/secrets.env` para apuntar al JSON movido.
+- Se centralizo la ruta de dotenv en `scripts/secrets_io.py` con `secrets_env_path(BASE_DIR)`, manteniendo fallback temporal a `./secrets.env` si existiera.
+- Se actualizaron `main_webapp.py`, `webapp/app.py` y `scripts/label_persuasion.py` para cargar/escribir secretos desde `secrets/secrets.env`.
+- Se actualizaron mensajes de preflight/UI y documentacion viva (`README.md`, `context.md`) para usar la nueva ruta.
+- `secrets.env.example` queda en la raiz como plantilla publica; no debe moverse a `secrets/`.
+
+**Nota de seguridad:** `secrets/` ya esta cubierto por `.gitignore`, junto con patrones de llaves, credenciales y JSON sensibles.
+
+---
+
+### 2026-06-16 — Rediseño de árbitros: 3 árbitros, modelos diversos, system prompts con lente profesional
+
+**Objetivo:** mejorar la calidad metodológica del etiquetado antes de correr el pipeline
+completo sobre el dataset. Se detectaron tres debilidades en la configuración anterior.
+
+**Problemas identificados:**
+
+1. **System prompts demasiado cortos:** los prompts anteriores eran etiquetas de rol
+   más dos restricciones (~15 tokens). Las personas no añadían valor real porque no
+   describían cómo aplicar el lente profesional a la tarea.
+
+2. **Cuatro árbitros generan empates 2-2:** con número par de árbitros el consenso
+   por mayoría simple puede quedar indeciso. Tres árbitros garantizan siempre una
+   mayoría.
+
+3. **arb1 y arb3 compartían el mismo modelo (gemini-2.5-pro):** con temperatura 0.1
+   los dos árbitros son cuasi-deterministas para el mismo input. Sus respuestas estarían
+   correlacionadas por los pesos del modelo, no por genuino desacuerdo de criterio. Eso
+   infla el Fleiss Kappa artificialmente — problema metodológico para el paper.
+
+**Cambios realizados en `scripts/arbiters_config.json`:**
+
+- **Eliminado arb2** (Carlos Doce, Especialista Ciberseguridad, gemini-2.5-flash):
+  era el árbitro de menor capacidad y su modelo flash sería más útil como diferenciador
+  en arb3 que como árbitro independiente con arb4 ya cubriendo la perspectiva de menor
+  costo.
+
+- **arb4 subido de `claude-haiku-4-5-20251001` a `claude-sonnet-4-6`:** Haiku es el
+  modelo más ligero de Claude, inadecuado para detección matizada de principios de
+  persuasión. Sonnet ofrece razonamiento sustancialmente mejor para esta tarea.
+
+- **arb3 cambiado de gemini-2.5-pro a gemini-2.5-flash:** para garantizar que los tres
+  árbitros usen modelos genuinamente distintos. Flash tiene escala y comportamiento
+  diferente a Pro; el desacuerdo entre ellos refleja diferencia real de criterio.
+
+- **System prompts reescritos para los 3 árbitros:** cada uno ahora describe su rol
+  profesional, cómo ese rol se aplica a la detección de cada uno de los 5 principios,
+  y refuerza el criterio de "solo lo explícito" en lenguaje propio de esa profesión.
+  Extensión: ~80-100 palabras por árbitro vs ~15 anteriores.
+
+**Configuración final de árbitros:**
+
+| ID | Persona | Modelo | Proveedor |
+|---|---|---|---|
+| arb1 | Viviana Inés Fuentes (Psicóloga Clínica) | gemini-2.5-pro | vertex_gemini |
+| arb3 | Rodrigo Santana (Investigador Forense) | gemini-2.5-flash | vertex_gemini |
+| arb4 | Claudio Codencio (Psicólogo Forense) | claude-sonnet-4-6 | anthropic |
+
+**Archivo de resultados anteriores:**
+
+Los checkpoints, outputs y logs de la configuración de 4 árbitros fueron movidos a
+`archive/4arb_v1/` para preservarlos. Las carpetas `checkpoints/`, `output/` y `logs/`
+quedaron limpias para la nueva corrida. Se agregó `archive/` a `.gitignore`.
+
+**Pendiente estratégico documentado:**
+
+Incorporar un cuarto árbitro de familia completamente distinta (GPT-4o, Llama 3 u otro)
+para máxima diversidad de arquitectura. Al hacerlo, revisar el sistema de consenso:
+con 4 árbitros hay riesgo de empate 2-2 y se necesitaría mayoría ponderada o un quinto
+árbitro desempatador. Por ahora se mantienen 3.
+
+**Verificación:**
+- `python -c "import json; json.load(open('scripts/arbiters_config.json'))"` — JSON válido.
+- Árbitros activos confirmados: `['arb1', 'arb3', 'arb4']`.

@@ -73,6 +73,7 @@ biblio/**/*.docx
 output/
 logs/
 checkpoints/
+archive/
 *.log
 *.out
 *.err

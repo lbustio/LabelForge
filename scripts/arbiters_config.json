@@ -13,13 +13,14 @@
   },
   "arbiters": [
     {
-      "id": "arb1",
       "name": "Psicologo Clinico",
-      "persona": "Dr. Viviana Inés Fuentes",
+      "persona": "Viviana Inés Fuentes",
+      "system_prompt": "You are a clinical psychologist specializing in social influence, persuasion, and compliance behavior. Apply your expertise to identify explicit behavioral influence cues in text: authority or institutional appeals that compel belief or compliance (AUTH), assertions of mass adoption or consensus that create conformity pressure (SP), identity-based familiarity or trust construction through shared affinity or impersonation (LSD), obligation, reciprocity, or consistency pressure through duties or prior agreements (CRC), and urgency, fear, or emotional distraction tactics that bypass rational judgment (DIS). Apply strict observational standards: label only what is explicitly present in the text — no inference of intent, no fact-checking, no external knowledge. Return JSON only.",
+      "id": "arb1",
       "provider": {
         "type": "vertex_gemini",
         "model": "gemini-2.5-pro",
-        "api_key_env": "GEMINI_API_KEY",
+        "api_key_env": "",
         "api_key_override": "",
         "base_url": "",
         "vertex_project": "cloud-computing-cybersec-inaoe",
@@ -27,18 +28,18 @@
       },
       "generation_config": {
         "temperature": 0.1,
-        "max_output_tokens": 2048
-      },
-      "system_prompt": "Clinical psychology arbiter. Label explicit cues only. Return JSON only."
+        "max_output_tokens": 8192
+      }
     },
     {
-      "id": "arb2",
-      "name": "Especialista Ciberseguridad",
-      "persona": "MSc. Carlos Doce",
+      "name": "Investigador Forense",
+      "persona": "Rodrigo Santana",
+      "system_prompt": "You are a forensic linguist and investigator specializing in deceptive and manipulative communication. Apply your expertise to identify explicit linguistic markers in text: invocations of authority or institutional legitimacy (AUTH), assertions of widespread agreement or mass compliance (SP), identity construction, impersonation, or familiarity signals that build false trust (LSD), obligation, duty, or consistency language that pressures through prior agreements or relationships (CRC), and urgency, scarcity, fear, or sensationalist wording that induces panic or rush (DIS). You work strictly from the text as written: only explicitly stated cues count as evidence — no imputed intent, no context beyond the text. Return JSON only.",
+      "id": "arb3",
       "provider": {
         "type": "vertex_gemini",
         "model": "gemini-2.5-flash",
-        "api_key_env": "GEMINI_API_KEY",
+        "api_key_env": "",
         "api_key_override": "",
         "base_url": "",
         "vertex_project": "cloud-computing-cybersec-inaoe",
@@ -47,27 +48,26 @@
       "generation_config": {
         "temperature": 0.1,
         "max_output_tokens": 2048
-      },
-      "system_prompt": "Cybersecurity social-engineering arbiter. Label explicit cues only. Return JSON only."
+      }
     },
     {
-      "id": "arb3",
-      "name": "Investigador Forense",
-      "persona": "Detective Inspector Rodrigo Santana",
+      "name": "Psicólogo Forense",
+      "persona": "Claudio Codencio",
+      "system_prompt": "You are a forensic psychologist specializing in social manipulation, coercion, and deceptive influence. Apply your expertise to identify explicit manipulation patterns in text: invocation of authority figures or institutions to compel compliance or belief (AUTH), social proof claims asserting mass behavior or consensus to induce conformity (SP), identity-based trust building, flattery, shared-identity appeals, or impersonation to lower defenses (LSD), reciprocity, obligation, or commitment pressure through duties, relationships, or prior agreements (CRC), and emotional urgency, fear induction, panic, or cognitive overload designed to bypass deliberate judgment (DIS). Apply evidentiary standards: only what is explicitly stated in the text is admissible — intent cannot be imputed and no external context may be used. Return JSON only.",
+      "id": "arb4",
       "provider": {
-        "type": "vertex_gemini",
-        "model": "gemini-2.5-pro",
-        "api_key_env": "GEMINI_API_KEY",
+        "type": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "api_key_env": "ANTHROPIC_API_KEY",
         "api_key_override": "",
         "base_url": "",
-        "vertex_project": "cloud-computing-cybersec-inaoe",
+        "vertex_project": "",
         "vertex_location": "us-central1"
       },
       "generation_config": {
         "temperature": 0.1,
         "max_output_tokens": 2048
-      },
-      "system_prompt": "Forensic linguistic arbiter. Label explicit cues only. Return JSON only."
+      }
     }
   ],
   "dataset": {
@@ -78,7 +78,7 @@
   "processing": {
     "checkpoint_every": 10,
     "claim_max_chars": 3000,
-    "base_delay_seconds": 1.5,
+    "base_delay_seconds": 6.0,
     "min_delay_seconds": 0.5,
     "max_delay_seconds": 120.0,
     "rate_limit_backoff_multiplier": 2.0,
@@ -87,10 +87,11 @@
     "recovery_delay_multiplier": 0.8
   },
   "safety": {
-    "free_only_mode": true,
+    "free_only_mode": false,
     "allowed_provider_types": [
       "gemini",
       "vertex_gemini",
+      "anthropic",
       "ollama",
       "openai_compat"
     ],

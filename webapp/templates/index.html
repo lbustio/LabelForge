@@ -156,7 +156,7 @@ function showArbiterModal(arb) {
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Persona</span><br><span style="color:#e2e8f0">${escapeHtml(arb.persona || '—')}</span></div>
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Proveedor</span><br><span style="color:#e2e8f0">${escapeHtml(p.type || '—')}</span></div>
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Modelo</span><br><span style="color:#e2e8f0">${escapeHtml(p.model || '—')}</span></div>
-    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Temperatura</span><br><span style="color:#e2e8f0">${gc.temperature ?? '0.1'}</span></div>
+    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Temperatura</span><br>${temperatureBadge(gc.temperature ?? 0.1)}</div>
     <div class="mb-0">
       <span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Instrucción de sistema</span>
       <pre style="background:#0f1117;border:1px solid #2d3148;border-radius:.5rem;padding:.6rem;margin-top:.3rem;font-size:.78rem;color:#c4b5fd;max-height:180px;overflow-y:auto;white-space:pre-wrap">${escapeHtml(arb.system_prompt || '—')}</pre>

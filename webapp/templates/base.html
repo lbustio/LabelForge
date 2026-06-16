@@ -335,6 +335,36 @@ function showToast(msg, type='success') {
   el.className = `toast align-items-center border-0 text-bg-${type === 'error' ? 'danger' : type === 'warn' ? 'warning' : 'success'}`;
   bootstrap.Toast.getOrCreateInstance(el, {delay: 3000}).show();
 }
+
+function clamp01(value) {
+  return Math.min(Math.max(Number(value) || 0, 0), 1);
+}
+
+function temperatureBadge(value) {
+  const raw = Number(value ?? 0.1);
+  const t = clamp01(raw);
+  const pct = Math.round(t * 100);
+  const hue = Math.round(205 - (205 * t));
+  const border = `hsl(${hue} 90% 58% / .55)`;
+  const bg = `linear-gradient(90deg, hsl(205 90% 48% / .30), hsl(${hue} 90% 52% / .34))`;
+  const text = `hsl(${hue} 95% 72%)`;
+  const label =
+    t <= 0.2 ? 'frio y quirurgico' :
+    t <= 0.45 ? 'calma analitica' :
+    t <= 0.7 ? 'templado creativo' :
+    t <= 0.9 ? 'picante' :
+    'modo lava';
+  return `<span class="small d-inline-flex align-items-center gap-2 px-2 py-1"
+      title="Temperatura del modelo: 0 azul preciso, 1 rojo creativo"
+      style="border:1px solid ${border};background:${bg};color:${text};border-radius:999px;font-weight:650">
+      <i class="bi bi-thermometer-half"></i>
+      <span>temperatura: ${raw.toFixed(2).replace(/\.?0+$/, '')}</span>
+      <span style="opacity:.78">· ${label}</span>
+      <span style="width:42px;height:6px;border-radius:999px;background:rgba(255,255,255,.12);overflow:hidden;display:inline-block">
+        <span style="display:block;height:100%;width:${pct}%;background:hsl(${hue} 92% 58%);border-radius:999px"></span>
+      </span>
+    </span>`;
+}
 </script>
 {% block scripts %}{% endblock %}
 </body>
