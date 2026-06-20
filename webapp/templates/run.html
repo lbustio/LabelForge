@@ -414,6 +414,8 @@ let statsRefreshTimer = null;
 let arbiterLogMeta = {};
 let itemLabel = 'entrada';
 let checkpointEvery = 10;
+let allArbiterConfigs = {};
+let hwProfile = null;
 
 function configureArbiterLogColors(arbiters, maxArbs) {
   arbiterLogMeta = {};
@@ -558,8 +560,14 @@ function datasetSummaryText(dataset = {}, runState = null) {
 
 async function loadConfigSummary() {
   try {
-    const cfg = await fetch('/api/config').then(r => r.json());
-    const cp = await fetch('/api/checkpoint/status').then(r => r.json()).catch(() => ({}));
+    const [cfg, cp, hw] = await Promise.all([
+      fetch('/api/config').then(r => r.json()),
+      fetch('/api/checkpoint/status').then(r => r.json()).catch(() => ({})),
+      fetch('/api/local/hardware').then(r => r.json()).catch(() => null),
+    ]);
+    hwProfile = hw;
+    allArbiterConfigs = {};
+    (cfg.arbiters || []).forEach(a => { allArbiterConfigs[a.id] = a.provider || {}; });
     const runState = cp.run_state || null;
     document.getElementById('config-arbiters').textContent = cfg.arbiters.length;
     document.getElementById('config-principles').textContent = Object.keys(cfg.task?.principles || {}).length;
@@ -579,6 +587,38 @@ async function loadConfigSummary() {
       chartSpeed.update('none');
     }
   } catch(e) { /* silencio */ }
+}
+
+function hwBadge(arbId) {
+  const prov = allArbiterConfigs[arbId];
+  if (!prov) return '';
+  if (prov.type === 'llama_cpp') {
+    if (!hwProfile || !hwProfile.os) {
+      return '<span class="badge bg-warning-subtle text-warning border-warning border" style="font-size:.68rem"><i class="bi bi-cpu me-1"></i>Local</span>';
+    }
+    const backend = (hwProfile.best_backend || 'cpu').toLowerCase();
+    const gpu = hwProfile.gpu || {};
+    const npu = hwProfile.npu || {};
+    if (backend === 'cuda' && gpu.ok) {
+      return `<span class="badge bg-success-subtle text-success border-success border" style="font-size:.68rem" title="${escapeHtml(gpu.name||'GPU NVIDIA')}"><i class="bi bi-gpu-card me-1"></i>GPU</span>`;
+    }
+    if (backend === 'npu' && npu.ok) {
+      return `<span class="badge bg-info-subtle text-info border-info border" style="font-size:.68rem" title="${escapeHtml((npu.vendor||'')+' '+(npu.type||''))}"><i class="bi bi-cpu me-1"></i>NPU</span>`;
+    }
+    if (backend === 'tpu') {
+      return `<span class="badge bg-info-subtle text-info border-info border" style="font-size:.68rem"><i class="bi bi-hdd-network me-1"></i>TPU</span>`;
+    }
+    return `<span class="badge bg-secondary-subtle text-secondary border-secondary border" style="font-size:.68rem"><i class="bi bi-cpu me-1"></i>CPU</span>`;
+  }
+  const CLOUD_BADGES = {
+    gemini:        '<i class="bi bi-google me-1"></i>Nube',
+    vertex_gemini: '<i class="bi bi-cloud-check me-1"></i>Nube',
+    anthropic:     '<i class="bi bi-stars me-1"></i>Nube',
+    openai:        '<i class="bi bi-robot me-1"></i>Nube',
+    openai_compat: '<i class="bi bi-plug me-1"></i>Nube',
+  };
+  const inner = CLOUD_BADGES[prov.type] || '<i class="bi bi-cloud me-1"></i>Nube';
+  return `<span class="badge bg-primary-subtle text-primary border-primary border" style="font-size:.68rem">${inner}</span>`;
 }
 
 // ---------- resultados ----------
@@ -1152,6 +1192,7 @@ function renderLiveStats(data) {
         <div>${escapeHtml(id)}</div>
         ${s.name && s.name !== id ? `<div class="small text-secondary">${escapeHtml(s.name)}</div>` : ''}
       </td>
+      <td>${hwBadge(id)}</td>
       <td>${formatNumber(s.prompt_tokens)}</td>
       <td>${formatNumber(s.completion_tokens)}</td>
       <td class="fw-semibold">${formatNumber(s.total_tokens)}</td>
@@ -1167,6 +1208,7 @@ function renderLiveStats(data) {
       <table class="table table-dark table-sm mb-0" style="border-color:#2d3148;font-size:.8rem">
         <thead><tr>
           <th class="text-secondary">Arbitro</th>
+          <th class="text-secondary">SW/HW</th>
           <th class="text-secondary">Entrada</th>
           <th class="text-secondary">Salida</th>
           <th class="text-secondary">Total</th>
@@ -1175,7 +1217,7 @@ function renderLiveStats(data) {
           <th class="text-secondary">Min / Max</th>
           <th class="text-secondary">Tiempo total</th>
         </tr></thead>
-        <tbody>${tbody || '<tr><td colspan="8" class="text-secondary">Sin métricas por arbitro todavía.</td></tr>'}</tbody>
+        <tbody>${tbody || '<tr><td colspan="9" class="text-secondary">Sin métricas por arbitro todavía.</td></tr>'}</tbody>
       </table>
     </div>`;
 
@@ -1579,7 +1621,8 @@ async function loadRunStats(keepPosition = false) {
   const arbiters = Object.entries(data.arbiters || {});
   const tbody = arbiters.map(([id, s]) => `
     <tr>
-      <td class="text-secondary">${id}</td>
+      <td class="text-secondary">${escapeHtml(id)}</td>
+      <td>${hwBadge(id)}</td>
       <td>${formatNumber(s.prompt_tokens)}</td>
       <td>${formatNumber(s.completion_tokens)}</td>
       <td class="fw-semibold">${formatNumber(s.total_tokens)}</td>
@@ -1595,6 +1638,7 @@ async function loadRunStats(keepPosition = false) {
     <table class="table table-dark table-sm mb-0" style="border-color:#2d3148;font-size:.8rem">
       <thead><tr>
         <th class="text-secondary">Arbitro</th>
+        <th class="text-secondary">SW/HW</th>
         <th class="text-secondary">Entrada</th>
         <th class="text-secondary">Salida</th>
         <th class="text-secondary">Total</th>
@@ -1603,7 +1647,7 @@ async function loadRunStats(keepPosition = false) {
         <th class="text-secondary">Min / Max</th>
         <th class="text-secondary">Tiempo total</th>
       </tr></thead>
-      <tbody>${tbody || '<tr><td colspan="8" class="text-secondary">Sin metricas por arbitro.</td></tr>'}</tbody>
+      <tbody>${tbody || '<tr><td colspan="9" class="text-secondary">Sin metricas por arbitro.</td></tr>'}</tbody>
     </table>
     </div>`;
 

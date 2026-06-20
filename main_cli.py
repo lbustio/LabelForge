@@ -33,10 +33,11 @@ def _check_hw_profile_if_needed():
     Si hay proveedores locales y el setup no se ha completado, aborta con
     un mensaje accionable.
     """
-    config_path = ROOT / "scripts" / "arbiters_config.json"
     hw_profile  = ROOT / "models" / "hw_profile.json"
 
     try:
+        from scripts.paths import ARBITERS_CONFIG_PATH, resolve_config_file_path
+        config_path = resolve_config_file_path(ARBITERS_CONFIG_PATH)
         with open(config_path, encoding="utf-8") as f:
             cfg = json.load(f)
     except Exception:

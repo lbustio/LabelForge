@@ -18,6 +18,19 @@ from dotenv import load_dotenv
 from flask import Flask, Response, g, jsonify, render_template, request, send_from_directory, stream_with_context
 
 # ---------------------------------------------------------------------------
+# Inicialización de CUDA (debe ir antes de cualquier import que use llama_cpp)
+# ---------------------------------------------------------------------------
+from scripts.cuda_init import _ensure_cuda_ready as _cuda_ready
+_cuda_ready()
+
+# Forzar importación de llama_cpp ahora (mientras CUDA está listo) para que
+# quede cacheado en sys.modules y los imports posteriores no fallen.
+try:
+    import llama_cpp as _llama_cpp_  # noqa: F401
+except Exception:
+    pass
+
+# ---------------------------------------------------------------------------
 # Módulo compartido de métricas de acuerdo y utilidades
 # ---------------------------------------------------------------------------
 from scripts.agreement_metrics import compute_agreement_metrics
@@ -34,18 +47,24 @@ from scripts.secrets_io import provider_api_key_env, resolve_gcp_credentials, se
 from scripts.rate_limits import compute_min_delay
 from scripts.provider_preflight import validate_provider_preflight
 from scripts.utils import safe_int as _safe_int, safe_float as _safe_float
+from scripts.paths import (
+    ARBITERS_CONFIG_PATH,
+    CHECKPOINTS_DIR,
+    CONFIG_DIR,
+    HW_PROFILE_PATH,
+    MODELS_DIR,
+    OUTPUT_DIR,
+    SCRIPTS_DIR,
+    resolve_config_file_path,
+)
 
 # ---------------------------------------------------------------------------
 # Rutas
 # ---------------------------------------------------------------------------
 BASE_DIR        = Path(__file__).resolve().parent.parent
 WEBAPP_DIR      = Path(__file__).resolve().parent
-CONFIG_PATH     = BASE_DIR / "scripts" / "arbiters_config.json"
-SCRIPTS_DIR     = BASE_DIR / "scripts"
-OUTPUT_DIR      = BASE_DIR / "output"
-CHECKPOINTS_DIR = BASE_DIR / "checkpoints"
-MODELS_DIR      = BASE_DIR / "models"
-HW_PROFILE_PATH = MODELS_DIR / "hw_profile.json"
+CONFIG_DIR.mkdir(exist_ok=True)
+CONFIG_PATH     = resolve_config_file_path(ARBITERS_CONFIG_PATH)
 
 SECRETS_ENV_PATH = secrets_env_path(BASE_DIR)
 load_dotenv(SECRETS_ENV_PATH)
@@ -872,9 +891,11 @@ def api_local_recommended():
     """
     force = request.args.get("refresh") == "1"
     try:
-        from scripts.local_models import recommended_models
+        from scripts.local_models import list_known_model_filenames, recommended_models
         hw = _load_hw_profile()
         result = recommended_models(hw if hw else None, force_refresh=force)
+        downloaded = list_known_model_filenames()
+        result = [m for m in result if m.get("filename") not in downloaded]
         return jsonify(result)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
@@ -929,24 +950,41 @@ def api_local_download():
         "status": "pending",
         "progress": 0,
         "error": None,
+        "cancel_requested": False,
         "log_lines": [],
     }
 
     with _download_jobs_lock:
+        for existing_id, existing in _download_jobs.items():
+            if (
+                existing.get("filename") == filename
+                and existing.get("status") in ("pending", "downloading", "canceling")
+            ):
+                return jsonify({"job_id": existing_id, "already_running": True})
         _download_jobs[job_id] = job
 
     def _run():
         job["status"] = "downloading"
         try:
-            from scripts.local_models import download_model
+            from scripts.local_models import DownloadCancelled, download_model
 
             def _progress(downloaded: int, total: int):
+                if job.get("cancel_requested"):
+                    raise DownloadCancelled("Descarga cancelada por el usuario.")
                 if total:
                     job["progress"] = int(downloaded * 100 / total)
 
             download_model(repo_id, filename, progress_callback=_progress, description=description)
-            job["status"] = "done"
-            job["progress"] = 100
+            if job.get("cancel_requested"):
+                job["status"] = "canceled"
+            else:
+                job["status"] = "done"
+                job["progress"] = 100
+        except DownloadCancelled as exc:
+            part = MODELS_DIR / f"{filename}.part"
+            part.unlink(missing_ok=True)
+            job["status"] = "canceled"
+            job["error"] = str(exc)
         except Exception as exc:
             job["status"] = "error"
             job["error"] = str(exc)
@@ -977,7 +1015,7 @@ def api_local_download_status(job_id: str):
                 "error": current.get("error"),
             })
             yield f"data: {data}\n\n"
-            if current.get("status") in ("done", "error"):
+            if current.get("status") in ("done", "error", "canceled"):
                 break
             time.sleep(1)
 
@@ -987,6 +1025,20 @@ def api_local_download_status(job_id: str):
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
                  "Connection": "keep-alive"},
     )
+
+
+@app.route("/api/local/download/<job_id>/cancel", methods=["POST"])
+def api_local_cancel_download(job_id: str):
+    """Solicita cancelar una descarga GGUF en curso."""
+    with _download_jobs_lock:
+        job = _download_jobs.get(job_id)
+        if not job:
+            return jsonify({"error": "job no encontrado"}), 404
+        if job.get("status") in ("done", "error", "canceled"):
+            return jsonify({"ok": True, "status": job.get("status")})
+        job["cancel_requested"] = True
+        job["status"] = "canceling"
+    return jsonify({"ok": True, "status": "canceling"})
 
 
 @app.route("/api/local/model/<filename>", methods=["DELETE"])
@@ -1000,6 +1052,34 @@ def api_local_delete_model(filename: str):
     target.unlink()
     _log.info("Modelo local eliminado: %s", filename)
     return jsonify({"ok": True, "deleted": filename})
+
+
+@app.route("/api/local/model/<filename>/move", methods=["POST"])
+def api_local_move_model(filename: str):
+    """Mueve un GGUF activo a una carpeta absoluta elegida desde la maquina local."""
+    if not _is_localhost():
+        return jsonify({"error": "Mover modelos a rutas arbitrarias solo se permite desde localhost"}), 403
+    if not _valid_gguf_filename(filename):
+        return jsonify({"error": "Nombre de archivo invÃ¡lido"}), 400
+
+    body = request.get_json(silent=True) or {}
+    destination_dir = (body.get("destination_dir") or "").strip()
+    if not destination_dir:
+        return jsonify({"error": "destination_dir es obligatorio"}), 400
+
+    try:
+        from scripts.local_models import move_model_to_directory
+        destination = move_model_to_directory(filename, destination_dir)
+        _log.info("Modelo local movido fuera del cache: %s -> %s", filename, destination)
+        return jsonify({"ok": True, "moved": filename, "destination": str(destination)})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except FileNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except FileExistsError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/api/local/archive", methods=["GET"])

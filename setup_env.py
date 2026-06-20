@@ -31,6 +31,7 @@ import os
 import re
 import subprocess
 import sys
+import textwrap
 from datetime import datetime
 from pathlib import Path
 
@@ -257,16 +258,39 @@ def install_npu_backend():
 # ---------------------------------------------------------------------------
 
 _ABETLEN_BASE = "https://abetlen.github.io/llama-cpp-python/whl"
+_WIN_VSDEVCMD = Path(r"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat")
+_WIN_CUDA_PATH = Path(r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.3")
+
+
+def _cuda_source_env() -> dict:
+    cuda_path = os.environ.get("CUDA_PATH") or str(_WIN_CUDA_PATH)
+    env = {
+        "CMAKE_ARGS": "-DGGML_CUDA=on",
+        "FORCE_CMAKE": "1",
+        "CMAKE_CUDA_ARCHITECTURES": "native",
+        "CMAKE_BUILD_PARALLEL_LEVEL": str(max((os.cpu_count() or 4) - 1, 1)),
+        "CUDA_PATH": cuda_path,
+        "CudaToolkitDir": cuda_path + "\\",
+        "CUDA_PATH_V13_3": cuda_path,
+    }
+    cuda_bin = str(Path(cuda_path) / "bin")
+    env["PATH"] = cuda_bin + os.pathsep + os.environ.get("PATH", "")
+    return env
 
 _LLAMA_INSTALL_MAP = {
     # backend  → list of (env_vars_dict, pip_args_extra) intentos en orden
     "cuda":   [
-        # 1er intento: wheel precompilada CUDA (evita necesitar MSVC en Windows)
+        # Intentos con wheels precompiladas — del más nuevo al más antiguo
+        # cu130/cu128 necesarios para Blackwell (RTX 5xxx, sm_120+, CUDA 12.8+)
+        ({}, ["--prefer-binary", "--extra-index-url", f"{_ABETLEN_BASE}/cu130"]),
+        ({}, ["--prefer-binary", "--extra-index-url", f"{_ABETLEN_BASE}/cu128"]),
         ({}, ["--prefer-binary", "--extra-index-url", f"{_ABETLEN_BASE}/cu126"]),
         ({}, ["--prefer-binary", "--extra-index-url", f"{_ABETLEN_BASE}/cu124"]),
         ({}, ["--prefer-binary", "--extra-index-url", f"{_ABETLEN_BASE}/cu121"]),
         # Último recurso: compilar desde fuente con MSVC
         ({"CMAKE_ARGS": "-DGGML_CUDA=on"}, ["--force-reinstall", "--no-cache-dir"]),
+        # Fallback funcional si CUDA no carga en runtime
+        ({}, ["--prefer-binary", "--extra-index-url", f"{_ABETLEN_BASE}/cpu"]),
     ],
     "rocm":   [({"CMAKE_ARGS": "-DGGML_HIPBLAS=on"}, ["--force-reinstall", "--no-cache-dir"])],
     "metal":  [({"CMAKE_ARGS": "-DGGML_METAL=on"},   ["--force-reinstall", "--no-cache-dir"])],
@@ -278,6 +302,21 @@ _LLAMA_INSTALL_MAP = {
         ({}, []),
     ],
 }
+
+
+def _has_windows_cuda_build_tools() -> bool:
+    return (
+        os.name == "nt"
+        and _WIN_VSDEVCMD.exists()
+        and (_WIN_CUDA_PATH / "bin" / "nvcc.exe").exists()
+    )
+
+
+def _uninstall_llama_cpp():
+    subprocess.run(
+        [sys.executable, "-m", "pip", "uninstall", "llama-cpp-python", "-y"],
+        capture_output=True, text=True
+    )
 
 
 def _detect_cuda_version() -> str:
@@ -300,10 +339,24 @@ def _run_pip_attempt(env_vars: dict, extra_args: list) -> bool:
     if env_vars:
         log.info("  Variables: %s", " ".join(f"{k}={v}" for k, v in env_vars.items()))
     try:
-        proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-            env={**env, "PIP_DISABLE_PIP_VERSION_CHECK": "1"},
-        )
+        run_env = {**env, "PIP_DISABLE_PIP_VERSION_CHECK": "1"}
+        if os.name == "nt" and env_vars.get("CMAKE_ARGS") == "-DGGML_CUDA=on" and _WIN_VSDEVCMD.exists():
+            # subprocess.list2cmdline escapa correctamente ">=" evitando que cmd.exe
+            # lo interprete como redirección de I/O
+            cmd_text = subprocess.list2cmdline(cmd)
+            shell_cmd = f'call "{_WIN_VSDEVCMD}" -arch=x64 && {cmd_text}'
+            proc = subprocess.Popen(
+                ["cmd.exe", "/c", shell_cmd],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                env=run_env,
+            )
+        else:
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                env=run_env,
+            )
         for line in proc.stdout:
             line = line.rstrip()
             if line:
@@ -315,6 +368,60 @@ def _run_pip_attempt(env_vars: dict, extra_args: list) -> bool:
         return False
 
 
+def _probe_llama_cpp() -> tuple[bool, bool, str]:
+    import tempfile
+    # Escribir el probe como script temporal para evitar problemas de escaping y GC.
+    # IMPORTANTE: os.add_dll_directory() devuelve un handle — si se descarta sin asignar,
+    # el GC lo destruye inmediatamente y elimina el directorio del search path.
+    # En CUDA 13.x las DLLs están en bin\x64, no en bin.
+    script = textwrap.dedent("""\
+        import os, ctypes
+        from pathlib import Path
+        cuda_root = Path(r"C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA")
+        _handles = []
+        for cv in sorted(cuda_root.glob("v*"), reverse=True):
+            os.environ.setdefault("CUDA_PATH", str(cv))
+            for sub in ("bin\\\\x64", "bin"):
+                d = cv / sub
+                if d.exists() and list(d.glob("cublas*.dll")):
+                    _handles.append(os.add_dll_directory(str(d)))
+                    for dll in ("cublas64_13.dll", "cublasLt64_13.dll", "cudart64_13.dll",
+                                "cublas64_12.dll", "cublasLt64_12.dll", "cudart64_12.dll"):
+                        dp = d / dll
+                        if dp.exists():
+                            try:
+                                ctypes.CDLL(str(dp))
+                            except Exception:
+                                pass
+            break
+        import llama_cpp
+        print("gpu=" + str(bool(llama_cpp.llama_supports_gpu_offload())))
+    """)
+
+    probe_env = dict(os.environ)
+    if "CUDA_PATH" not in probe_env and os.name == "nt" and _WIN_CUDA_PATH.exists():
+        probe_env["CUDA_PATH"] = str(_WIN_CUDA_PATH)
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False,
+                                     encoding="utf-8") as tmp:
+        tmp.write(script)
+        tmp_path = tmp.name
+    try:
+        proc = subprocess.run(
+            [sys.executable, tmp_path],
+            capture_output=True,
+            text=True,
+            env=probe_env,
+        )
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+    output = (proc.stdout + proc.stderr).strip()
+    if proc.returncode != 0:
+        return False, False, output
+    return True, "gpu=True" in output, output
+
+
 def install_llama_cpp(backend: str) -> bool:
     _section("INSTALANDO llama-cpp-python")
     backend = backend if backend in _LLAMA_INSTALL_MAP else "cpu"
@@ -324,28 +431,44 @@ def install_llama_cpp(backend: str) -> bool:
 
     if backend == "cuda":
         cuda_ver = _detect_cuda_version()
+        if _has_windows_cuda_build_tools():
+            log.info("MSVC + CUDA Toolkit detectados — se prioriza compilación local CUDA desde fuente")
+            source_attempt = (_cuda_source_env(), ["--force-reinstall", "--no-cache-dir"])
+            attempts = [source_attempt] + [a for a in attempts if a != source_attempt]
         if cuda_ver:
             log.info("CUDA detectada: versión %s", cuda_ver)
             major, minor = cuda_ver.split(".", 1)
             cu_tag = f"cu{major}{minor.split('.')[0]}"
             preferred = ({}, ["--prefer-binary", "--extra-index-url", f"{_ABETLEN_BASE}/{cu_tag}"])
             # Insertar el intento con versión exacta como primera opción
-            attempts = [preferred] + [a for a in attempts if a != preferred]
+            if not _has_windows_cuda_build_tools():
+                attempts = [preferred] + [a for a in attempts if a != preferred]
         else:
             log.warning("No se pudo detectar versión de CUDA — se intentarán múltiples índices")
 
     # Desinstalar versión previa para evitar incompatibilidades
     log.info("Desinstalando versión previa de llama-cpp-python (si existe)...")
-    subprocess.run(
-        [sys.executable, "-m", "pip", "uninstall", "llama-cpp-python", "-y"],
-        capture_output=True, text=True
-    )
+    _uninstall_llama_cpp()
 
     for i, (env_vars, extra_args) in enumerate(attempts, 1):
         log.info("Intento %d/%d...", i, len(attempts))
         if _run_pip_attempt(env_vars, extra_args):
-            log.info("llama-cpp-python instalado OK (intento %d)", i)
-            return True
+            import_ok, gpu_ok, probe_output = _probe_llama_cpp()
+            if import_ok:
+                if backend != "cpu" and not gpu_ok:
+                    log.warning(
+                        "llama-cpp-python importó, pero sin offload GPU en intento %d. "
+                        "Se probará otra opción si queda disponible.",
+                        i,
+                    )
+                    if i < len(attempts):
+                        _uninstall_llama_cpp()
+                        continue
+                log.info("llama-cpp-python instalado y verificado OK (intento %d)", i)
+                return True
+            log.warning("llama-cpp-python instalado pero no importable: %s", probe_output)
+            if i < len(attempts):
+                _uninstall_llama_cpp()
         log.warning("Intento %d falló — probando siguiente opción...", i)
 
     log.error("Todos los intentos de instalar llama-cpp-python fallaron")
@@ -360,15 +483,31 @@ def verify_imports(has_npu: bool, gpu_backend: str) -> dict:
     _section("VERIFICANDO IMPORTS CRITICOS")
     results: dict = {}
 
-    # llama_cpp
+    # Pre-cargar DLLs de CUDA antes de importar llama_cpp (necesario en Windows/CUDA 13.x)
+    try:
+        from scripts.cuda_init import _ensure_cuda_ready
+        _ensure_cuda_ready()
+    except ImportError:
+        pass
     try:
         import llama_cpp
         gpu_ok = llama_cpp.llama_supports_gpu_offload()
         log.info("llama_cpp importado OK — GPU offload soportado: %s", gpu_ok)
+        if gpu_backend != "cpu" and not gpu_ok:
+            log.warning(
+                "llama_cpp es importable, pero no reporta soporte GPU para backend=%s. "
+                "Se usará CPU como fallback.",
+                gpu_backend,
+            )
         results["llama_cpp"] = True
         results["llama_cpp_gpu"] = gpu_ok
-    except ImportError as exc:
+    except (ImportError, RuntimeError, OSError) as exc:
         log.error("llama_cpp NO importable: %s", exc)
+        if "Could not find module" in str(exc) or "Failed to load shared library" in str(exc):
+            log.error(
+                "En Windows esto suele significar que falta una dependencia DLL de llama.dll "
+                "(por ejemplo runtime CUDA/MSVC), no necesariamente que falte llama.dll."
+            )
         results["llama_cpp"] = False
         results["llama_cpp_gpu"] = False
 
@@ -379,7 +518,7 @@ def verify_imports(has_npu: bool, gpu_backend: str) -> dict:
             log.info("openvino importado OK — versión: %s", openvino.__version__)
             results["openvino"] = True
             results["openvino_version"] = openvino.__version__
-        except ImportError as exc:
+        except (ImportError, RuntimeError, OSError) as exc:
             log.warning("openvino NO importable (NPU no disponible en runtime): %s", exc)
             results["openvino"] = False
 
@@ -388,7 +527,7 @@ def verify_imports(has_npu: bool, gpu_backend: str) -> dict:
         import huggingface_hub
         log.info("huggingface_hub importado OK — versión: %s", huggingface_hub.__version__)
         results["huggingface_hub"] = True
-    except ImportError as exc:
+    except (ImportError, RuntimeError, OSError) as exc:
         log.error("huggingface_hub NO importable: %s", exc)
         results["huggingface_hub"] = False
 
@@ -417,6 +556,12 @@ def write_hw_profile(hw: dict, verify_results: dict, npu_ok: bool, llama_ok: boo
     if best_backend == "npu" and not npu_ok:
         best_backend = gpu.get("backend") or "cpu"
         log.warning("NPU detectada pero backend OpenVINO no OK — recayendo en: %s", best_backend)
+    if best_backend not in ("cpu", "npu") and not gpu.get("ok"):
+        log.warning(
+            "GPU detectada con backend=%s, pero llama_cpp no confirmó offload GPU — recayendo en CPU",
+            best_backend,
+        )
+        best_backend = "cpu"
 
     profile = {
         "setup_date": datetime.now().isoformat(timespec="seconds"),

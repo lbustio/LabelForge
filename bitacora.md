@@ -27,33 +27,46 @@ y que criterios deben respetarse.
 
 ## Contexto actual del proyecto
 
-LabelForge es una plataforma para etiquetar entradas textuales de forma general,
-incluyendo datasets de noticias falsas segun la taxonomia de Principios de
-Persuasion de Ana Ferreira aplicada a ingenieria social. El sistema combina:
+LabelForge es una plataforma para etiquetar entradas textuales con LLMs mediante
+un enfoque multi-arbitro por consenso. La configuracion por defecto trabaja con
+la taxonomia de Principios de Persuasion de Ana Ferreira aplicada a noticias
+falsas e ingenieria social, pero los principios son configurables. El sistema
+combina:
 
 - Un pipeline CLI de etiquetado masivo.
 - Una webapp Flask para configuracion, ejecucion y monitoreo.
-- Un archivo central de configuracion de arbitros y principios.
+- Configuracion editable en `config/`.
 - Un enfoque multi-arbitro por consenso.
-- Soporte para distintos proveedores LLM.
+- Soporte para proveedores cloud, OpenAI-compatible y modelos locales GGUF.
 - Checkpoints, cola de reintentos, logs, salidas CSV y metricas de tokens y
   latencia.
 
 ## Arquitectura conocida
 
-- `main_label.py`: entrada CLI para lanzar el etiquetado.
+- `main_cli.py`: entrada CLI para lanzar el etiquetado.
 - `main_webapp.py`: entrada para levantar la webapp Flask.
+- `setup_env.py`: deteccion de hardware e instalacion de backend local GGUF.
+- `config/arbiters_config.json`: configuracion central de principios, arbitros,
+  prompts, dataset, processing y safety.
+- `config/local_models_config.json`: configuracion del catalogo dinamico GGUF.
 - `scripts/label_persuasion.py`: nucleo del pipeline de etiquetado, proveedores
   LLM, rate limiter, checkpoints, cola de fallos, consenso y metricas.
-- `scripts/arbiters_config.json`: configuracion central de principios,
-  arbitros, prompts y parametros de procesamiento.
+- `scripts/local_models.py`: gestion de modelos GGUF, catalogo, descarga, cache,
+  archivo, restauracion, cancelacion y movimiento externo.
+- `scripts/paths.py`: rutas canonicas y compatibilidad con ubicaciones legacy.
 - `webapp/app.py`: backend Flask, endpoints de configuracion, ejecucion,
-  streaming de logs y metricas.
+  streaming de logs, metricas y modelos locales.
 - `webapp/templates/`: pantallas HTML de la interfaz.
 - `data/`: datos de entrada.
+- `models/`: modelos GGUF, perfil de hardware y caches locales.
 - `output/`: datasets etiquetados generados.
 - `checkpoints/`: estado intermedio de ejecuciones.
 - `logs/`: historico de corridas y reportes.
+
+> Nota: las entradas antiguas del historico pueden mencionar nombres legacy como
+> `main_label.py`, `scripts/arbiters_config.json` o `scripts/local_models_config.json`.
+> Esas referencias describen el estado del proyecto en ese momento. Las rutas
+> canonicas actuales son las listadas arriba.
 
 ## Criterios de desarrollo
 
@@ -71,9 +84,11 @@ Persuasion de Ana Ferreira aplicada a ingenieria social. El sistema combina:
 
 ## Pendientes vivos
 
-- Verificar con una ejecucion corta que el pipeline CLI y la webapp siguen
-  funcionando despues de futuros cambios.
-- Mantener esta lista actualizada con problemas reales detectados en desarrollo.
+- Ejecutar una prueba end-to-end corta desde la webapp.
+- Ejecutar el pipeline completo para obtener resultados finales del paper.
+- Cerrar pendientes de seguridad documentados en `context.md` y `todos.md`.
+- Limpiar deuda JS legacy en `webapp/templates/arbiters.html`.
+- Validar en navegador descargas GGUF simultaneas, cancelacion y movimiento externo.
 
 ## Historico
 
@@ -2770,3 +2785,127 @@ Estas vulnerabilidades **no han sido corregidas** en esta sesión. Se documentan
 - `secrets.env.example`
 - `bitacora.md`
 - `context.md`
+
+### 2026-06-19 — Reorganización de configuración fuera de `scripts/`
+
+**Autor/agente:** Codex.
+
+**Objetivo:** separar código Python de configuración editable. El usuario señaló que
+`arbiters_config.json` y `local_models_config.json` no debían vivir junto al código
+en `scripts/`.
+
+**Decisión tomada:**
+
+- `config/` queda como directorio canónico para configuración editable/versionable.
+- `scripts/` queda reservado para código Python importable.
+- `secrets/` sigue siendo el lugar de credenciales privadas.
+- `models/`, `logs/`, `output/`, `checkpoints/` y `archive/` siguen como estado,
+  cache o artefactos locales ignorados por Git.
+
+**Cambios realizados:**
+
+- Movidos:
+  - `scripts/arbiters_config.json` → `config/arbiters_config.json`
+  - `scripts/local_models_config.json` → `config/local_models_config.json`
+- Política de almacenamiento documentada en el README raíz del proyecto.
+- Añadido `scripts/paths.py` como fuente única de rutas canónicas y fallbacks legacy.
+- Actualizados WebApp, CLI, pipeline y catálogo GGUF para usar `config/`.
+- `.gitignore` ahora ignora overrides locales `config/*.local.json` y
+  `config/*.private.json`.
+
+**Compatibilidad:**
+
+Se mantiene fallback para rutas antiguas: si algún comando usa explícitamente
+`scripts/arbiters_config.json` y ese archivo ya no existe, el código resuelve la
+ruta canónica `config/arbiters_config.json`.
+
+**Archivos tocados:**
+
+- `config/arbiters_config.json`
+- `config/local_models_config.json`
+- `scripts/paths.py`
+- `scripts/label_persuasion.py`
+- `scripts/local_models.py`
+- `scripts/utils.py`
+- `main_cli.py`
+- `webapp/app.py`
+- `.gitignore`
+- `README.md`
+- `context.md`
+- `bitacora.md`
+
+---
+
+### 2026-06-19 - Actualizacion documental integral y backlog real
+
+**Autor/agente:** Codex.
+
+**Objetivo:** actualizar los documentos Markdown del proyecto para que reflejen el
+estado real del codigo y sean utiles para uso, mantenimiento y transferencia de
+contexto. El usuario indico que README, TODOs, bitacora y contexto se sentian
+desactualizados.
+
+**Diagnostico:**
+
+- `README.md` mezclaba informacion vigente con detalles historicos y no reflejaba
+  completamente la gestion nueva de modelos GGUF: cancelacion de descargas,
+  modelos archivados, movimiento externo y filtrado de recomendados ya existentes.
+- `todos.md` seguia centrado en una implementacion GGUF ya completada, por lo que
+  no funcionaba como backlog real.
+- `context.md` era muy extenso y conservaba secciones historicas utiles, pero no
+  priorizaba una transferencia tecnica rapida del estado actual.
+- La parte superior de `bitacora.md` aun mencionaba rutas viejas como
+  `main_label.py` y configuracion JSON dentro de `scripts/`.
+- La politica de almacenamiento necesitaba quedar integrada en el README unico
+  del proyecto, sin documentacion duplicada dentro de `config/`.
+
+**Cambios realizados:**
+
+- `README.md` reescrito como manual actual:
+  - proposito del proyecto;
+  - arquitectura;
+  - instalacion;
+  - uso CLI/webapp;
+  - configuracion y secretos;
+  - pipeline;
+  - arbitros actuales;
+  - gestion GGUF actual;
+  - endpoints principales;
+  - politica de almacenamiento;
+  - seguridad y tests.
+- `todos.md` reescrito como backlog real:
+  - prioridades altas, medias y bajas;
+  - pendientes de seguridad;
+  - deuda tecnica de `arbiters.html`;
+  - items ya completados recientemente.
+- `context.md` reescrito como transferencia tecnica:
+  - rutas canonicas;
+  - estado de config;
+  - pipeline;
+  - checkpoints;
+  - webapp;
+  - seguridad;
+  - GGUF;
+  - reglas de almacenamiento;
+  - comandos de verificacion.
+- Politica de almacenamiento integrada en `README.md`.
+- `bitacora.md` actualizado en su encabezado para reflejar:
+  - `main_cli.py`, no `main_label.py`;
+  - `config/` como ubicacion canonica;
+  - `models/` como cache local;
+  - `scripts/local_models.py` y `scripts/paths.py`;
+  - pendientes vivos reales.
+
+**Decision editorial:**
+
+No se elimino el historico largo de `bitacora.md`, porque su valor es preservar
+razones y decisiones pasadas. En cambio, se corrigio la fotografia inicial y se
+dejo esta entrada para registrar la actualizacion documental. Para estado actual
+rapido, usar `README.md`, `context.md` y `todos.md`.
+
+**Archivos tocados:**
+
+- `README.md`
+- `todos.md`
+- `context.md`
+- `bitacora.md`

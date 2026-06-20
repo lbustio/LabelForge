@@ -33,6 +33,8 @@ def normalize_arbiter(data: dict, existing: dict = None) -> dict:
         base["provider"] = {
             "type": p.get("type", "gemini"),
             "model": p.get("model", ""),
+            "model_path": p.get("model_path", ""),
+            "n_ctx": int(p.get("n_ctx", 4096) or 4096),
             "api_key_env": p.get("api_key_env", ""),
             "api_key_override": p.get("api_key_override", ""),
             "base_url": p.get("base_url", ""),

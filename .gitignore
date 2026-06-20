@@ -29,7 +29,10 @@ application_default_credentials.json
 adc.json
 
 # Configuraciones locales con posibles overrides de API keys.
-# Mantener scripts/arbiters_config.json sin secretos si se decide versionarlo.
+# `config/*.json` puede versionarse cuando es configuracion base del proyecto;
+# los overrides locales/privados quedan fuera.
+config/*.local.json
+config/*.private.json
 *.local.json
 *.private.json
 *secret*.json
@@ -149,3 +152,9 @@ artifacts/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# ---------------------------------------------------------------------------
+# Claude Code memory y archivos temporales de herramientas
+# ---------------------------------------------------------------------------
+.claude/
+0.3.0

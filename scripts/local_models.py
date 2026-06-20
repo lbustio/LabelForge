@@ -26,14 +26,22 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from scripts.paths import (
+    BASE_DIR,
+    HW_PROFILE_PATH,
+    MODELS_DIR,
+    resolve_local_models_config_path,
+)
+
 log = logging.getLogger(__name__)
 
-BASE_DIR      = Path(__file__).resolve().parent.parent
-MODELS_DIR    = BASE_DIR / "models"
-HW_PROFILE    = MODELS_DIR / "hw_profile.json"
+from scripts.cuda_init import _ensure_cuda_ready as _cuda_ready
+_cuda_ready()
+
 MODELS_JSON   = MODELS_DIR / "models.json"
+HW_PROFILE    = HW_PROFILE_PATH
 CATALOG_CACHE      = MODELS_DIR / "catalog_cache.json"
-LOCAL_MODELS_CONFIG = BASE_DIR / "scripts" / "local_models_config.json"
+LOCAL_MODELS_CONFIG = resolve_local_models_config_path()
 
 _catalog_cfg: dict = {}
 
@@ -68,9 +76,9 @@ def _catalog_llm_model(provider: str) -> str:
 
 # ---------------------------------------------------------------------------
 # Cache de modelos Llama cargados — evita recargar en cada llamada de arbiter
-# Clave: (model_path_str, n_ctx)  Valor: instancia Llama
+# Clave: (model_path_str, n_ctx)  Valor: (instancia Llama, último acceso float)
 # ---------------------------------------------------------------------------
-_LLAMA_MODEL_CACHE: dict = {}
+_LLAMA_MODEL_CACHE: dict = {}   # {key: (Llama, last_access_time)}
 _cache_lock = threading.Lock()
 
 
@@ -543,6 +551,10 @@ def recommended_models(hw_profile: Optional[dict] = None, force_refresh: bool = 
 
 ARCHIVE_DIR = MODELS_DIR / "archive"
 
+
+class DownloadCancelled(RuntimeError):
+    """Señal interna para cancelar una descarga GGUF en curso."""
+
 # Familias conocidas de modelos GGUF para parseo de nombre
 _GGUF_FAMILIES = [
     ("codellama",  "Code Llama"),
@@ -708,6 +720,42 @@ def delete_archived_model(filename: str) -> None:
     log.info("[local_models] Modelo archivado eliminado: %s", filename)
 
 
+def list_known_model_filenames() -> set[str]:
+    """Devuelve modelos ya disponibles o movidos fuera del cache desde la app."""
+    names = {m["filename"] for m in list_cached_models()}
+    names.update(m["filename"] for m in list_archived_models())
+
+    if MODELS_JSON.exists():
+        try:
+            registry = json.loads(MODELS_JSON.read_text(encoding="utf-8"))
+        except Exception:
+            registry = []
+        for entry in registry:
+            if entry.get("location") == "external" and entry.get("filename"):
+                names.add(entry["filename"])
+    return names
+
+
+def move_model_to_directory(filename: str, destination_dir: str | Path) -> Path:
+    """Mueve un GGUF activo desde models/ a una carpeta elegida por el usuario."""
+    src = MODELS_DIR / filename
+    if not src.exists():
+        raise FileNotFoundError(f"Modelo no encontrado: {filename}")
+
+    dest_dir = Path(destination_dir).expanduser()
+    if not dest_dir.is_absolute():
+        raise ValueError("La carpeta destino debe ser una ruta absoluta.")
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    dest = dest_dir / filename
+    if dest.exists():
+        raise FileExistsError(f"Ya existe un archivo con ese nombre en: {dest}")
+    src.rename(dest)
+    _mark_model_moved(filename, dest)
+    log.info("[local_models] Modelo movido fuera del cache: %s -> %s", filename, dest)
+    return dest
+
+
 # ---------------------------------------------------------------------------
 # Descarga desde Hugging Face
 # ---------------------------------------------------------------------------
@@ -864,8 +912,15 @@ def download_model(
     dest = MODELS_DIR / filename
     url  = _hf_download_url(repo_id, filename)
 
+    if dest.exists():
+        log.info("[local_models] Modelo ya existe en cache: %s", dest.name)
+        _update_models_json(dest, repo_id=repo_id, description=description)
+        return dest
+
     try:
         _stream_download(url, dest, progress_callback=progress_callback)
+    except DownloadCancelled:
+        raise
     except Exception as exc:
         exc_str = str(exc)
         # 404 → intentar con nombre corregido (diferencias de mayúsculas/minúsculas)
@@ -874,9 +929,15 @@ def download_model(
             if corrected != filename:
                 dest = MODELS_DIR / corrected
                 url  = _hf_download_url(repo_id, corrected)
+                if dest.exists():
+                    log.info("[local_models] Modelo corregido ya existe en cache: %s", dest.name)
+                    _update_models_json(dest, repo_id=repo_id, description=description)
+                    return dest
                 try:
                     _stream_download(url, dest, progress_callback=progress_callback)
                     filename = corrected
+                except DownloadCancelled:
+                    raise
                 except Exception as exc2:
                     raise RuntimeError(
                         f"Descarga fallida para {repo_id}/{corrected}: {exc2}"
@@ -936,6 +997,31 @@ def _update_models_json(model_path: Path, repo_id: str = "", description: str = 
         json.dump(registry, f, indent=2, ensure_ascii=False)
 
 
+def _mark_model_moved(filename: str, destination: Path) -> None:
+    """Marca un modelo como movido a una ruta externa para no recomendarlo otra vez."""
+    registry: list = []
+    if MODELS_JSON.exists():
+        try:
+            registry = json.loads(MODELS_JSON.read_text(encoding="utf-8"))
+        except Exception:
+            registry = []
+
+    previous = next((r for r in registry if r.get("filename") == filename), {})
+    entry = {
+        **previous,
+        "filename": filename,
+        "path": str(destination),
+        "size_gb": round(destination.stat().st_size / (1024 ** 3), 2),
+        "location": "external",
+    }
+    registry = [r for r in registry if r.get("filename") != filename]
+    registry.append(entry)
+
+    MODELS_JSON.parent.mkdir(parents=True, exist_ok=True)
+    with open(MODELS_JSON, "w", encoding="utf-8") as f:
+        json.dump(registry, f, indent=2, ensure_ascii=False)
+
+
 # ---------------------------------------------------------------------------
 # Cache de instancias Llama
 # ---------------------------------------------------------------------------
@@ -944,6 +1030,7 @@ def get_or_load_llama(model_path: str, n_ctx: int = 4096, **llama_kwargs):
     """
     Retorna una instancia Llama del cache o la carga desde disco.
     Thread-safe mediante _cache_lock.
+    Si la carga falla (p.ej. VRAM llena), evicta el modelo menos usado y reintenta.
     """
     try:
         from llama_cpp import Llama
@@ -954,29 +1041,50 @@ def get_or_load_llama(model_path: str, n_ctx: int = 4096, **llama_kwargs):
 
     key = (model_path, n_ctx)
     with _cache_lock:
-        if key not in _LLAMA_MODEL_CACHE:
-            path = Path(model_path)
-            if not path.is_absolute():
-                path = BASE_DIR / path
-            if not path.exists():
-                raise FileNotFoundError(
-                    f"Modelo GGUF no encontrado: {path}. "
-                    "Descárgalo desde la webapp (Árbitros → Descargar modelos)."
-                )
-            optimal = get_optimal_params(str(path), n_ctx)
+        if key in _LLAMA_MODEL_CACHE:
+            instance, _ = _LLAMA_MODEL_CACHE[key]
+            _LLAMA_MODEL_CACHE[key] = (instance, time.monotonic())
+            return instance
+
+        path = Path(model_path)
+        if not path.is_absolute():
+            path = BASE_DIR / path
+        if not path.exists():
+            raise FileNotFoundError(
+                f"Modelo GGUF no encontrado: {path}. "
+                "Descárgalo desde la webapp (Árbitros → Descargar modelos)."
+            )
+        optimal = get_optimal_params(str(path), n_ctx)
+
+        while True:
             log.info("[local_models] Cargando modelo: %s (n_gpu_layers=%s, n_ctx=%d)",
                      path.name, optimal["n_gpu_layers"], n_ctx)
-            _LLAMA_MODEL_CACHE[key] = Llama(
-                model_path=str(path),
-                n_ctx=n_ctx,
-                n_gpu_layers=llama_kwargs.pop("n_gpu_layers", optimal["n_gpu_layers"]),
-                n_threads=llama_kwargs.pop("n_threads", optimal["n_threads"]),
-                n_batch=llama_kwargs.pop("n_batch", optimal["n_batch"]),
-                verbose=False,
-                **llama_kwargs,
-            )
-            log.info("[local_models] Modelo cargado y en cache: %s", path.name)
-        return _LLAMA_MODEL_CACHE[key]
+            try:
+                instance = Llama(
+                    model_path=str(path),
+                    n_ctx=n_ctx,
+                    n_gpu_layers=llama_kwargs.get("n_gpu_layers", optimal["n_gpu_layers"]),
+                    n_threads=llama_kwargs.get("n_threads", optimal["n_threads"]),
+                    n_batch=llama_kwargs.get("n_batch", optimal["n_batch"]),
+                    verbose=False,
+                    **{k: v for k, v in llama_kwargs.items()
+                       if k not in ("n_gpu_layers", "n_threads", "n_batch")},
+                )
+                _LLAMA_MODEL_CACHE[key] = (instance, time.monotonic())
+                log.info("[local_models] Modelo cargado y en cache: %s", path.name)
+                return instance
+            except Exception as exc:
+                if _LLAMA_MODEL_CACHE:
+                    lru_key = min(_LLAMA_MODEL_CACHE, key=lambda k: _LLAMA_MODEL_CACHE[k][1])
+                    lru_name = Path(lru_key[0]).name
+                    del _LLAMA_MODEL_CACHE[lru_key]
+                    log.warning(
+                        "[local_models] Fallo al cargar '%s' (%s) — "
+                        "evictando '%s' (LRU) y reintentando",
+                        path.name, exc, lru_name,
+                    )
+                else:
+                    raise
 
 
 def clear_model_cache():

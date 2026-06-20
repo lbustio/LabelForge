@@ -57,31 +57,33 @@ from scripts.arbiters_io import (
 from scripts.secrets_io import provider_api_key_env, secrets_env_path, set_secret_value
 from scripts.provider_preflight import require_provider_preflight
 from scripts.utils import number as _number
+from scripts.paths import (
+    ARBITERS_CONFIG_PATH,
+    BASE_DIR,
+    CHECKPOINTS_DIR,
+    LOGS_DIR,
+    OUTPUT_DIR,
+    SCRIPTS_DIR,
+    resolve_config_file_path,
+)
 
 # ---------------------------------------------------------------------------
 # Rutas base
 # ---------------------------------------------------------------------------
-BASE_DIR    = Path(__file__).resolve().parent.parent
-SCRIPTS_DIR = Path(__file__).resolve().parent
-
 SECRETS_ENV_PATH = secrets_env_path(BASE_DIR)
 load_dotenv(SECRETS_ENV_PATH)
 
-OUTPUT_DIR     = BASE_DIR / "output"
-LOG_DIR        = BASE_DIR / "logs"
-CHECKPOINT_DIR = BASE_DIR / "checkpoints"
-
 OUTPUT_DIR.mkdir(exist_ok=True)
-LOG_DIR.mkdir(exist_ok=True)
-CHECKPOINT_DIR.mkdir(exist_ok=True)
+LOGS_DIR.mkdir(exist_ok=True)
+CHECKPOINTS_DIR.mkdir(exist_ok=True)
 
 RUN_ID             = datetime.now().strftime("%Y%m%d_%H%M%S")
-CHECKPOINT_PATH    = CHECKPOINT_DIR / "checkpoint.json"
-FAILED_QUEUE_PATH  = CHECKPOINT_DIR / "failed_queue.jsonl"
-RUN_STATE_PATH     = CHECKPOINT_DIR / "run_state.json"
-CLAIM_RESULTS_PATH = CHECKPOINT_DIR / "claim_results.jsonl"
-ARBITER_RESULTS_PATH = CHECKPOINT_DIR / "arbiter_results.jsonl"
-LOG_PATH           = LOG_DIR / f"run_{RUN_ID}.log"
+CHECKPOINT_PATH    = CHECKPOINTS_DIR / "checkpoint.json"
+FAILED_QUEUE_PATH  = CHECKPOINTS_DIR / "failed_queue.jsonl"
+RUN_STATE_PATH     = CHECKPOINTS_DIR / "run_state.json"
+CLAIM_RESULTS_PATH = CHECKPOINTS_DIR / "claim_results.jsonl"
+ARBITER_RESULTS_PATH = CHECKPOINTS_DIR / "arbiter_results.jsonl"
+LOG_PATH           = LOGS_DIR / f"run_{RUN_ID}.log"
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -132,6 +134,7 @@ def write_json_atomic(path: Path, data: dict):
 
 
 def read_config_file(config_path: Path) -> dict:
+    config_path = resolve_config_file_path(config_path)
     if not config_path.exists():
         raise FileNotFoundError(f"Config no encontrado: {config_path}")
     with open(config_path, "r", encoding="utf-8-sig") as f:
@@ -139,6 +142,8 @@ def read_config_file(config_path: Path) -> dict:
 
 
 def write_config_file(config_path: Path, cfg: dict):
+    config_path = resolve_config_file_path(config_path)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = config_path.with_suffix(config_path.suffix + ".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
@@ -1556,7 +1561,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Etiqueta entradas con principios de persuasion usando arbitros multi-proveedor."
     )
-    parser.add_argument("--config", default=str(SCRIPTS_DIR / "arbiters_config.json"),
+    parser.add_argument("--config", default=str(ARBITERS_CONFIG_PATH),
                         help="Ruta al JSON de configuracion")
     parser.add_argument("--input",  default=None,
                         help="Ruta al archivo de entrada (CSV o Excel). Si no se indica, se usa el valor del config.")

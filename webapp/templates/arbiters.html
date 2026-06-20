@@ -6,10 +6,10 @@
   <div class="page-title mb-0">Arbitros</div>
   <div class="d-flex gap-2 flex-wrap justify-content-end">
     <button class="btn btn-outline-secondary btn-sm" onclick="openImportModal()" title="Importar arbitros cifrados">
-      <i class="bi bi-upload me-1"></i>Importar
+      <i class="bi bi-box-arrow-in-down me-1"></i>Importar
     </button>
     <button class="btn btn-outline-secondary btn-sm" onclick="openExportModal()" title="Exportar arbitros cifrados">
-      <i class="bi bi-download me-1"></i>Exportar
+      <i class="bi bi-box-arrow-up me-1"></i>Exportar
     </button>
     <button class="btn btn-primary btn-sm" onclick="openModal()">
       <i class="bi bi-plus-lg me-1"></i>Nuevo arbitro
@@ -233,8 +233,8 @@
       </div>
       <div class="modal-footer border-0">
         <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
-        <button class="btn btn-primary btn-sm" onclick="exportArbiters()">
-          <i class="bi bi-download me-1"></i>Exportar
+        <button class="btn btn-primary btn-sm" onclick="exportArbiters(this)">
+          <i class="bi bi-box-arrow-up me-1"></i>Exportar
         </button>
       </div>
     </div>
@@ -265,7 +265,7 @@
       <div class="modal-footer border-0">
         <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
         <button class="btn btn-primary btn-sm" onclick="importArbiters()">
-          <i class="bi bi-upload me-1"></i>Importar
+          <i class="bi bi-box-arrow-in-down me-1"></i>Importar
         </button>
       </div>
     </div>
@@ -426,6 +426,7 @@ let arbiters       = [];
 let maxArbiters    = 10;
 let preflightByArbiter = {};
 let preflightIssues = [];
+let localHardwareProfile = null;
 let geminiModels   = [];
 let currentModels  = [];   // modelos cargados para el proveedor actual
 let selectedModel  = "";
@@ -808,8 +809,9 @@ async function loadRateLimitInfo() {
 // Lista de arbitros
 // ---------------------------------------------------------------------------
 async function loadArbiters() {
-  [arbiters] = await Promise.all([
+  [arbiters, localHardwareProfile] = await Promise.all([
     fetch('/api/arbiters').then(r => r.json()),
+    fetch('/api/local/hardware').then(r => r.json()).catch(() => null),
     fetch('/api/config').then(r => r.json()).then(cfg => {
       maxArbiters = cfg.safety?.max_arbiters || 10;
     }),
@@ -892,7 +894,7 @@ function renderList() {
             <i class="bi bi-plus-lg me-1"></i>Nuevo arbitro
           </button>
           <button class="btn btn-outline-secondary btn-sm" onclick="openImportModal()">
-            <i class="bi bi-upload me-1"></i>Importar
+            <i class="bi bi-box-arrow-in-down me-1"></i>Importar
           </button>
         </div>
       </div>`;
@@ -922,6 +924,7 @@ function renderList() {
               <span class="soft-chip" style="font-size:.72rem">
                 <i class="bi ${PROVIDER_ICONS[p.type]||'bi-cloud'} me-1"></i>${PROVIDER_LABELS[p.type]||p.type||'?'}
               </span>
+              ${p.type === 'llama_cpp' ? localRuntimeBadge(localHardwareProfile) : ''}
               ${modelBadge}
               ${p.base_url ? `<span class="text-secondary" style="font-size:.72rem"><i class="bi bi-link-45deg me-1"></i>${escapeHtml(p.base_url)}</span>` : ''}
             </div>
@@ -1117,37 +1120,96 @@ function filenameFromDisposition(disposition) {
   return match ? match[1] : `labelforge-arbiters-${Date.now()}.lfarb`;
 }
 
-async function exportArbiters() {
+function localRuntimeStatus(hw) {
+  if (!hw || !hw.os) {
+    return {
+      label: 'No configurado',
+      tone: 'warning',
+      icon: 'bi-exclamation-triangle',
+      detail: 'Ejecuta python setup_env.py para detectar hardware.',
+    };
+  }
+  const backend = (hw.best_backend || 'cpu').toLowerCase();
+  const gpu = hw.gpu || {};
+  const npu = hw.npu || {};
+  if (backend === 'cuda' && gpu.ok) {
+    return {label: 'GPU CUDA', tone: 'success', icon: 'bi-gpu-card', detail: gpu.name || 'GPU NVIDIA'};
+  }
+  if (backend === 'npu' && npu.ok) {
+    return {label: 'NPU OpenVINO', tone: 'info', icon: 'bi-cpu', detail: `${npu.vendor || ''} ${npu.type || ''}`.trim()};
+  }
+  if (backend === 'tpu') {
+    return {label: 'TPU', tone: 'info', icon: 'bi-hdd-network', detail: 'Backend TPU detectado'};
+  }
+  if (gpu.detected && !gpu.ok) {
+    return {
+      label: 'CPU',
+      tone: 'warning',
+      icon: 'bi-cpu',
+      detail: `RTX/GPU detectada (${gpu.name || 'GPU'}), pero llama_cpp no tiene CUDA activo.`,
+    };
+  }
+  return {label: 'CPU', tone: 'secondary', icon: 'bi-cpu', detail: 'Ejecucion local por CPU'};
+}
+
+function localRuntimeBadge(hw) {
+  const s = localRuntimeStatus(hw);
+  return `<span class="badge bg-${s.tone}-subtle text-${s.tone} border border-${s.tone}">
+    <i class="bi ${s.icon} me-1"></i>Modelo local: ${escapeHtml(s.label)}
+  </span>
+  <div class="small text-secondary mt-1">${escapeHtml(s.detail)}</div>`;
+}
+
+async function exportArbiters(btn) {
   const password = document.getElementById('export-password').value;
   if (!password || password.length < 8) {
     showToast('Usa una contrasena de al menos 8 caracteres', 'error');
     return;
   }
 
-  const res = await fetch('/api/arbiters/export', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({password}),
-  });
-
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    showToast(data.error || 'Error al exportar', 'error');
-    return;
+  const originalHtml = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Exportando';
   }
 
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filenameFromDisposition(res.headers.get('Content-Disposition'));
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  try {
+    const res = await fetch('/api/arbiters/export', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({password}),
+    });
 
-  bootstrap.Modal.getOrCreateInstance(document.getElementById('exportModal')).hide();
-  showToast('Arbitros exportados en archivo cifrado');
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      showToast(data.error || 'Error al exportar', 'error');
+      return;
+    }
+
+    const blob = await res.blob();
+    if (!blob.size) {
+      showToast('La exportacion no genero contenido', 'error');
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filenameFromDisposition(res.headers.get('Content-Disposition'));
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('exportModal')).hide();
+    showToast('Arbitros exportados en archivo cifrado');
+  } catch (err) {
+    showToast(`Error al exportar: ${err.message || err}`, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
+  }
 }
 
 async function importArbiters() {
@@ -1525,8 +1587,11 @@ function ggufSetStatus(filename, status, progress, message) {
   bar.style.width = `${Math.max(3, Math.min(100, Number(progress || 0)))}%`;
   bar.classList.toggle('bg-danger', status === 'error');
   bar.classList.toggle('bg-success', status === 'done');
-  bar.classList.toggle('progress-bar-animated', status !== 'done' && status !== 'error');
-  msg.className = status === 'error' ? 'small text-danger' : (status === 'done' ? 'small text-success' : 'small text-secondary');
+  bar.classList.toggle('bg-warning', status === 'canceled' || status === 'canceling');
+  bar.classList.toggle('progress-bar-animated', status !== 'done' && status !== 'error' && status !== 'canceled');
+  msg.className = status === 'error'
+    ? 'small text-danger'
+    : (status === 'done' ? 'small text-success' : (status === 'canceled' ? 'small text-warning' : 'small text-secondary'));
   msg.innerHTML = message;
 }
 
@@ -1549,8 +1614,8 @@ function ggufCard(model, kind, options = {}) {
   if (kind === 'cached') {
     actions = `
       <button class="btn btn-sm btn-outline-secondary" onclick="archiveModel('${escapeHtml(filename)}', this)" title="Guardar para despues"><i class="bi bi-archive"></i></button>
-      <button class="btn btn-sm btn-outline-danger" onclick="deleteModel('${escapeHtml(filename)}', this)" title="Eliminar"><i class="bi bi-trash3"></i></button>
-      <button class="btn btn-sm btn-outline-info" onclick="redownloadModel('${escapeHtml(repoId)}','${escapeHtml(filename)}', this)" title="Volver a descargar"><i class="bi bi-arrow-clockwise"></i></button>`;
+      <button class="btn btn-sm btn-outline-warning" onclick="moveModel('${escapeHtml(filename)}', this)" title="Mover a otra carpeta"><i class="bi bi-folder-symlink"></i></button>
+      <button class="btn btn-sm btn-outline-danger" onclick="deleteModel('${escapeHtml(filename)}', this)" title="Eliminar"><i class="bi bi-trash3"></i></button>`;
   } else if (kind === 'archived') {
     actions = `
       <button class="btn btn-sm btn-outline-success" onclick="restoreModel('${escapeHtml(filename)}', this)" title="Cargar de nuevo"><i class="bi bi-box-arrow-in-down"></i></button>
@@ -1563,7 +1628,7 @@ function ggufCard(model, kind, options = {}) {
     <div class="p-2 mb-2 rounded" id="gguf-card-${ggufSafeId(filename)}" style="background:#12141e;border:1px solid ${border}">
       <div class="d-flex align-items-start gap-2">
         <div class="flex-grow-1 min-width-0">
-          <div class="small fw-semibold" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(filename)}</div>
+          <div class="small fw-semibold mb-1" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(filename)}</div>
           <div class="text-secondary" style="font-size:.72rem">${ggufSize(model)}${details ? ` · ${details}` : ''}</div>
           ${description ? `<div class="text-secondary mt-1" style="font-size:.72rem">${escapeHtml(description)}</div>` : ''}
           <div class="text-secondary mt-1" style="font-size:.68rem">
@@ -1591,14 +1656,16 @@ async function openDownloadModal() {
       const gpu = hw.gpu || {};
       const npu = hw.npu || {};
       const vram = gpu.vram_gb ? `${gpu.vram_gb} GB` : (gpu.shared_memory ? 'compartida' : 'N/A');
+      localHardwareProfile = hw;
       hwBody.innerHTML = `
         <div class="row g-2">
+          <div class="col-12">${localRuntimeBadge(hw)}</div>
           <div class="col-md-4"><span class="text-secondary">OS:</span> ${escapeHtml(hw.os)}</div>
           <div class="col-md-4"><span class="text-secondary">CPU:</span> ${escapeHtml(hw.cpu?.vendor || '')} ${escapeHtml(String(hw.cpu?.cores_physical || '?'))} nucleos</div>
           <div class="col-md-4"><span class="text-secondary">RAM:</span> ${escapeHtml(String(hw.ram_gb))} GB</div>
-          ${gpu.detected ? `<div class="col-md-6"><span class="text-secondary">GPU:</span> ${escapeHtml(gpu.name)} - VRAM ${escapeHtml(vram)}</div>` : '<div class="col-md-6 text-secondary">Sin GPU dedicada</div>'}
-          ${npu.detected ? `<div class="col-md-6"><span class="text-info">NPU:</span> ${escapeHtml(npu.vendor)} ${escapeHtml(npu.type)}</div>` : ''}
-          <div class="col-12"><span class="text-secondary">Backend optimo:</span> <strong style="color:rgb(var(--tone-cyan))">${escapeHtml(hw.best_backend)}</strong></div>
+          ${gpu.detected ? `<div class="col-md-6"><span class="text-secondary">GPU:</span> ${escapeHtml(gpu.name)} - VRAM ${escapeHtml(vram)} - ${gpu.ok ? 'activa' : 'no activa para llama_cpp'}</div>` : '<div class="col-md-6 text-secondary">Sin GPU dedicada</div>'}
+          ${npu.detected ? `<div class="col-md-6"><span class="text-info">NPU:</span> ${escapeHtml(npu.vendor)} ${escapeHtml(npu.type)} - ${npu.ok ? 'activa' : 'no activa'}</div>` : ''}
+          <div class="col-12"><span class="text-secondary">Backend local activo:</span> <strong style="color:rgb(var(--tone-cyan))">${escapeHtml((hw.best_backend || 'cpu').toUpperCase())}</strong></div>
         </div>`;
     }
   } catch(e) {
@@ -1645,7 +1712,7 @@ async function deleteModel(filename, btn) {
     const res = await fetch(`/api/local/model/${encodeURIComponent(filename)}`, {method: 'DELETE'});
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al eliminar');
-    await Promise.all([loadCachedModels(), loadModels()]);
+    await Promise.all([loadCachedModels(), loadModels(), loadRecommended(false)]);
   } catch(e) {
     ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}`);
     btn.disabled = false;
@@ -1658,7 +1725,31 @@ async function archiveModel(filename, btn) {
     const res = await fetch(`/api/local/model/${encodeURIComponent(filename)}/archive`, {method: 'POST'});
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al guardar');
-    await Promise.all([loadCachedModels(), loadArchivedModels(), loadModels()]);
+    await Promise.all([loadCachedModels(), loadArchivedModels(), loadModels(), loadRecommended(false)]);
+  } catch(e) {
+    ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}`);
+    btn.disabled = false;
+  }
+}
+
+async function moveModel(filename, btn) {
+  const destinationDir = prompt(
+    `Carpeta destino absoluta para mover ${filename}:`,
+    ''
+  );
+  if (!destinationDir) return;
+  btn.disabled = true;
+  ggufSetStatus(filename, 'canceling', 25, `<i class="bi bi-folder-symlink me-1"></i>Moviendo a ${escapeHtml(destinationDir)}...`);
+  try {
+    const res = await fetch(`/api/local/model/${encodeURIComponent(filename)}/move`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({destination_dir: destinationDir}),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al mover');
+    ggufSetStatus(filename, 'done', 100, `<i class="bi bi-check2-circle me-1"></i>Movido a ${escapeHtml(data.destination || destinationDir)}`);
+    await Promise.all([loadCachedModels(), loadModels(), loadRecommended(false)]);
   } catch(e) {
     ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}`);
     btn.disabled = false;
@@ -1671,7 +1762,7 @@ async function restoreModel(filename, btn) {
     const res = await fetch(`/api/local/archive/${encodeURIComponent(filename)}/restore`, {method: 'POST'});
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al cargar');
-    await Promise.all([loadCachedModels(), loadArchivedModels(), loadModels()]);
+    await Promise.all([loadCachedModels(), loadArchivedModels(), loadModels(), loadRecommended(false)]);
   } catch(e) {
     ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}`);
     btn.disabled = false;
@@ -1685,7 +1776,7 @@ async function deleteArchivedModel(filename, btn) {
     const res = await fetch(`/api/local/archive/${encodeURIComponent(filename)}`, {method: 'DELETE'});
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al eliminar');
-    await loadArchivedModels();
+    await Promise.all([loadArchivedModels(), loadRecommended(false)]);
   } catch(e) {
     ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}`);
     btn.disabled = false;
@@ -1727,7 +1818,7 @@ async function loadRecommended(forceRefresh) {
     const models = await fetch(url).then(r => r.json());
     if (models.error) throw new Error(models.error);
     if (!models.length) {
-      listEl.innerHTML = '<div class="text-secondary small">No hay modelos recomendados disponibles.</div>';
+      listEl.innerHTML = '<div class="text-secondary small">No hay modelos recomendados pendientes para descargar.</div>';
       return;
     }
     const hasVotes = models.some(m => m.consensus_votes > 0);
@@ -1790,6 +1881,13 @@ async function startDownload(repoId, filename, btn, description = '') {
     });
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || 'Error iniciando descarga');
+    if (data.already_running) {
+      ggufSetStatus(filename, 'downloading', 5, 'La descarga ya esta en curso.');
+    }
+
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-x-circle me-1"></i>Cancelar';
+    btn.onclick = () => cancelDownload(data.job_id, filename, btn);
 
     const es = new EventSource(`/api/local/download/${data.job_id}`);
     es.onmessage = (e) => {
@@ -1797,15 +1895,26 @@ async function startDownload(repoId, filename, btn, description = '') {
       if (d.status === 'done') {
         ggufSetStatus(filename, 'done', 100, `<i class="bi bi-check2-circle me-1"></i>${escapeHtml(filename)} descargado correctamente`);
         btn.innerHTML = '<i class="bi bi-check2"></i>';
+        btn.disabled = true;
         ggufActiveDownloads.delete(filename);
         es.close();
-        setTimeout(() => { loadModels(); loadCachedModels(); }, 500);
+        setTimeout(() => { loadModels(); loadCachedModels(); loadRecommended(false); }, 500);
       } else if (d.status === 'error') {
         ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(d.error || 'Error de descarga')}`);
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-download me-1"></i>Reintentar';
         ggufActiveDownloads.delete(filename);
         es.close();
+      } else if (d.status === 'canceled') {
+        ggufSetStatus(filename, 'canceled', 100, `<i class="bi bi-x-circle me-1"></i>${escapeHtml(d.error || 'Descarga cancelada')}`);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-download me-1"></i>Descargar';
+        btn.onclick = () => startDownload(repoId, filename, btn, description);
+        ggufActiveDownloads.delete(filename);
+        es.close();
+      } else if (d.status === 'canceling') {
+        ggufSetStatus(filename, 'canceling', d.progress || 10, `Cancelando ${escapeHtml(filename)}...`);
+        btn.disabled = true;
       } else {
         ggufSetStatus(filename, 'downloading', d.progress || 10, `Descargando ${escapeHtml(filename)}... (${d.progress || 0}%)`);
       }
@@ -1822,6 +1931,19 @@ async function startDownload(repoId, filename, btn, description = '') {
     btn.disabled = false;
     btn.innerHTML = '<i class="bi bi-download me-1"></i>Reintentar';
     ggufActiveDownloads.delete(filename);
+  }
+}
+
+async function cancelDownload(jobId, filename, btn) {
+  btn.disabled = true;
+  ggufSetStatus(filename, 'canceling', 100, `Cancelando ${escapeHtml(filename)}...`);
+  try {
+    const res = await fetch(`/api/local/download/${encodeURIComponent(jobId)}/cancel`, {method: 'POST'});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al cancelar');
+  } catch(e) {
+    ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}`);
+    btn.disabled = false;
   }
 }
 </script>

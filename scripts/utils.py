@@ -20,6 +20,7 @@ def ensure_project_dirs(root: Path) -> list[Path]:
         root / "checkpoints",
         root / "models",
         root / "secrets",
+        root / "config",
         root / "scripts",
         root / "data",
         root / "archive",
