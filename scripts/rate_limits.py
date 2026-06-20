@@ -2,10 +2,9 @@
 Provider/model rate-limit profiles used by the WebApp.
 
 Important distinction:
-- Gemini API / AI Studio publishes model/tier RPM, TPM and RPD style limits.
-- Vertex AI, Anthropic and OpenAI limits are account/project/tier dependent.
-  For those providers we keep conservative UI guidance and clearly mark the
-  source as account-dependent instead of presenting the numbers as exact quotas.
+- Gemini API / AI Studio: published per-model/tier limits.
+- OpenAI: published per-model Tier-1 limits (verified from platform dashboard).
+- Vertex AI, Anthropic: account/project/tier dependent; conservative guidance only.
 """
 
 from __future__ import annotations
@@ -52,6 +51,49 @@ GEMINI_API_RATE_LIMITS = {
         "free": {"rpm": 10, "tpm": 250_000, "rpd": 500},
         "paid": {"rpm": 500, "tpm": 2_000_000, "rpd": None},
     },
+}
+
+
+OPENAI_API_RATE_LIMITS = {
+    # Published limits — OpenAI Tier 1, verified from platform.openai.com/settings/limits.
+    # Shared-limit groups: versioned variants (e.g. gpt-4o-2024-08-06) share the same bucket
+    # as the base name, so matching by prefix is correct.
+
+    # GPT-5.x — newest flagship family (3 RPM per model group)
+    "gpt-5.5-pro":  {"rpm": 3,   "tpm": 10_000,    "rpd": 50},
+    "gpt-5.5":      {"rpm": 3,   "tpm": 10_000,    "rpd": 50},
+    "gpt-5.4-pro":  {"rpm": 3,   "tpm": 10_000,    "rpd": 50},
+    "gpt-5.4-nano": {"rpm": 10,  "tpm": 60_000,    "rpd": 50},
+    "gpt-5.4-mini": {"rpm": 10,  "tpm": 100_000,   "rpd": 50},
+    "gpt-5.4":      {"rpm": 3,   "tpm": 10_000,    "rpd": 50},
+    "gpt-5.3":      {"rpm": 3,   "tpm": 10_000,    "rpd": 50},
+    "gpt-5.2-pro":  {"rpm": 3,   "tpm": 10_000,    "rpd": 50},
+    "gpt-5.2":      {"rpm": 3,   "tpm": 10_000,    "rpd": 50},
+    "gpt-5.1":      {"rpm": 3,   "tpm": 10_000,    "rpd": 50},
+    "gpt-5-pro":    {"rpm": 10,  "tpm": 30_000,    "rpd": 50},
+    "gpt-5-nano":   {"rpm": 10,  "tpm": 40_000,    "rpd": 50},
+    "gpt-5-mini":   {"rpm": 10,  "tpm": 60_000,    "rpd": 50},
+    "gpt-5":        {"rpm": 3,   "tpm": 10_000,    "rpd": 50},
+
+    # GPT-4.1 family
+    "gpt-4.1-nano": {"rpm": 10,  "tpm": 60_000,    "rpd": 50},
+    "gpt-4.1-mini": {"rpm": 10,  "tpm": 60_000,    "rpd": 50},
+    "gpt-4.1":      {"rpm": 3,   "tpm": 10_000,    "rpd": 50},
+
+    # GPT-4o family
+    "gpt-4o-mini":  {"rpm": 10,  "tpm": 60_000,    "rpd": 50},
+    "gpt-4o":       {"rpm": 3,   "tpm": 10_000,    "rpd": 50},
+
+    # GPT-3.5
+    "gpt-3.5-turbo": {"rpm": 3,  "tpm": 40_000,    "rpd": 50},
+
+    # o-series reasoning models
+    "o3-mini": {"rpm": 150, "tpm": 1_000_000,  "rpd": None},
+    "o4-mini": {"rpm": 3,   "tpm": 100_000,    "rpd": 50},
+    "o3":      {"rpm": 3,   "tpm": 100_000,    "rpd": 50},
+    "o1":      {"rpm": 10,  "tpm": 100_000,    "rpd": 50},
+
+    "_default": {"rpm": 10, "tpm": 100_000,    "rpd": 50},
 }
 
 
@@ -138,9 +180,13 @@ ACCOUNT_DEPENDENT_MODEL_LIMITS = {
 
 def model_tier(model_id: str) -> str:
     model_id = (model_id or "").lower()
-    if any(k in model_id for k in ("lite", "haiku")) or "-mini" in model_id or model_id.endswith("mini"):
+    if any(k in model_id for k in ("lite", "haiku", "nano")) or "-mini" in model_id or model_id.endswith("mini"):
         return "lite"
-    if "opus" in model_id or ("pro" in model_id and "lite" not in model_id) or model_id.startswith(("gpt-4", "o1", "o3")):
+    if (
+        "opus" in model_id
+        or ("pro" in model_id and "lite" not in model_id)
+        or model_id.startswith(("gpt-4", "gpt-5", "o1", "o3"))
+    ):
         return "pro"
     if any(k in model_id for k in ("flash", "sonnet", "gpt-")):
         return "mid"
@@ -158,6 +204,16 @@ def _match_gemini_limits(model_id: str, tier: str) -> tuple[dict, str]:
     return dict(GEMINI_API_RATE_LIMITS["_default"][tier]), "_default"
 
 
+def _match_openai_limits(model_id: str) -> tuple[dict, str]:
+    model_id = (model_id or "").lower()
+    for pattern in sorted(OPENAI_API_RATE_LIMITS.keys(), key=len, reverse=True):
+        if pattern == "_default":
+            continue
+        if model_id.startswith(pattern) or pattern in model_id:
+            return dict(OPENAI_API_RATE_LIMITS[pattern]), pattern
+    return dict(OPENAI_API_RATE_LIMITS["_default"]), "_default"
+
+
 def _match_account_limits(provider: str, model_id: str) -> tuple[dict, str]:
     provider = provider or "openai_compat"
     model_id = (model_id or "").lower()
@@ -173,6 +229,21 @@ def _match_account_limits(provider: str, model_id: str) -> tuple[dict, str]:
 
 def get_rate_limit_profile(provider: str, model_id: str, tier: str = "free") -> dict:
     provider = provider or "gemini"
+
+    if provider == "llama_cpp":
+        return {
+            "provider": provider,
+            "model": model_id,
+            "tier": "local",
+            "rpm": None,
+            "rpd": None,
+            "tpm": None,
+            "limit_kind": "local",
+            "source_label": "Modelo local GGUF",
+            "source_url": "",
+            "note": "Modelo local — sin límites de API.",
+        }
+
     if provider == "gemini":
         limits, matched = _match_gemini_limits(model_id, tier)
         return {
@@ -185,6 +256,20 @@ def get_rate_limit_profile(provider: str, model_id: str, tier: str = "free") -> 
             "source_label": "Gemini API / AI Studio",
             "source_url": "https://ai.google.dev/gemini-api/docs/rate-limits",
             "note": "Limites publicados por Google para Gemini API; pueden variar por proyecto/tier.",
+        }
+
+    if provider == "openai":
+        limits, matched = _match_openai_limits(model_id)
+        return {
+            **limits,
+            "provider": provider,
+            "model": model_id,
+            "tier": "tier1",
+            "pattern_matched": matched,
+            "limit_kind": "published",
+            "source_label": "OpenAI Tier 1 (platform dashboard)",
+            "source_url": "https://platform.openai.com/settings/organization/limits",
+            "note": "Limites publicados de OpenAI Tier 1; pueden diferir en cuentas de otro tier.",
         }
 
     model_class = model_tier(model_id)
@@ -217,6 +302,17 @@ def get_rate_limit_profile(provider: str, model_id: str, tier: str = "free") -> 
 
 def compute_min_delay(provider: str, model_id: str, tier: str = "free", n_arbiters: int = 1) -> dict:
     profile = get_rate_limit_profile(provider, model_id, tier)
+
+    if profile.get("limit_kind") == "local":
+        return {
+            **profile,
+            "n_arbiters": n_arbiters,
+            "min_delay_s": 0,
+            "safe_delay_s": 0,
+            "alert_level": "info",
+            "alert_msg": "Modelo local GGUF — sin límites de API, sin delay necesario.",
+        }
+
     rpm = profile.get("rpm") or 10
     n_arbiters = max(int(n_arbiters or 1), 1)
     delay_min = (60.0 / rpm) * n_arbiters * 1.2

@@ -67,15 +67,69 @@ def _missing_api_key_message(arb_id: str, ptype: str, env_var: str) -> str:
         "openai": "OpenAI",
     }.get(ptype, ptype)
     cli = {
-        "gemini": "python main_label.py --set-provider-key gemini",
-        "anthropic": "python main_label.py --set-provider-key anthropic",
-        "openai": "python main_label.py --set-provider-key openai",
-    }.get(ptype, "python main_label.py --set-provider-key PROVEEDOR")
+        "gemini": "python main_cli.py --set-provider-key gemini",
+        "anthropic": "python main_cli.py --set-provider-key anthropic",
+        "openai": "python main_cli.py --set-provider-key openai",
+    }.get(ptype, "python main_cli.py --set-provider-key PROVEEDOR")
     return (
         f"{arb_id}: falta API key para {label} ({env_var}). "
         "Soluciones: en WebApp ve a Arbitros, pega la clave en Clave de API y pulsa verificar; "
         f"o usa CLI `{cli}`; o define `{env_var}=...` en secrets/secrets.env."
     )
+
+
+def _check_llama_cpp(arb_id: str, provider: dict) -> list[str]:
+    issues: list[str] = []
+
+    # 1. hw_profile.json existe y setup_ok
+    hw_profile = Path(__file__).resolve().parent.parent / "models" / "hw_profile.json"
+    if not hw_profile.exists():
+        issues.append(
+            f"{arb_id}: falta models/hw_profile.json. "
+            "Ejecuta 'python setup_env.py' antes de usar modelos locales."
+        )
+    else:
+        try:
+            import json
+            profile = json.loads(hw_profile.read_text(encoding="utf-8"))
+            if not profile.get("setup_ok"):
+                issues.append(
+                    f"{arb_id}: setup_ok=false en hw_profile.json. "
+                    "Revisa logs/setup_*.log y vuelve a ejecutar 'python setup_env.py'."
+                )
+        except Exception as exc:
+            issues.append(f"{arb_id}: hw_profile.json no se puede leer: {exc}")
+
+    # 2. llama-cpp-python importable
+    try:
+        import llama_cpp  # noqa: F401
+    except ImportError:
+        issues.append(
+            f"{arb_id}: llama-cpp-python no está instalado. "
+            "Ejecuta 'python setup_env.py' para instalarlo con soporte GPU correcto."
+        )
+
+    # 3. model_path existe y es .gguf
+    model_path = (provider.get("model_path") or "").strip()
+    if not model_path:
+        issues.append(
+            f"{arb_id}: llama_cpp requiere provider.model_path con la ruta al archivo .gguf. "
+            "Descarga un modelo desde la webapp (Árbitros → Descargar modelos)."
+        )
+    else:
+        base_dir = Path(__file__).resolve().parent.parent
+        full_path = Path(model_path) if Path(model_path).is_absolute() else base_dir / model_path
+        if not full_path.exists():
+            issues.append(
+                f"{arb_id}: modelo GGUF no encontrado: {model_path}. "
+                "Descárgalo desde la webapp (Árbitros → Descargar modelos)."
+            )
+        elif full_path.suffix.lower() != ".gguf":
+            issues.append(
+                f"{arb_id}: model_path no apunta a un archivo .gguf: {model_path}"
+            )
+
+    return issues
 
 
 def validate_provider_preflight(cfg: dict) -> list[str]:
@@ -128,6 +182,9 @@ def validate_provider_preflight(cfg: dict) -> list[str]:
                     "si tienes Ollama local con API compatible OpenAI, o configura la direccion "
                     "del servidor en el arbitro."
                 )
+
+        elif ptype == "llama_cpp":
+            issues += _check_llama_cpp(arb_id, provider)
 
     if vertex_arb_ids:
         vertex_adc_issue = _check_vertex_adc()

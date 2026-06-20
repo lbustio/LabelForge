@@ -53,7 +53,7 @@
   <div class="card-header-label">Plantilla de instrucción de usuario</div>
   <p class="text-secondary small mb-3">
     Esta es la instrucción que recibe cada arbitro. Debe contener el marcador
-    <code>{claim}</code>
+    <code>{item}</code>
     donde se insertara el texto de entrada a analizar. Usa <code>{% raw %}{{ }}{% endraw %}</code>
     para llaves literales en el JSON de salida. Usa
     <code>{principles_catalog}</code>
@@ -252,7 +252,8 @@ function buildPrinciplesCatalog() {
 
 function renderTemplate(template, claim, principlesCatalog, outputInstruction) {
   let rendered = template
-    .replaceAll('{claim}', claim)
+    .replaceAll('{item}', claim)
+    .replaceAll('{claim}', claim)  // backward compat
     .replaceAll('{principles_catalog}', principlesCatalog)
     .replaceAll('{output_instruction}', outputInstruction)
     .replaceAll('{output_schema}', outputInstruction);

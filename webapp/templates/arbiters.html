@@ -80,8 +80,8 @@
                 <button type="button" class="btn btn-sm provider-tab" data-provider="openai"       onclick="selectProvider('openai')">
                   <i class="bi bi-robot me-1"></i>OpenAI ChatGPT
                 </button>
-                <button type="button" class="btn btn-sm provider-tab" data-provider="ollama"       onclick="selectProvider('ollama')">
-                  <i class="bi bi-hdd-rack me-1"></i>Ollama (local)
+                <button type="button" class="btn btn-sm provider-tab" data-provider="llama_cpp"   onclick="selectProvider('llama_cpp')">
+                  <i class="bi bi-cpu me-1"></i>Local (GGUF)
                 </button>
                 <button type="button" class="btn btn-sm provider-tab" data-provider="openai_compat" onclick="selectProvider('openai_compat')">
                   <i class="bi bi-plug me-1"></i>Compatible con OpenAI
@@ -90,7 +90,22 @@
             </div>
           </div>
 
-          <!-- Clave de API (no aplica para Ollama) -->
+          <!-- Parámetros locales GGUF (solo para llama_cpp) -->
+          <div class="row g-3 mb-3" id="local-gguf-section" style="display:none!important">
+            <div class="col-md-4">
+              <label class="form-label small text-secondary">Contexto (tokens)</label>
+              <input type="number" id="arb-n-ctx" class="form-control" value="4096" min="512" max="131072" step="512">
+              <div class="form-text text-secondary">Ventana de contexto máximo del modelo</div>
+            </div>
+            <div class="col-12">
+              <button type="button" class="btn btn-sm btn-outline-info" onclick="openDownloadModal()">
+                <i class="bi bi-download me-1"></i>Descargar modelos recomendados
+              </button>
+              <span class="text-secondary small ms-2">Descarga modelos GGUF optimizados para tu hardware</span>
+            </div>
+          </div>
+
+          <!-- Clave de API (no aplica para Ollama ni llama_cpp) -->
           <div class="row g-3 mb-3" id="apikey-section">
             <input type="hidden" id="arb-api-key-env">
             <div class="col-md-8">
@@ -102,6 +117,7 @@
                 </button>
               </div>
               <div class="form-text text-secondary" id="api-key-help">Se verifica, se guarda en secrets/secrets.env y luego se limpia de este formulario</div>
+              <div id="api-key-status" class="mt-1"></div>
             </div>
           </div>
 
@@ -272,6 +288,87 @@
   </div>
 </div>
 
+<!-- Modal descarga de modelos GGUF -->
+<div class="modal fade" id="downloadModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content" style="background:#1a1d27;border:1px solid #2d3148;color:#e2e8f0">
+      <div class="modal-header border-0">
+        <h5 class="modal-title"><i class="bi bi-cpu me-2"></i>Gestión de modelos locales GGUF</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <!-- Hardware -->
+        <div class="mb-3 p-3 rounded" style="background:#12141e;border:1px solid #2d3148;font-size:.82rem">
+          <div class="fw-semibold mb-2 text-secondary"><i class="bi bi-motherboard me-1"></i>Hardware detectado</div>
+          <div id="hw-info-body" class="text-secondary">Cargando inventario…</div>
+        </div>
+
+        <!-- Modelos descargados -->
+        <div class="d-flex align-items-center justify-content-between mb-2">
+          <div class="fw-semibold small text-secondary"><i class="bi bi-hdd me-1"></i>Modelos descargados</div>
+          <button class="btn btn-sm btn-outline-secondary" onclick="loadCachedModels()" title="Refrescar lista de modelos en disco">
+            <i class="bi bi-arrow-clockwise me-1"></i>Refrescar
+          </button>
+        </div>
+        <div id="cached-models-list" class="mb-3">
+          <div class="text-secondary small">Cargando…</div>
+        </div>
+
+        <div class="d-flex align-items-center justify-content-between mb-2">
+          <div class="fw-semibold small text-secondary"><i class="bi bi-archive me-1"></i>Modelos guardados para despues</div>
+          <button class="btn btn-sm btn-outline-secondary" onclick="loadArchivedModels()" title="Refrescar modelos archivados">
+            <i class="bi bi-arrow-clockwise me-1"></i>Refrescar
+          </button>
+        </div>
+        <div id="archived-models-list" class="mb-3">
+          <div class="text-secondary small">Cargando...</div>
+        </div>
+
+        <!-- Descargar por nombre -->
+        <div class="mb-3 p-3 rounded" style="background:#12141e;border:1px solid #2d3148">
+          <div class="fw-semibold small text-secondary mb-2"><i class="bi bi-cloud-download me-1"></i>Descargar modelo por nombre</div>
+          <div class="row g-2">
+            <div class="col-md-7">
+              <input type="text" id="custom-repo-id" class="form-control form-control-sm" placeholder="ej: bartowski/Meta-Llama-3.1-8B-Instruct-GGUF">
+              <div class="form-text text-secondary" style="font-size:.7rem">Repositorio en Hugging Face</div>
+            </div>
+            <div class="col-md-5">
+              <input type="text" id="custom-filename" class="form-control form-control-sm" placeholder="ej: model-Q4_K_M.gguf">
+              <div class="form-text text-secondary" style="font-size:.7rem">Nombre del archivo .gguf</div>
+            </div>
+            <div class="col-12">
+              <button class="btn btn-sm btn-outline-info" onclick="startCustomDownload(this)">
+                <i class="bi bi-download me-1"></i>Descargar
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modelos recomendados -->
+        <div class="d-flex align-items-center justify-content-between mb-2">
+          <div class="fw-semibold small text-secondary"><i class="bi bi-stars me-1"></i>Modelos recomendados para tu hardware</div>
+          <button class="btn btn-sm btn-outline-secondary" onclick="loadRecommended(true)" title="Consultar nuevamente a los LLMs configurados">
+            <i class="bi bi-arrow-clockwise me-1"></i>Actualizar
+          </button>
+        </div>
+        <div id="recommended-source" class="text-secondary mb-2" style="font-size:.72rem"></div>
+        <div id="recommended-models-list" class="mb-3">
+          <div class="text-secondary small">Cargando…</div>
+        </div>
+
+        <!-- Descargas activas -->
+        <div id="download-progress-area" class="mt-2" style="display:none">
+          <div class="fw-semibold small text-secondary mb-2">Descargas en curso</div>
+          <div id="active-downloads-list"></div>
+        </div>
+      </div>
+      <div class="modal-footer border-0">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <style>
 .provider-tab {
   background: #12141e; border: 1px solid #2d3148; color: #94a3b8;
@@ -326,6 +423,7 @@ TIER_LABELS['mid']   = 'Flash';
 TIER_LABELS['lite']  = 'Lite';
 TIER_LABELS['other'] = 'Otro';
 let arbiters       = [];
+let maxArbiters    = 10;
 let preflightByArbiter = {};
 let preflightIssues = [];
 let geminiModels   = [];
@@ -342,7 +440,7 @@ const DEFAULT_ENV = {
   anthropic:     "ANTHROPIC_API_KEY",
   openai:        "OPENAI_API_KEY",
   openai_compat: "OPENAI_API_KEY",
-  ollama:        "",
+  llama_cpp:     "",
 };
 
 const API_KEY_HELP = {
@@ -351,13 +449,68 @@ const API_KEY_HELP = {
   openai:        "OpenAI: se verificara y guardara como OPENAI_API_KEY en secrets/secrets.env.",
   openai_compat: "Compatible con OpenAI: se verificara contra la direccion base y se guardara como OPENAI_API_KEY en secrets/secrets.env.",
   vertex_gemini: "Vertex AI usa credenciales de Google Cloud, no una API key directa aqui.",
-  ollama:        "Ollama local no necesita API key.",
+  llama_cpp:     "Modelo local GGUF — sin API key. El backend se detecta automáticamente al ejecutar setup_env.py.",
 };
 
 function updateApiKeyHelp() {
   const help = document.getElementById('api-key-help');
   if (!help) return;
   help.textContent = API_KEY_HELP[activeProvider] || "Se verifica, se guarda en secrets/secrets.env y luego se limpia de este formulario.";
+}
+
+const KEY_SENTINEL = '__KEY_SET__';
+
+function _setKeySentinel(keyInp, envVar) {
+  keyInp.value = KEY_SENTINEL;
+  keyInp.dataset.keySentinel = 'true';
+  keyInp.placeholder = '';
+}
+
+function _clearKeySentinel(keyInp) {
+  if (keyInp.dataset.keySentinel === 'true') {
+    keyInp.value = '';
+    delete keyInp.dataset.keySentinel;
+  }
+}
+
+function updateApiKeyStatus(arbId) {
+  const el     = document.getElementById('api-key-status');
+  const keyInp = document.getElementById('arb-api-key-override');
+  if (!el) return;
+
+  const needsKey = !['llama_cpp', 'vertex_gemini'].includes(activeProvider);
+  if (!needsKey || !arbId) {
+    el.innerHTML = '';
+    if (keyInp) { _clearKeySentinel(keyInp); keyInp.placeholder = 'Pega la clave y verifica'; }
+    return;
+  }
+
+  const status = preflightByArbiter[arbId];
+  const envVar = DEFAULT_ENV[activeProvider] || '…';
+
+  if (!status) {
+    el.innerHTML = '';
+    return;
+  }
+
+  if (status.ok) {
+    el.innerHTML = `<span class="small" style="color:#34d399">
+      <i class="bi bi-check2-circle me-1"></i>Clave activa en
+      <code style="color:#6ee7b7;background:transparent">${envVar}</code>
+      — escribe una nueva para reemplazarla</span>`;
+    if (keyInp) _setKeySentinel(keyInp, envVar);
+  } else {
+    const hasKeyIssue = (status.issues || []).some(i => /key|clave|api|credencial/i.test(i));
+    if (hasKeyIssue) {
+      el.innerHTML = `<span class="small" style="color:#fbbf24">
+        <i class="bi bi-exclamation-triangle me-1"></i>Sin clave en
+        <code style="color:#fde68a;background:transparent">${envVar}</code>
+        — pega una y pulsa verificar</span>`;
+    } else {
+      el.innerHTML = '';
+    }
+    if (keyInp) { _clearKeySentinel(keyInp); keyInp.placeholder = 'Pega la clave y verifica'; }
+  }
 }
 
 function looksLikeApiKey(value) {
@@ -393,13 +546,22 @@ function selectProvider(p) {
   });
 
   // Mostrar/ocultar secciones
-  const needKey  = !["ollama", "vertex_gemini"].includes(p);
-  const needUrl  = ["ollama","openai_compat"].includes(p);
+  const needKey    = !["llama_cpp", "vertex_gemini"].includes(p);
+  const needUrl    = ["openai_compat"].includes(p);
   const needVertex = p === "vertex_gemini";
-  document.getElementById('apikey-section').style.setProperty('display', needKey  ? '' : 'none', 'important');
-  document.getElementById('baseurl-section').style.setProperty('display', needUrl ? '' : 'none', 'important');
+  const needLocal  = p === "llama_cpp";
+  document.getElementById('apikey-section').style.setProperty('display', needKey   ? '' : 'none', 'important');
+  document.getElementById('baseurl-section').style.setProperty('display', needUrl  ? '' : 'none', 'important');
   document.getElementById('vertex-section').style.setProperty('display', needVertex ? '' : 'none', 'important');
+  document.getElementById('local-gguf-section').style.setProperty('display', needLocal ? '' : 'none', 'important');
+  // Rate limits no aplican para modelos locales
+  const rateLimitBox = document.getElementById('rate-limit-box');
+  if (rateLimitBox && p === 'llama_cpp') { rateLimitBox.style.display = 'none'; rateLimitBox.innerHTML = ''; }
+  const tierGroup = document.getElementById('tier-filter-group');
+  if (tierGroup) tierGroup.style.display = needLocal ? 'none' : '';
   updateApiKeyHelp();
+  const currentArbId = document.getElementById('arb-editing-id').value;
+  updateApiKeyStatus(currentArbId || null);
 
   // Default env var
   const envInp = document.getElementById('arb-api-key-env');
@@ -422,7 +584,8 @@ async function loadModels() {
     <div class="spinner-border spinner-border-sm me-2"></div>Cargando modelos...
   </div>`;
 
-  const apiKey  = document.getElementById('arb-api-key-override').value.trim();
+  const rawKey  = document.getElementById('arb-api-key-override').value;
+  const apiKey  = (rawKey === KEY_SENTINEL) ? '' : rawKey.trim();
   const apiKeyEnv = DEFAULT_ENV[activeProvider] || '';
   const baseUrl = document.getElementById('arb-base-url').value.trim();
   const project = document.getElementById('arb-vertex-project').value.trim();
@@ -459,8 +622,8 @@ async function loadModels() {
 }
 
 async function reloadModels() {
-  // Si hay una clave pegada, primero se verifica y guarda en secrets/secrets.env.
-  if (document.getElementById('arb-api-key-override').value.trim()) {
+  const keyVal = document.getElementById('arb-api-key-override').value;
+  if (keyVal && keyVal !== KEY_SENTINEL) {
     await verifyProviderKey();
     return;
   }
@@ -471,7 +634,8 @@ async function verifyProviderKey() {
   normalizeApiKeyInputs();
   const keyInp = document.getElementById('arb-api-key-override');
   const envInp = document.getElementById('arb-api-key-env');
-  const apiKey = keyInp.value.trim();
+  const rawKey = keyInp.value;
+  const apiKey = (rawKey === KEY_SENTINEL) ? '' : rawKey.trim();
   const apiKeyEnv = DEFAULT_ENV[activeProvider] || '';
   const baseUrl = document.getElementById('arb-base-url').value.trim();
   const grid = document.getElementById('model-grid');
@@ -509,7 +673,15 @@ async function verifyProviderKey() {
   }
 
   envInp.value = data.api_key_env || apiKeyEnv;
-  keyInp.value = '';
+  _setKeySentinel(keyInp, data.api_key_env || apiKeyEnv);
+  const statusEl = document.getElementById('api-key-status');
+  if (statusEl) {
+    const evn = data.api_key_env || apiKeyEnv;
+    statusEl.innerHTML = `<span class="small" style="color:#34d399">
+      <i class="bi bi-check2-circle me-1"></i>Clave activa en
+      <code style="color:#6ee7b7;background:transparent">${evn}</code>
+      — escribe una nueva para reemplazarla</span>`;
+  }
   currentModels = data.models || [];
   activeFilter = 'all';
   ['all','pro','mid','lite'].forEach(f =>
@@ -636,7 +808,12 @@ async function loadRateLimitInfo() {
 // Lista de arbitros
 // ---------------------------------------------------------------------------
 async function loadArbiters() {
-  arbiters = await fetch('/api/arbiters').then(r => r.json());
+  [arbiters] = await Promise.all([
+    fetch('/api/arbiters').then(r => r.json()),
+    fetch('/api/config').then(r => r.json()).then(cfg => {
+      maxArbiters = cfg.safety?.max_arbiters || 10;
+    }),
+  ]);
   await loadArbiterPreflight(false);
   renderList();
 }
@@ -678,11 +855,11 @@ async function loadArbiterPreflight(shouldRender = true) {
 
 const PROVIDER_ICONS = {
   gemini:'bi-google', vertex_gemini:'bi-cloud-check', anthropic:'bi-stars', openai:'bi-robot',
-  ollama:'bi-hdd-rack', openai_compat:'bi-plug'
+  llama_cpp:'bi-cpu', openai_compat:'bi-plug'
 };
 const PROVIDER_LABELS = {
   gemini:'Gemini AI Studio', vertex_gemini:'Gemini Vertex AI', anthropic:'Claude', openai:'ChatGPT',
-  ollama:'Ollama', openai_compat:'Compatible con OpenAI'
+  llama_cpp:'Local (GGUF)', openai_compat:'Compatible con OpenAI'
 };
 
 
@@ -721,42 +898,40 @@ function renderList() {
       </div>`;
     return;
   }
-  const tones = ['accent-cyan', 'accent-violet', 'accent-emerald', 'accent-amber', 'accent-rose'];
   el.innerHTML = arbiters.map((a, idx) => {
-    const tone = tones[idx % tones.length];
     const p    = a.provider || {};
     const tier = getTier(p.model || '');
     const modelBadge = p.model
       ? `<span class="tier-badge tier-${tier}" style="font-size:.65rem">${TIER_LABELS[tier]||''}</span>
-         <span style="font-size:.8rem">${p.model}</span>`
+         <span style="font-size:.8rem">${escapeHtml(p.model)}</span>`
       : `<span class="text-warning small"><i class="bi bi-exclamation-triangle me-1"></i>Sin modelo</span>`;
 
-    return `<div class="card-dark accent-card ${tone} arbiter-card mb-3">
+    return `<div class="card-dark accent-card arbiter-card mb-3" style="--accent-rgb:${arbiterColorRGB(idx, maxArbiters)}">
       <div class="d-flex justify-content-between align-items-start">
         <div class="d-flex align-items-start gap-3" style="flex:1">
           <div class="text-center" style="min-width:48px">
             <div class="rounded-circle d-flex align-items-center justify-content-center mx-auto mb-1"
               style="width:40px;height:40px;background:rgba(var(--accent-rgb), .13);border:1px solid rgba(var(--accent-rgb), .3);font-weight:700;color:rgb(var(--accent-rgb))">${idx+1}</div>
-            <span class="soft-chip" style="font-size:.62rem;margin-right:0">${a.id}</span>
+            <span class="soft-chip" style="font-size:.62rem;margin-right:0">${escapeHtml(a.id)}</span>
           </div>
           <div style="flex:1">
-            <div class="fw-semibold mb-1">${a.name}
-              ${a.persona ? `<span class="text-secondary fw-normal" style="font-size:.82rem"> · ${a.persona}</span>` : ''}
+            <div class="fw-semibold mb-1">${escapeHtml(a.name)}
+              ${a.persona ? `<span class="text-secondary fw-normal" style="font-size:.82rem"> · ${escapeHtml(a.persona)}</span>` : ''}
             </div>
             <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
               <span class="soft-chip" style="font-size:.72rem">
                 <i class="bi ${PROVIDER_ICONS[p.type]||'bi-cloud'} me-1"></i>${PROVIDER_LABELS[p.type]||p.type||'?'}
               </span>
               ${modelBadge}
-              ${p.base_url ? `<span class="text-secondary" style="font-size:.72rem"><i class="bi bi-link-45deg me-1"></i>${p.base_url}</span>` : ''}
+              ${p.base_url ? `<span class="text-secondary" style="font-size:.72rem"><i class="bi bi-link-45deg me-1"></i>${escapeHtml(p.base_url)}</span>` : ''}
             </div>
             <div class="text-secondary" style="font-size:.78rem;max-height:52px;overflow:hidden;
-              display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical">${a.system_prompt}</div>
+              display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical">${escapeHtml(a.system_prompt)}</div>
           </div>
         </div>
         <div class="d-flex gap-2 ms-3 flex-shrink-0">
-          <button class="btn btn-sm btn-outline-secondary" onclick="openModal('${a.id}')"><i class="bi bi-pencil"></i></button>
-          <button class="btn btn-sm btn-danger-soft"       onclick="askDelete('${a.id}','${a.name}')"><i class="bi bi-trash3"></i></button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="openModal('${escapeHtml(a.id)}')"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-sm btn-danger-soft"       onclick="askDelete('${escapeHtml(a.id)}','${escapeHtml(a.name)}')"><i class="bi bi-trash3"></i></button>
         </div>
       </div>
       <div class="d-flex gap-3 mt-3 pt-2 border-top border-dark">
@@ -773,6 +948,15 @@ function renderList() {
 // ---------------------------------------------------------------------------
 // Modal
 // ---------------------------------------------------------------------------
+function nextArbId(arbList) {
+  let max = 0;
+  for (const a of arbList) {
+    const m = (a.id || '').match(/^arb(\d+)$/);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return `arb${max + 1}`;
+}
+
 function openModal(arbId = null) {
   selectedModel  = "";
   activeFilter   = "all";
@@ -807,13 +991,14 @@ function openModal(arbId = null) {
     document.querySelectorAll('.provider-tab').forEach(b =>
       b.classList.toggle('active', b.dataset.provider === activeProvider)
     );
-    const needKey = !["ollama", "vertex_gemini"].includes(activeProvider);
-    const needUrl = ["ollama","openai_compat"].includes(activeProvider);
+    const needKey = !["llama_cpp", "vertex_gemini"].includes(activeProvider);
+    const needUrl = ["openai_compat"].includes(activeProvider);
     const needVertex = activeProvider === "vertex_gemini";
     document.getElementById('apikey-section').style.setProperty('display', needKey ? '' : 'none', 'important');
     document.getElementById('baseurl-section').style.setProperty('display', needUrl ? '' : 'none', 'important');
     document.getElementById('vertex-section').style.setProperty('display', needVertex ? '' : 'none', 'important');
     updateApiKeyHelp();
+    updateApiKeyStatus(arbId);
     // Cargar modelos y mostrar el seleccionado
     loadModels().then(() => {
       renderSelectedChip();
@@ -821,7 +1006,7 @@ function openModal(arbId = null) {
     });
   } else {
     document.getElementById('modalTitle').textContent        = 'Nuevo arbitro';
-    document.getElementById('arb-id').value                  = '';
+    document.getElementById('arb-id').value                  = nextArbId(arbiters);
     document.getElementById('arb-name').value                = '';
     document.getElementById('arb-persona').value             = '';
     document.getElementById('arb-temp').value                = '0.1';
@@ -832,6 +1017,7 @@ function openModal(arbId = null) {
     document.getElementById('arb-base-url').value            = '';
     document.getElementById('arb-vertex-project').value      = '';
     document.getElementById('arb-vertex-location').value     = 'us-central1';
+    document.getElementById('api-key-status').innerHTML      = '';
     activeProvider = 'gemini';
     document.querySelectorAll('.provider-tab').forEach(b =>
       b.classList.toggle('active', b.dataset.provider === 'gemini')
@@ -859,6 +1045,8 @@ async function saveArbiter() {
     provider: {
       type:             activeProvider,
       model:            selectedModel,
+      model_path:       activeProvider === 'llama_cpp' ? (currentModels.find(m => m.id === selectedModel)?.path || '') : '',
+      n_ctx:            activeProvider === 'llama_cpp' ? parseInt(document.getElementById('arb-n-ctx')?.value || '4096') : undefined,
       api_key_env:      DEFAULT_ENV[activeProvider] || '',
       api_key_override: '',
       base_url:         document.getElementById('arb-base-url').value.trim(),
@@ -999,6 +1187,642 @@ async function importArbiters() {
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
+(function setupKeyField() {
+  const keyInp = document.getElementById('arb-api-key-override');
+  if (!keyInp) return;
+
+  keyInp.addEventListener('focus', function () {
+    if (this.dataset.keySentinel === 'true') {
+      _clearKeySentinel(this);
+      const el = document.getElementById('api-key-status');
+      if (el) el.innerHTML = `<span class="small" style="color:#64748b">
+        <i class="bi bi-pencil me-1"></i>Escribe la nueva clave y pulsa verificar — deja vacío para mantener la actual</span>`;
+    }
+  });
+
+  keyInp.addEventListener('blur', function () {
+    if (!this.value.trim() && !this.dataset.keySentinel) {
+      const arbId = document.getElementById('arb-editing-id').value;
+      if (arbId && preflightByArbiter[arbId]?.ok) {
+        _setKeySentinel(this, DEFAULT_ENV[activeProvider] || '');
+        updateApiKeyStatus(arbId);
+      }
+    }
+  });
+})();
+
 loadArbiters();
+
+// ---------------------------------------------------------------------------
+// Modal de descarga de modelos GGUF
+// ---------------------------------------------------------------------------
+async function openDownloadModal() {
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('downloadModal')).show();
+  document.getElementById('download-progress-area').style.display = 'none';
+
+  // Hardware
+  const hwBody = document.getElementById('hw-info-body');
+  try {
+    const hw = await fetch('/api/local/hardware').then(r => r.json());
+    if (!hw || !hw.os) {
+      hwBody.innerHTML = '<span class="text-warning">No se encontró hw_profile.json. Ejecuta <code>python setup_env.py</code> primero.</span>';
+    } else {
+      const gpu = hw.gpu || {};
+      const npu = hw.npu || {};
+      const vram = gpu.vram_gb ? `${gpu.vram_gb} GB` : (gpu.shared_memory ? 'compartida' : 'N/A');
+      hwBody.innerHTML = `
+        <div class="row g-2">
+          <div class="col-md-4"><span class="text-secondary">OS:</span> ${escapeHtml(hw.os)}</div>
+          <div class="col-md-4"><span class="text-secondary">CPU:</span> ${escapeHtml(hw.cpu?.vendor || '')} ${escapeHtml(String(hw.cpu?.cores_physical || '?'))} núcleos</div>
+          <div class="col-md-4"><span class="text-secondary">RAM:</span> ${escapeHtml(String(hw.ram_gb))} GB</div>
+          ${gpu.detected ? `<div class="col-md-6"><span class="text-secondary">GPU:</span> ${escapeHtml(gpu.name)} — VRAM ${escapeHtml(vram)}</div>` : '<div class="col-md-6 text-secondary">Sin GPU dedicada</div>'}
+          ${npu.detected ? `<div class="col-md-6"><span class="text-info">NPU:</span> ${escapeHtml(npu.vendor)} ${escapeHtml(npu.type)}</div>` : ''}
+          <div class="col-12"><span class="text-secondary">Backend óptimo:</span> <strong style="color:rgb(var(--tone-cyan))">${escapeHtml(hw.best_backend)}</strong></div>
+        </div>`;
+    }
+  } catch(e) {
+    hwBody.innerHTML = `<span class="text-danger">Error al cargar hardware: ${e.message}</span>`;
+  }
+
+  await Promise.all([loadCachedModels(), loadRecommended(false)]);
+}
+
+async function loadCachedModels() {
+  const listEl = document.getElementById('cached-models-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<div class="text-secondary small"><div class="spinner-border spinner-border-sm me-2"></div>Cargando…</div>';
+  try {
+    const models = await fetch('/api/local/cached').then(r => r.json());
+    if (models.error) throw new Error(models.error);
+    if (!models.length) {
+      listEl.innerHTML = '<div class="text-secondary small">No hay modelos descargados aún.</div>';
+      return;
+    }
+    listEl.innerHTML = models.map(m => {
+      const sizeStr = m.size_gb ? `${m.size_gb} GB` : '—';
+      const layers  = m.n_layers ? ` · ${m.n_layers} capas` : '';
+      return `
+      <div class="d-flex align-items-center gap-2 p-2 mb-1 rounded" style="background:#12141e;border:1px solid #2d3148">
+        <div class="flex-grow-1 min-width-0">
+          <div class="small fw-semibold" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.filename}</div>
+          <div class="text-secondary" style="font-size:.72rem">${sizeStr}${layers}</div>
+        </div>
+        <button class="btn btn-sm btn-outline-danger flex-shrink-0"
+                onclick="deleteModel('${escapeHtml(m.filename)}', this)"
+                title="Eliminar modelo del disco">
+          <i class="bi bi-trash3"></i>
+        </button>
+        <button class="btn btn-sm btn-outline-secondary flex-shrink-0"
+                onclick="redownloadModel('${escapeHtml(m.repo_id || '')}','${escapeHtml(m.filename)}', this)"
+                title="Volver a descargar (actualizar)">
+          <i class="bi bi-arrow-clockwise"></i>
+        </button>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    listEl.innerHTML = `<div class="text-danger small">${e.message}</div>`;
+  }
+}
+
+async function deleteModel(filename, btn) {
+  if (!confirm(`¿Eliminar ${filename}?`)) return;
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/local/model/${encodeURIComponent(filename)}`, {method: 'DELETE'});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al eliminar');
+    await loadCachedModels();
+    await loadModels(); // refresca grid de modelos en el modal principal si está abierto
+  } catch(e) {
+    alert(e.message);
+    btn.disabled = false;
+  }
+}
+
+async function redownloadModel(repoId, filename, btn) {
+  if (!repoId) {
+    alert('Este modelo no tiene repo_id guardado. Usa "Descargar por nombre" para re-descargarlo.');
+    return;
+  }
+  btn.disabled = true;
+  await startDownload(repoId, filename, btn);
+}
+
+async function startCustomDownload(btn) {
+  const repoId   = document.getElementById('custom-repo-id').value.trim();
+  const filename = document.getElementById('custom-filename').value.trim();
+  if (!repoId || !filename) {
+    alert('Completa el repositorio y el nombre del archivo .gguf');
+    return;
+  }
+  if (!filename.endsWith('.gguf')) {
+    alert('El nombre del archivo debe terminar en .gguf');
+    return;
+  }
+  await startDownload(repoId, filename, btn);
+  document.getElementById('custom-repo-id').value  = '';
+  document.getElementById('custom-filename').value = '';
+}
+
+async function loadRecommended(forceRefresh) {
+  const listEl   = document.getElementById('recommended-models-list');
+  const sourceEl = document.getElementById('recommended-source');
+  if (!listEl) return;
+
+  listEl.innerHTML = `<div class="text-secondary small">
+    <div class="spinner-border spinner-border-sm me-2"></div>
+    ${forceRefresh ? 'Consultando LLMs configurados…' : 'Cargando recomendaciones…'}
+  </div>`;
+  if (sourceEl) sourceEl.textContent = '';
+
+  try {
+    const url = '/api/local/recommended' + (forceRefresh ? '?refresh=1' : '');
+    const models = await fetch(url).then(r => r.json());
+    if (models.error) throw new Error(models.error);
+    if (!models.length) {
+      listEl.innerHTML = '<div class="text-secondary small">No hay modelos recomendados disponibles.</div>';
+      return;
+    }
+
+    // Mostrar fuente (¿catálogo dinámico o fallback?)
+    const hasVotes = models.some(m => m.consensus_votes > 0);
+    if (sourceEl) {
+      const maxVotes = hasVotes ? Math.max(...models.map(m => m.consensus_votes || 0)) : 0;
+      sourceEl.innerHTML = hasVotes
+        ? `<i class="bi bi-stars me-1" style="color:#a78bfa"></i>Catálogo generado por ${maxVotes} LLM(s) — consenso entre Gemini, Claude y GPT`
+        : `<i class="bi bi-archive me-1"></i>Usando catálogo base (sin LLMs configurados o en caché)`;
+    }
+
+    const hwKnown = models.some(m => m.fits_in_memory !== null);
+    const compatible   = models.filter(m => m.fits_in_memory !== false);
+    const incompatible = models.filter(m => m.fits_in_memory === false);
+
+    function renderModel(m) {
+      const votes = m.consensus_votes || 0;
+      const votesBadge = votes > 1
+        ? `<span class="ms-1" style="font-size:.65rem;color:#a78bfa" title="${votes} LLMs lo recomendaron">★${votes}</span>`
+        : '';
+      const hwUnknown = m.fits_in_memory === null;
+      const border = hwUnknown ? '#3a3520' : '#2d3148';
+      const downloadBtn = `<button class="btn btn-sm btn-outline-info flex-shrink-0"
+          onclick="startDownload('${escapeHtml(m.repo_id)}','${escapeHtml(m.filename)}',this)">
+          <i class="bi bi-download me-1"></i>Descargar
+        </button>`;
+      const unknownBadge = hwUnknown
+        ? `<span class="small flex-shrink-0" style="color:#fbbf24" title="Perfil de HW no disponible — tamaño no verificado">HW ?</span>`
+        : '';
+      return `
+      <div class="d-flex align-items-center gap-2 p-2 mb-1 rounded" style="background:#12141e;border:1px solid ${border}">
+        <div class="flex-grow-1 min-width-0">
+          <div class="small fw-semibold" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+            ${m.filename}${votesBadge}
+          </div>
+          <div class="text-secondary" style="font-size:.72rem">${m.description || ''} — <strong>${m.size_gb} GB</strong></div>
+        </div>
+        ${unknownBadge}
+        ${downloadBtn}
+      </div>`;
+    }
+
+    function renderIncompatible(m) {
+      return `
+      <div class="d-flex align-items-center gap-2 p-2 mb-1 rounded" style="background:#12141e;border:1px solid #3a2020;opacity:.6">
+        <div class="flex-grow-1 min-width-0">
+          <div class="small fw-semibold text-secondary" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+            ${m.filename}
+          </div>
+          <div class="text-secondary" style="font-size:.72rem">${m.description || ''} — <strong>${m.size_gb} GB</strong></div>
+        </div>
+        <span class="small flex-shrink-0" style="color:#f87171" title="Requiere ${m.ram_min_gb} GB — excede la memoria disponible">
+          <i class="bi bi-x-circle me-1"></i>No cabe
+        </span>
+      </div>`;
+    }
+
+    let html = '';
+
+    if (!hwKnown) {
+      html += `<div class="small mb-2 p-2 rounded" style="background:#2a2415;border:1px solid #4a3f20;color:#fbbf24">
+        <i class="bi bi-exclamation-triangle me-1"></i>
+        Perfil de hardware no disponible. Ejecuta <code>python setup_env.py</code> para filtrar por tu HW.
+      </div>`;
+    }
+
+    if (compatible.length) {
+      if (hwKnown) {
+        html += `<div class="small text-secondary mb-1" style="font-size:.7rem">
+          <i class="bi bi-check-circle me-1" style="color:#34d399"></i>Compatibles con tu hardware (${compatible.length})
+        </div>`;
+      }
+      html += compatible.map(renderModel).join('');
+    } else if (hwKnown) {
+      html += `<div class="small text-secondary">Ningún modelo del catálogo cabe en tu memoria disponible.</div>`;
+    }
+
+    if (incompatible.length) {
+      html += `<details class="mt-2">
+        <summary class="small" style="cursor:pointer;color:#94a3b8;font-size:.72rem;list-style:none">
+          <i class="bi bi-chevron-down me-1"></i>Ver también (${incompatible.length} modelos que no caben en tu HW)
+        </summary>
+        <div class="mt-1">${incompatible.map(renderIncompatible).join('')}</div>
+      </details>`;
+    }
+
+    listEl.innerHTML = html;
+  } catch(e) {
+    listEl.innerHTML = `<div class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>${e.message}</div>`;
+  }
+}
+
+async function startDownload(repoId, filename, btn) {
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner-border spinner-border-sm"></div>';
+
+  const progressArea = document.getElementById('download-progress-area');
+  const progressBar  = document.getElementById('download-progress-bar');
+  const statusMsg    = document.getElementById('download-status-msg');
+  progressArea.style.display = '';
+  statusMsg.textContent = `Iniciando descarga de ${filename}…`;
+  progressBar.style.width = '5%';
+
+  try {
+    const res = await fetch('/api/local/download', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({repo_id: repoId, filename}),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Error iniciando descarga');
+
+    const jobId = data.job_id;
+    const es = new EventSource(`/api/local/download/${jobId}`);
+    es.onmessage = (e) => {
+      const d = JSON.parse(e.data);
+      if (d.status === 'done') {
+        progressBar.style.width = '100%';
+        progressBar.classList.remove('progress-bar-animated');
+        statusMsg.innerHTML = `<span style="color:#34d399"><i class="bi bi-check2-circle me-1"></i>${filename} descargado correctamente</span>`;
+        btn.innerHTML = '<i class="bi bi-check2"></i>';
+        es.close();
+        setTimeout(() => { loadModels(); loadCachedModels(); }, 500);
+      } else if (d.status === 'error') {
+        statusMsg.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>${d.error}</span>`;
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-download me-1"></i>Reintentar';
+        es.close();
+      } else {
+        statusMsg.textContent = `Descargando ${filename}… (${d.progress || 0}%)`;
+        progressBar.style.width = `${Math.max(5, d.progress || 10)}%`;
+      }
+    };
+    es.onerror = () => {
+      es.close();
+      statusMsg.innerHTML = '<span class="text-danger">Conexión perdida con el servidor de descarga.</span>';
+    };
+  } catch(e) {
+    statusMsg.innerHTML = `<span class="text-danger">${e.message}</span>`;
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-download me-1"></i>Reintentar';
+  }
+}
+// ---------------------------------------------------------------------------
+// Modal GGUF v2: tarjetas gestionables, progreso por modelo y descargas paralelas
+// ---------------------------------------------------------------------------
+const ggufActiveDownloads = new Map();
+
+function ggufSafeId(value) {
+  return String(value || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function ggufSize(model) {
+  if (model.size_bytes) {
+    const b = Number(model.size_bytes);
+    if (b >= 1024 ** 3) return `${(b / (1024 ** 3)).toFixed(2)} GB`;
+    if (b >= 1024 ** 2) return `${(b / (1024 ** 2)).toFixed(1)} MB`;
+    return `${Math.round(b / 1024)} KB`;
+  }
+  return model.size_gb ? `${model.size_gb} GB` : '-';
+}
+
+function ggufStatusHtml(filename, show = false) {
+  const id = ggufSafeId(filename);
+  return `
+    <div id="gguf-status-${id}" class="mt-2 ${show ? '' : 'd-none'}">
+      <div class="progress mb-1" style="height:6px;background:#0a0c14">
+        <div id="gguf-progress-${id}" class="progress-bar progress-bar-animated" style="width:0%"></div>
+      </div>
+      <div id="gguf-status-msg-${id}" class="small text-secondary"></div>
+    </div>`;
+}
+
+function ggufSetStatus(filename, status, progress, message) {
+  const id = ggufSafeId(filename);
+  const box = document.getElementById(`gguf-status-${id}`);
+  const bar = document.getElementById(`gguf-progress-${id}`);
+  const msg = document.getElementById(`gguf-status-msg-${id}`);
+  if (!box || !bar || !msg) return;
+  box.classList.remove('d-none');
+  bar.style.width = `${Math.max(3, Math.min(100, Number(progress || 0)))}%`;
+  bar.classList.toggle('bg-danger', status === 'error');
+  bar.classList.toggle('bg-success', status === 'done');
+  bar.classList.toggle('progress-bar-animated', status !== 'done' && status !== 'error');
+  msg.className = status === 'error' ? 'small text-danger' : (status === 'done' ? 'small text-success' : 'small text-secondary');
+  msg.innerHTML = message;
+}
+
+function ggufCard(model, kind, options = {}) {
+  const filename = String(model.filename || '');
+  const repoId = String(model.repo_id || '');
+  const creator = model.creator || (repoId ? repoId.split('/')[0] : '');
+  const details = [
+    model.family ? `Familia: ${escapeHtml(model.family)}` : '',
+    model.params ? `Parametros: ${escapeHtml(model.params)}` : '',
+    model.quant ? `Quant: ${escapeHtml(model.quant)}` : '',
+    model.variant ? `Variante: ${escapeHtml(model.variant)}` : '',
+    model.n_layers ? `${escapeHtml(String(model.n_layers))} capas` : '',
+  ].filter(Boolean).join(' · ');
+  const description = String(model.description || options.description || '');
+  const location = String(model.path || model.abs_path || '');
+  const border = options.border || '#2d3148';
+  let actions = '';
+
+  if (kind === 'cached') {
+    actions = `
+      <button class="btn btn-sm btn-outline-secondary" onclick="archiveModel('${escapeHtml(filename)}', this)" title="Guardar para despues"><i class="bi bi-archive"></i></button>
+      <button class="btn btn-sm btn-outline-danger" onclick="deleteModel('${escapeHtml(filename)}', this)" title="Eliminar"><i class="bi bi-trash3"></i></button>
+      <button class="btn btn-sm btn-outline-info" onclick="redownloadModel('${escapeHtml(repoId)}','${escapeHtml(filename)}', this)" title="Volver a descargar"><i class="bi bi-arrow-clockwise"></i></button>`;
+  } else if (kind === 'archived') {
+    actions = `
+      <button class="btn btn-sm btn-outline-success" onclick="restoreModel('${escapeHtml(filename)}', this)" title="Cargar de nuevo"><i class="bi bi-box-arrow-in-down"></i></button>
+      <button class="btn btn-sm btn-outline-danger" onclick="deleteArchivedModel('${escapeHtml(filename)}', this)" title="Eliminar guardado"><i class="bi bi-trash3"></i></button>`;
+  } else if (kind === 'recommended') {
+    actions = `<button class="btn btn-sm btn-outline-info" onclick="startDownload('${escapeHtml(repoId)}','${escapeHtml(filename)}',this,decodeURIComponent('${encodeURIComponent(description)}'))"><i class="bi bi-download me-1"></i>Descargar</button>`;
+  }
+
+  return `
+    <div class="p-2 mb-2 rounded" id="gguf-card-${ggufSafeId(filename)}" style="background:#12141e;border:1px solid ${border}">
+      <div class="d-flex align-items-start gap-2">
+        <div class="flex-grow-1 min-width-0">
+          <div class="small fw-semibold" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(filename)}</div>
+          <div class="text-secondary" style="font-size:.72rem">${ggufSize(model)}${details ? ` · ${details}` : ''}</div>
+          ${description ? `<div class="text-secondary mt-1" style="font-size:.72rem">${escapeHtml(description)}</div>` : ''}
+          <div class="text-secondary mt-1" style="font-size:.68rem">
+            ${creator ? `<span>Creador: ${escapeHtml(creator)}</span>` : ''}
+            ${repoId ? `<span class="ms-2">Repo: ${escapeHtml(repoId)}</span>` : ''}
+            ${location ? `<span class="d-block">Ubicacion: ${escapeHtml(location)}</span>` : ''}
+          </div>
+        </div>
+        <div class="d-flex gap-1 flex-shrink-0">${actions}</div>
+      </div>
+      ${ggufStatusHtml(filename, ggufActiveDownloads.has(filename))}
+    </div>`;
+}
+
+async function openDownloadModal() {
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('downloadModal')).show();
+  document.getElementById('download-progress-area').style.display = ggufActiveDownloads.size ? '' : 'none';
+
+  const hwBody = document.getElementById('hw-info-body');
+  try {
+    const hw = await fetch('/api/local/hardware').then(r => r.json());
+    if (!hw || !hw.os) {
+      hwBody.innerHTML = '<span class="text-warning">No se encontro hw_profile.json. Ejecuta <code>python setup_env.py</code> primero.</span>';
+    } else {
+      const gpu = hw.gpu || {};
+      const npu = hw.npu || {};
+      const vram = gpu.vram_gb ? `${gpu.vram_gb} GB` : (gpu.shared_memory ? 'compartida' : 'N/A');
+      hwBody.innerHTML = `
+        <div class="row g-2">
+          <div class="col-md-4"><span class="text-secondary">OS:</span> ${escapeHtml(hw.os)}</div>
+          <div class="col-md-4"><span class="text-secondary">CPU:</span> ${escapeHtml(hw.cpu?.vendor || '')} ${escapeHtml(String(hw.cpu?.cores_physical || '?'))} nucleos</div>
+          <div class="col-md-4"><span class="text-secondary">RAM:</span> ${escapeHtml(String(hw.ram_gb))} GB</div>
+          ${gpu.detected ? `<div class="col-md-6"><span class="text-secondary">GPU:</span> ${escapeHtml(gpu.name)} - VRAM ${escapeHtml(vram)}</div>` : '<div class="col-md-6 text-secondary">Sin GPU dedicada</div>'}
+          ${npu.detected ? `<div class="col-md-6"><span class="text-info">NPU:</span> ${escapeHtml(npu.vendor)} ${escapeHtml(npu.type)}</div>` : ''}
+          <div class="col-12"><span class="text-secondary">Backend optimo:</span> <strong style="color:rgb(var(--tone-cyan))">${escapeHtml(hw.best_backend)}</strong></div>
+        </div>`;
+    }
+  } catch(e) {
+    hwBody.innerHTML = `<span class="text-danger">Error al cargar hardware: ${escapeHtml(e.message)}</span>`;
+  }
+
+  await Promise.all([loadCachedModels(), loadArchivedModels(), loadRecommended(false)]);
+}
+
+async function loadCachedModels() {
+  const listEl = document.getElementById('cached-models-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<div class="text-secondary small"><div class="spinner-border spinner-border-sm me-2"></div>Cargando...</div>';
+  try {
+    const models = await fetch('/api/local/cached').then(r => r.json());
+    if (models.error) throw new Error(models.error);
+    listEl.innerHTML = models.length
+      ? models.map(m => ggufCard(m, 'cached')).join('')
+      : '<div class="text-secondary small">No hay modelos descargados aun.</div>';
+  } catch(e) {
+    listEl.innerHTML = `<div class="text-danger small">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function loadArchivedModels() {
+  const listEl = document.getElementById('archived-models-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<div class="text-secondary small"><div class="spinner-border spinner-border-sm me-2"></div>Cargando...</div>';
+  try {
+    const models = await fetch('/api/local/archive').then(r => r.json());
+    if (models.error) throw new Error(models.error);
+    listEl.innerHTML = models.length
+      ? models.map(m => ggufCard(m, 'archived', {border: '#3a3520'})).join('')
+      : '<div class="text-secondary small">No hay modelos guardados para despues.</div>';
+  } catch(e) {
+    listEl.innerHTML = `<div class="text-danger small">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function deleteModel(filename, btn) {
+  if (!confirm(`Eliminar ${filename}?`)) return;
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/local/model/${encodeURIComponent(filename)}`, {method: 'DELETE'});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al eliminar');
+    await Promise.all([loadCachedModels(), loadModels()]);
+  } catch(e) {
+    ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}`);
+    btn.disabled = false;
+  }
+}
+
+async function archiveModel(filename, btn) {
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/local/model/${encodeURIComponent(filename)}/archive`, {method: 'POST'});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al guardar');
+    await Promise.all([loadCachedModels(), loadArchivedModels(), loadModels()]);
+  } catch(e) {
+    ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}`);
+    btn.disabled = false;
+  }
+}
+
+async function restoreModel(filename, btn) {
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/local/archive/${encodeURIComponent(filename)}/restore`, {method: 'POST'});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al cargar');
+    await Promise.all([loadCachedModels(), loadArchivedModels(), loadModels()]);
+  } catch(e) {
+    ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}`);
+    btn.disabled = false;
+  }
+}
+
+async function deleteArchivedModel(filename, btn) {
+  if (!confirm(`Eliminar definitivamente ${filename}?`)) return;
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/local/archive/${encodeURIComponent(filename)}`, {method: 'DELETE'});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al eliminar');
+    await loadArchivedModels();
+  } catch(e) {
+    ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}`);
+    btn.disabled = false;
+  }
+}
+
+async function redownloadModel(repoId, filename, btn) {
+  if (!repoId) {
+    ggufSetStatus(filename, 'error', 100, 'Este modelo no tiene repo_id guardado. Usa Descargar por nombre.');
+    return;
+  }
+  await startDownload(repoId, filename, btn);
+}
+
+async function startCustomDownload(btn) {
+  const repoId = document.getElementById('custom-repo-id').value.trim();
+  const filename = document.getElementById('custom-filename').value.trim();
+  if (!repoId || !filename) {
+    showToast('Completa el repositorio y el nombre del archivo .gguf', 'error');
+    return;
+  }
+  if (!filename.endsWith('.gguf')) {
+    showToast('El nombre del archivo debe terminar en .gguf', 'error');
+    return;
+  }
+  await startDownload(repoId, filename, btn);
+  document.getElementById('custom-repo-id').value = '';
+  document.getElementById('custom-filename').value = '';
+}
+
+async function loadRecommended(forceRefresh) {
+  const listEl = document.getElementById('recommended-models-list');
+  const sourceEl = document.getElementById('recommended-source');
+  if (!listEl) return;
+  listEl.innerHTML = `<div class="text-secondary small"><div class="spinner-border spinner-border-sm me-2"></div>${forceRefresh ? 'Consultando LLMs configurados...' : 'Cargando recomendaciones...'}</div>`;
+  if (sourceEl) sourceEl.textContent = '';
+  try {
+    const url = '/api/local/recommended' + (forceRefresh ? '?refresh=1' : '');
+    const models = await fetch(url).then(r => r.json());
+    if (models.error) throw new Error(models.error);
+    if (!models.length) {
+      listEl.innerHTML = '<div class="text-secondary small">No hay modelos recomendados disponibles.</div>';
+      return;
+    }
+    const hasVotes = models.some(m => m.consensus_votes > 0);
+    if (sourceEl) {
+      const maxVotes = hasVotes ? Math.max(...models.map(m => m.consensus_votes || 0)) : 0;
+      sourceEl.innerHTML = hasVotes
+        ? `<i class="bi bi-stars me-1" style="color:#a78bfa"></i>Catalogo generado por ${maxVotes} LLM(s)`
+        : `<i class="bi bi-archive me-1"></i>Usando catalogo base`;
+    }
+    const hwKnown = models.some(m => m.fits_in_memory !== null);
+    const compatible = models.filter(m => m.fits_in_memory !== false);
+    const incompatible = models.filter(m => m.fits_in_memory === false);
+    let html = '';
+    if (!hwKnown) {
+      html += `<div class="small mb-2 p-2 rounded" style="background:#2a2415;border:1px solid #4a3f20;color:#fbbf24">
+        <i class="bi bi-exclamation-triangle me-1"></i>Perfil de hardware no disponible. Ejecuta <code>python setup_env.py</code>.
+      </div>`;
+    }
+    html += compatible.map(m => ggufCard(m, 'recommended', {border: m.fits_in_memory === null ? '#3a3520' : '#2d3148'})).join('');
+    if (incompatible.length) {
+      html += `<details class="mt-2">
+        <summary class="small" style="cursor:pointer;color:#94a3b8;font-size:.72rem;list-style:none">
+          <i class="bi bi-chevron-down me-1"></i>Ver tambien (${incompatible.length} modelos que no caben en tu HW)
+        </summary>
+        <div class="mt-1">${incompatible.map(m => ggufCard(m, 'recommended', {border: '#3a2020'})).join('')}</div>
+      </details>`;
+    }
+    listEl.innerHTML = html || '<div class="small text-secondary">Ningun modelo del catalogo cabe en tu memoria disponible.</div>';
+  } catch(e) {
+    listEl.innerHTML = `<div class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function ensureActiveDownloadCard(repoId, filename, description = '') {
+  if (document.getElementById(`gguf-card-${ggufSafeId(filename)}`)) return;
+  const area = document.getElementById('download-progress-area');
+  const list = document.getElementById('active-downloads-list');
+  if (!area || !list) return;
+  area.style.display = '';
+  list.insertAdjacentHTML('beforeend', ggufCard({
+    filename,
+    repo_id: repoId,
+    creator: repoId ? repoId.split('/')[0] : '',
+    description,
+  }, 'manual'));
+}
+
+async function startDownload(repoId, filename, btn, description = '') {
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner-border spinner-border-sm"></div>';
+  ensureActiveDownloadCard(repoId, filename, description);
+  ggufActiveDownloads.set(filename, true);
+  ggufSetStatus(filename, 'downloading', 5, `Iniciando descarga de ${escapeHtml(filename)}...`);
+
+  try {
+    const res = await fetch('/api/local/download', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({repo_id: repoId, filename, description}),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Error iniciando descarga');
+
+    const es = new EventSource(`/api/local/download/${data.job_id}`);
+    es.onmessage = (e) => {
+      const d = JSON.parse(e.data);
+      if (d.status === 'done') {
+        ggufSetStatus(filename, 'done', 100, `<i class="bi bi-check2-circle me-1"></i>${escapeHtml(filename)} descargado correctamente`);
+        btn.innerHTML = '<i class="bi bi-check2"></i>';
+        ggufActiveDownloads.delete(filename);
+        es.close();
+        setTimeout(() => { loadModels(); loadCachedModels(); }, 500);
+      } else if (d.status === 'error') {
+        ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(d.error || 'Error de descarga')}`);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-download me-1"></i>Reintentar';
+        ggufActiveDownloads.delete(filename);
+        es.close();
+      } else {
+        ggufSetStatus(filename, 'downloading', d.progress || 10, `Descargando ${escapeHtml(filename)}... (${d.progress || 0}%)`);
+      }
+    };
+    es.onerror = () => {
+      ggufSetStatus(filename, 'error', 100, 'Conexion perdida con el servidor de descarga.');
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-download me-1"></i>Reintentar';
+      ggufActiveDownloads.delete(filename);
+      es.close();
+    };
+  } catch(e) {
+    ggufSetStatus(filename, 'error', 100, escapeHtml(e.message));
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-download me-1"></i>Reintentar';
+    ggufActiveDownloads.delete(filename);
+  }
+}
 </script>
 {% endblock %}

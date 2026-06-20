@@ -244,14 +244,13 @@ function loadDashboard() {
 
     // Arbitros
     const arbEl = document.getElementById('arbiters-summary');
-    const rowTones = ['accent-cyan', 'accent-violet', 'accent-emerald', 'accent-amber', 'accent-rose'];
+    const maxArbiters = cfg.safety?.max_arbiters || 10;
     arbEl.innerHTML = cfg.arbiters.map((a, idx) => {
       const provider = a.provider || {};
       const model = provider.model || 'modelo no configurado';
       const providerType = provider.type || 'proveedor no configurado';
-      const tone = rowTones[idx % rowTones.length];
       return `
-      <div class="entity-row ${tone}" style="cursor:pointer" data-arb-index="${idx}">
+      <div class="entity-row" style="--row-rgb:${arbiterColorRGB(idx, maxArbiters)};cursor:pointer" data-arb-index="${idx}">
         <div class="entity-icon">
           <i class="bi bi-person-badge"></i>
         </div>
@@ -271,11 +270,12 @@ function loadDashboard() {
 
     // Resultados
     const outEl = document.getElementById('outputs-list');
+    const outputTones = ['accent-cyan', 'accent-violet', 'accent-emerald', 'accent-amber', 'accent-rose'];
     if (!outputs.length) {
       outEl.innerHTML = '<span class="text-secondary small">Sin resultados todavía.</span>';
     } else {
       outEl.innerHTML = outputs.slice(0,5).map((o, idx) => {
-        const tone = rowTones[(idx + 2) % rowTones.length];
+        const tone = outputTones[(idx + 2) % outputTones.length];
         return `
         <div class="entity-row ${tone} align-items-center" style="cursor:pointer" data-out-index="${idx}">
           <span class="entity-icon"><i class="bi bi-filetype-csv"></i></span>

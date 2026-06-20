@@ -5,7 +5,31 @@ Utilidades comunes para el proyecto LabelForge.
 Evita la duplicación de helpers de conversión numérica y formateo.
 """
 
+from pathlib import Path
 from typing import Optional, Any
+
+
+def ensure_project_dirs(root: Path) -> list[Path]:
+    """
+    Verifica y crea todas las carpetas necesarias para el funcionamiento del proyecto.
+    Retorna la lista de directorios creados (los que no existían).
+    """
+    required = [
+        root / "logs",
+        root / "output",
+        root / "checkpoints",
+        root / "models",
+        root / "secrets",
+        root / "scripts",
+        root / "data",
+        root / "archive",
+    ]
+    created = []
+    for d in required:
+        if not d.exists():
+            d.mkdir(parents=True, exist_ok=True)
+            created.append(d)
+    return created
 
 
 def safe_int(value: Any, default: Any = None) -> Any:

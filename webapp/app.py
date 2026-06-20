@@ -11,10 +11,11 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, Response, jsonify, render_template, request, send_from_directory, stream_with_context
+from flask import Flask, Response, g, jsonify, render_template, request, send_from_directory, stream_with_context
 
 # ---------------------------------------------------------------------------
 # Módulo compartido de métricas de acuerdo y utilidades
@@ -29,7 +30,7 @@ from scripts.arbiters_io import (
     require_export_password,
     validate_imported_arbiters,
 )
-from scripts.secrets_io import provider_api_key_env, secrets_env_path, set_secret_value
+from scripts.secrets_io import provider_api_key_env, resolve_gcp_credentials, secrets_env_path, set_secret_value
 from scripts.rate_limits import compute_min_delay
 from scripts.provider_preflight import validate_provider_preflight
 from scripts.utils import safe_int as _safe_int, safe_float as _safe_float
@@ -43,11 +44,154 @@ CONFIG_PATH     = BASE_DIR / "scripts" / "arbiters_config.json"
 SCRIPTS_DIR     = BASE_DIR / "scripts"
 OUTPUT_DIR      = BASE_DIR / "output"
 CHECKPOINTS_DIR = BASE_DIR / "checkpoints"
+MODELS_DIR      = BASE_DIR / "models"
+HW_PROFILE_PATH = MODELS_DIR / "hw_profile.json"
 
 SECRETS_ENV_PATH = secrets_env_path(BASE_DIR)
 load_dotenv(SECRETS_ENV_PATH)
+resolve_gcp_credentials(BASE_DIR)
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB máximo por upload
+
+# ---------------------------------------------------------------------------
+# Logging — silencia Werkzeug, reemplaza con log de requests legible
+# ---------------------------------------------------------------------------
+import logging as _logging
+
+_logging.getLogger("werkzeug").setLevel(_logging.ERROR)
+
+_req_log = _logging.getLogger("labelforge.http")
+if not _req_log.handlers:
+    _rh = _logging.StreamHandler()
+    _rh.setFormatter(_logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    _req_log.addHandler(_rh)
+    _req_log.setLevel(_logging.INFO)
+    _req_log.propagate = False
+
+_log = _logging.getLogger(__name__)
+
+_HTTP_SKIP       = frozenset({"/favicon.ico"})
+_HTTP_SKIP_PREFX = ("/static/",)
+
+
+@app.before_request
+def _req_timer():
+    g._t0 = time.perf_counter()
+
+
+@app.after_request
+def _log_http(response):
+    path = request.path
+    if path in _HTTP_SKIP or any(path.startswith(p) for p in _HTTP_SKIP_PREFX):
+        return response
+    elapsed = round((time.perf_counter() - getattr(g, "_t0", time.perf_counter())) * 1000)
+    status  = response.status_code
+    if status == 304:
+        return response
+    msg = f"{request.method:<5} {path}  →  {status}  ({elapsed}ms)"
+    if status >= 500:
+        _req_log.error(msg)
+    elif status >= 400:
+        _req_log.warning(msg)
+    else:
+        _req_log.info(msg)
+    # Cabeceras de seguridad en todas las respuestas HTML
+    if "text/html" in response.content_type:
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "font-src 'self' https://cdn.jsdelivr.net; "
+            "img-src 'self' data:; connect-src 'self'"
+        )
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Autenticación — HTTP Basic Auth
+# ---------------------------------------------------------------------------
+import base64 as _b64
+import secrets as _sec
+
+# Secret key para sesiones Flask (necesaria para cookies seguras)
+app.secret_key = os.environ.get("LABELFORGE_SECRET_KEY") or _sec.token_hex(32)
+
+_AUTH_EXEMPT = frozenset({"/favicon.ico"})
+_AUTH_EXEMPT_PREFIX = ("/static/",)
+
+
+def _is_localhost() -> bool:
+    return request.remote_addr in ("127.0.0.1", "::1")
+
+
+def _basic_auth_ok(password: str) -> bool:
+    hdr = request.headers.get("Authorization", "")
+    if not hdr.startswith("Basic "):
+        return False
+    try:
+        _, _, provided = _b64.b64decode(hdr[6:]).decode("utf-8", errors="replace").partition(":")
+        return _sec.compare_digest(provided, password)
+    except Exception:
+        return False
+
+
+@app.before_request
+def _require_auth():
+    path = request.path
+    if path in _AUTH_EXEMPT or any(path.startswith(p) for p in _AUTH_EXEMPT_PREFIX):
+        return
+
+    _password = os.environ.get("LABELFORGE_PASSWORD", "").strip()
+
+    if not _password:
+        # Sin contraseña configurada: solo permite acceso desde localhost
+        if not _is_localhost():
+            return Response(
+                "Acceso denegado. Configura LABELFORGE_PASSWORD en secrets/secrets.env "
+                "para habilitar acceso remoto.",
+                status=403,
+                content_type="text/plain; charset=utf-8",
+            )
+        return
+
+    if not _basic_auth_ok(_password):
+        return Response(
+            "Autenticación requerida",
+            status=401,
+            content_type="text/plain; charset=utf-8",
+            headers={"WWW-Authenticate": 'Basic realm="LabelForge"'},
+        )
+
+
+# ---------------------------------------------------------------------------
+# Hardware profile (no aborta la webapp si falta — solo lo logea)
+# ---------------------------------------------------------------------------
+
+def _load_hw_profile() -> dict:
+    if not HW_PROFILE_PATH.exists():
+        _log.warning(
+            "models/hw_profile.json no encontrado. "
+            "Los modelos locales GGUF no estarán disponibles. "
+            "Ejecuta 'python setup_env.py' para habilitarlos."
+        )
+        return {}
+    try:
+        with open(HW_PROFILE_PATH, encoding="utf-8") as f:
+            profile = json.load(f)
+        if not profile.get("setup_ok"):
+            _log.warning(
+                "hw_profile.json indica setup_ok=false. "
+                "Revisa logs/setup_*.log y vuelve a ejecutar 'python setup_env.py'."
+            )
+        return profile
+    except Exception as exc:
+        _log.warning("No se pudo leer hw_profile.json: %s", exc)
+        return {}
+
+_HW_PROFILE: dict = _load_hw_profile()
 
 # ---------------------------------------------------------------------------
 # Descripciones orientadas al problema por modelo Gemini
@@ -117,6 +261,7 @@ def _empty_current_run_stats() -> dict:
         "updated_at": None,
         "completed_before_start": 0,
         "total_rows": 0,
+        "dataset_total_rows": 0,
         "processed_rows": 0,
         "successful_rows": 0,
         "failed_rows": 0,
@@ -128,6 +273,8 @@ def _empty_current_run_stats() -> dict:
         "pause_kind": "",
         "pause_reason": "",
         "principles": [],
+        "principle_counts": {},
+        "checkpoint_every": 10,
         "arbiters": {},
         "last_claim": None,
         "_claim_statuses": {},
@@ -161,6 +308,9 @@ def _public_current_stats(stats: dict = None) -> dict:
             "latency_min_s": arb_stats.get("latency_min_s") or 0,
             "latency_max_s": arb_stats.get("latency_max_s") or 0,
             "latency_total_s": round(arb_stats.get("latency_total_s", 0), 3),
+            "tokens_in":  arb_stats.get("prompt_tokens", 0),
+            "tokens_out": arb_stats.get("completion_tokens", 0),
+            "ok": arb_stats.get("calls", 0),
         }
         for arb_id, arb_stats in stats.get("arbiters", {}).items()
     }
@@ -253,8 +403,14 @@ def _apply_run_metric_event(event: dict) -> dict:
             stats["started_at"] = event.get("timestamp")
             stats["updated_at"] = event.get("timestamp")
             stats["total_rows"] = int(event.get("total_rows") or 0)
+            stats["dataset_total_rows"] = int(event.get("dataset_total_rows") or 0)
             stats["completed_before_start"] = int(event.get("completed_before_start") or 0)
             stats["principles"] = event.get("principles", [])
+            try:
+                _cfg = read_config()
+                stats["checkpoint_every"] = int(_cfg.get("processing", {}).get("checkpoint_every", 10))
+            except Exception:
+                pass
             for arb in event.get("arbiters", []):
                 _ensure_live_arbiter(stats, arb.get("id"), arb.get("name"))
             _apply_initial_summary(stats, event.get("initial_summary", {}))
@@ -277,6 +433,14 @@ def _apply_run_metric_event(event: dict) -> dict:
                     arb_stats["latency_total_s"] += latency
                     arb_stats["latency_min_s"] = latency if arb_stats["latency_min_s"] is None else min(arb_stats["latency_min_s"], latency)
                     arb_stats["latency_max_s"] = latency if arb_stats["latency_max_s"] is None else max(arb_stats["latency_max_s"], latency)
+            for p, val in event.get("consensus", {}).items():
+                pc = stats["principle_counts"]
+                if p not in pc:
+                    pc[p] = {"ones": 0, "zeros": 0}
+                if val == 1:
+                    pc[p]["ones"] += 1
+                elif val == 0:
+                    pc[p]["zeros"] += 1
 
         elif kind == "claim_failed":
             _set_live_claim_status(stats, event.get("row_index"), "failed")
@@ -372,6 +536,8 @@ def api_models():
             result = _list_openai_models(api_key)
         elif provider in ("ollama", "openai_compat"):
             result = _list_openai_compat_models(api_key, base_url)
+        elif provider == "llama_cpp":
+            result = _list_local_gguf_models()
         else:
             return jsonify({"error": f"Proveedor desconocido: {provider}"}), 400
     except Exception as e:
@@ -505,9 +671,29 @@ def _list_openai_models(api_key: str) -> list:
     return result
 
 
+def _validate_base_url(base_url: str) -> None:
+    """Block non-http(s) schemes and cloud metadata endpoints to prevent SSRF."""
+    from urllib.parse import urlparse
+    import ipaddress
+    parsed = urlparse(base_url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("base_url debe usar esquema http o https.")
+    host = (parsed.hostname or "").lower()
+    _blocked_hosts = {"metadata.google.internal", "metadata.google"}
+    if host in _blocked_hosts:
+        raise ValueError(f"base_url apunta a un host no permitido: {host}")
+    try:
+        addr = ipaddress.ip_address(host)
+        if addr.is_link_local:
+            raise ValueError("base_url no puede apuntar a direcciones link-local (169.254.x.x).")
+    except ValueError:
+        pass  # hostname, not an IP literal — allowed
+
+
 def _list_openai_compat_models(api_key: str, base_url: str) -> list:
     if not base_url:
         raise ValueError("Se requiere base_url para proveedor openai_compat / ollama.")
+    _validate_base_url(base_url)
     from openai import OpenAI
     client = OpenAI(api_key=api_key or "local", base_url=base_url)
     raw    = client.models.list()
@@ -516,6 +702,22 @@ def _list_openai_compat_models(api_key: str, base_url: str) -> list:
         for m in raw.data
     ]
     result.sort(key=lambda m: m["id"])
+    return result
+
+
+def _list_local_gguf_models() -> list:
+    """Lista los archivos .gguf disponibles en models/."""
+    MODELS_DIR.mkdir(exist_ok=True)
+    result = []
+    for gguf in sorted(MODELS_DIR.glob("*.gguf")):
+        size_gb = round(gguf.stat().st_size / (1024 ** 3), 2)
+        result.append({
+            "id": gguf.name,
+            "display_name": gguf.stem,
+            "task_description": f"Modelo local GGUF — {size_gb} GB",
+            "path": str(gguf.relative_to(BASE_DIR)),
+            "size_gb": size_gb,
+        })
     return result
 
 
@@ -649,6 +851,217 @@ def api_rate_limits_summary():
         "global_msg":        global_msg,
         "per_arbiter":       results,
     })
+
+
+# ---------------------------------------------------------------------------
+# API: Modelos locales GGUF
+# ---------------------------------------------------------------------------
+
+@app.route("/api/local/hardware", methods=["GET"])
+def api_local_hardware():
+    """Retorna hw_profile.json (leído fresco en cada llamada)."""
+    return jsonify(_load_hw_profile())
+
+
+@app.route("/api/local/recommended", methods=["GET"])
+def api_local_recommended():
+    """
+    Retorna lista de modelos recomendados según el hardware.
+    Query param: ?refresh=1 para forzar nueva consulta a los LLMs.
+    Siempre lee hw_profile.json fresco para reflejar cambios post-setup.
+    """
+    force = request.args.get("refresh") == "1"
+    try:
+        from scripts.local_models import recommended_models
+        hw = _load_hw_profile()
+        result = recommended_models(hw if hw else None, force_refresh=force)
+        return jsonify(result)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/local/cached", methods=["GET"])
+def api_local_cached():
+    """Lista los GGUFs descargados en models/."""
+    try:
+        from scripts.local_models import list_cached_models
+        return jsonify(list_cached_models())
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+_download_jobs: dict = {}
+_download_jobs_lock = threading.Lock()
+
+
+def _valid_gguf_filename(filename: str) -> bool:
+    return (
+        bool(filename)
+        and filename.endswith(".gguf")
+        and "/" not in filename
+        and "\\" not in filename
+        and ".." not in filename
+    )
+
+
+@app.route("/api/local/download", methods=["POST"])
+def api_local_download():
+    """
+    Inicia descarga de un modelo GGUF en background.
+    Body JSON: {repo_id, filename}
+    Retorna: {job_id}
+    """
+    body = request.get_json(silent=True) or {}
+    repo_id  = (body.get("repo_id") or "").strip()
+    filename = (body.get("filename") or "").strip()
+    description = (body.get("description") or "").strip()
+
+    if not repo_id or not filename:
+        return jsonify({"error": "repo_id y filename son obligatorios"}), 400
+    if not _valid_gguf_filename(filename):
+        return jsonify({"error": "Nombre de archivo inválido"}), 400
+
+    job_id = f"{int(time.time())}_{uuid.uuid4().hex[:8]}_{filename}"
+    job = {
+        "id": job_id,
+        "repo_id": repo_id,
+        "filename": filename,
+        "status": "pending",
+        "progress": 0,
+        "error": None,
+        "log_lines": [],
+    }
+
+    with _download_jobs_lock:
+        _download_jobs[job_id] = job
+
+    def _run():
+        job["status"] = "downloading"
+        try:
+            from scripts.local_models import download_model
+
+            def _progress(downloaded: int, total: int):
+                if total:
+                    job["progress"] = int(downloaded * 100 / total)
+
+            download_model(repo_id, filename, progress_callback=_progress, description=description)
+            job["status"] = "done"
+            job["progress"] = 100
+        except Exception as exc:
+            job["status"] = "error"
+            job["error"] = str(exc)
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/api/local/download/<job_id>", methods=["GET"])
+def api_local_download_status(job_id: str):
+    """SSE de progreso de descarga."""
+    with _download_jobs_lock:
+        job = _download_jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "job no encontrado"}), 404
+
+    def generate():
+        # Ping inicial: establece la conexión SSE antes de que llegue el primer dato
+        yield ": ping\n\n"
+        while True:
+            with _download_jobs_lock:
+                current = dict(_download_jobs.get(job_id, {}))
+            data = json.dumps({
+                "status": current.get("status"),
+                "progress": current.get("progress", 0),
+                "error": current.get("error"),
+            })
+            yield f"data: {data}\n\n"
+            if current.get("status") in ("done", "error"):
+                break
+            time.sleep(1)
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+                 "Connection": "keep-alive"},
+    )
+
+
+@app.route("/api/local/model/<filename>", methods=["DELETE"])
+def api_local_delete_model(filename: str):
+    """Elimina un archivo GGUF del cache."""
+    if not _valid_gguf_filename(filename):
+        return jsonify({"error": "Nombre de archivo inválido"}), 400
+    target = MODELS_DIR / filename
+    if not target.exists():
+        return jsonify({"error": "Archivo no encontrado"}), 404
+    target.unlink()
+    _log.info("Modelo local eliminado: %s", filename)
+    return jsonify({"ok": True, "deleted": filename})
+
+
+@app.route("/api/local/archive", methods=["GET"])
+def api_local_archive():
+    """Lista los GGUFs archivados en models/archive/."""
+    try:
+        from scripts.local_models import list_archived_models
+        return jsonify(list_archived_models())
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/local/model/<filename>/archive", methods=["POST"])
+def api_local_archive_model(filename: str):
+    """Mueve un GGUF descargado a models/archive/ para guardarlo fuera del cache activo."""
+    if not _valid_gguf_filename(filename):
+        return jsonify({"error": "Nombre de archivo invÃ¡lido"}), 400
+    try:
+        from scripts.local_models import archive_model
+        archive_model(filename)
+        _log.info("Modelo local archivado: %s", filename)
+        return jsonify({"ok": True, "archived": filename})
+    except FileNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except FileExistsError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/local/archive/<filename>/restore", methods=["POST"])
+def api_local_restore_model(filename: str):
+    """Restaura un GGUF desde models/archive/ hacia models/."""
+    if not _valid_gguf_filename(filename):
+        return jsonify({"error": "Nombre de archivo invÃ¡lido"}), 400
+    try:
+        from scripts.local_models import restore_model
+        restore_model(filename)
+        _log.info("Modelo local restaurado: %s", filename)
+        return jsonify({"ok": True, "restored": filename})
+    except FileNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except FileExistsError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/local/archive/<filename>", methods=["DELETE"])
+def api_local_delete_archived_model(filename: str):
+    """Elimina permanentemente un GGUF archivado."""
+    if not _valid_gguf_filename(filename):
+        return jsonify({"error": "Nombre de archivo invÃ¡lido"}), 400
+    try:
+        from scripts.local_models import delete_archived_model
+        delete_archived_model(filename)
+        _log.info("Modelo local archivado eliminado: %s", filename)
+        return jsonify({"ok": True, "deleted": filename})
+    except FileNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -1078,8 +1491,8 @@ def api_update_prompt_template():
     template = data.get("user_prompt_template", "").strip()
     if not template:
         return jsonify({"error": "El template no puede estar vacio"}), 400
-    if "{claim}" not in template:
-        return jsonify({"error": "El template debe contener {claim}, que representa el texto de la entrada"}), 400
+    if "{item}" not in template and "{claim}" not in template:
+        return jsonify({"error": "El template debe contener {item}, que representa el texto de la entrada"}), 400
     cfg["task"]["user_prompt_template"] = template
     if "include_justifications" in data:
         cfg["task"]["include_justifications"] = bool(data.get("include_justifications"))
@@ -1171,7 +1584,7 @@ def api_run_start():
     sheet       = dataset_cfg.get("sheet", "")
     text_column = dataset_cfg.get("text_column", "claim")
 
-    cmd = [sys.executable, str(BASE_DIR / "main_label.py")]
+    cmd = [sys.executable, str(BASE_DIR / "main_cli.py")]
     if input_file:
         cmd += ["--input", input_file]
     if sheet:
@@ -1382,6 +1795,63 @@ def api_delete_output(name):
     path.unlink()
     return jsonify({"ok": True})
 
+
+@app.route("/api/outputs/archive-all", methods=["POST"])
+def api_archive_all_outputs():
+    import re
+    from datetime import datetime
+    files = list(OUTPUT_DIR.glob("labeled_*.csv")) if OUTPUT_DIR.exists() else []
+    files = [f for f in files if re.match(r"^labeled_\d{8}_\d{6}\.csv$", f.name)]
+    if not files:
+        return jsonify({"ok": True, "archived": 0, "archive_dir": None})
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    archive_dir = BASE_DIR / "archive" / f"partial_{stamp}"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    count = 0
+    for f in files:
+        dest = archive_dir / f.name
+        f.rename(dest)
+        count += 1
+    return jsonify({"ok": True, "archived": count, "archive_dir": f"archive/partial_{stamp}"})
+
+
+@app.route("/api/run/principle-counts", methods=["GET"])
+def api_principle_counts():
+    import csv as csv_mod
+    stats      = _process_state["current_stats"]
+    principles  = stats.get("principles") or []
+    if not principles:
+        return jsonify({"ok": False, "counts": {}, "principles": []})
+
+    # Use live in-memory counts (updated on every claim_ok, no CSV read needed)
+    live_counts = stats.get("principle_counts", {})
+    if live_counts and any(
+        live_counts.get(p, {}).get("ones", 0) + live_counts.get(p, {}).get("zeros", 0) > 0
+        for p in principles
+    ):
+        counts = {p: live_counts.get(p, {"ones": 0, "zeros": 0}) for p in principles}
+        return jsonify({"ok": True, "counts": counts, "principles": principles, "source": "live"})
+
+    # Fallback: read from output CSV (written at checkpoint boundaries)
+    output_path = stats.get("output_path")
+    if not output_path:
+        return jsonify({"ok": False, "counts": {}, "principles": principles})
+    path = Path(output_path)
+    if not path.exists():
+        return jsonify({"ok": False, "counts": {}, "principles": principles})
+    counts = {p: {"ones": 0, "zeros": 0} for p in principles}
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            for row in csv_mod.DictReader(f):
+                for p in principles:
+                    v = row.get(f"{p}_consensus", "")
+                    if v == "1":
+                        counts[p]["ones"] += 1
+                    elif v == "0":
+                        counts[p]["zeros"] += 1
+    except Exception:
+        pass
+    return jsonify({"ok": True, "counts": counts, "principles": principles, "source": "csv"})
 
 
 def _detect_principles(fieldnames: list) -> list:

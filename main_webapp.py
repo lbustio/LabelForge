@@ -38,12 +38,21 @@ if str(ROOT) not in sys.path:
 
 # Cargar variables de entorno antes de parsear argumentos
 from dotenv import load_dotenv
-from scripts.secrets_io import secrets_env_path
+from scripts.secrets_io import resolve_gcp_credentials, secrets_env_path
 load_dotenv(secrets_env_path(ROOT))
+resolve_gcp_credentials(ROOT)
 
 # Valores por defecto: CLI > env var > hardcoded
 _DEFAULT_HOST = os.environ.get("LABELFORGE_HOST", "127.0.0.1")
 _DEFAULT_PORT = int(os.environ.get("LABELFORGE_PORT", "7860"))
+
+from scripts.utils import ensure_project_dirs
+_created = ensure_project_dirs(ROOT)
+if _created:
+    for _d in _created:
+        print(f"  [setup] Directorio creado: {_d.relative_to(ROOT)}")
+else:
+    print("  [setup] Directorios del proyecto verificados OK")
 
 from webapp.app import app
 

@@ -6,41 +6,100 @@ dependencies:
   - python=3.11
   - pip
   - pip:
+    # --- Cloud LLM providers ---
     - google-genai==2.8.0
     - google-cloud-aiplatform==1.157.0
     - anthropic==0.109.1
     - openai==2.41.1
+
+    # --- Web framework ---
     - flask==3.1.3
+
+    # --- Dataset reading ---
+    - openpyxl==3.1.5
+
+    # --- Hardware detection ---
+    - psutil==7.2.2
+
+    # --- Model downloads ---
+    - huggingface_hub==1.20.1
+
+    # --- Utils ---
     - python-dotenv==1.2.2
-    - anyio==4.13.0
-    - certifi==2026.5.20
-    - distro==1.9.0
-    - google-auth==2.54.0
-    - h11==0.16.0
-    - httpcore==1.0.9
-    - httpx==0.28.1
-    - pydantic==2.13.4
-    - pydantic-core==2.46.4
-    - requests==2.34.2
-    - sniffio==1.3.1
-    - tenacity==9.1.4
-    - websockets==16.0
-    - blinker==1.9.0
-    - click==8.4.1
-    - itsdangerous==2.2.0
-    - Jinja2==3.1.6
-    - MarkupSafe==3.0.3
-    - Werkzeug==3.1.8
+
+    # --- Local LLM GGUF (instalado por setup_env.py, NO aqui) ---
+    # setup_env.py detecta GPU y descarga la wheel precompilada correcta (CUDA/Vulkan/Metal)
+    # o compila desde fuente como ultimo recurso. No incluir en requirements base.
+    # - llama-cpp-python>=0.3.0   # <-- manejado por setup_env.py
+
+    # --- NPU / OpenVINO (solo Intel AI Boost — instala setup_env.py) ---
+    # - openvino>=2024.5.0
+    # - optimum[openvino]>=1.20.0
+    # - nncf
+
+    # -----------------------------------------------------------------------
+    # Dependencias transitivas (pinned para reproducibilidad exacta)
+    # -----------------------------------------------------------------------
+    - annotated-doc==0.0.4
     - annotated-types==0.7.0
+    - anyio==4.13.0
+    - blinker==1.9.0
+    - certifi==2026.5.20
     - cffi==2.0.0
     - charset-normalizer==3.4.7
+    - click==8.4.1
+    - colorama==0.4.6
     - cryptography==49.0.0
+    - distro==1.9.0
+    - docstring_parser==0.18.0
+    - et-xmlfile==2.0.0
+    - filelock==3.29.4
+    - fsspec==2026.6.0
+    - google-api-core==2.31.0
+    - google-auth==2.54.0
+    - google-cloud-bigquery==3.42.0
+    - google-cloud-core==2.6.0
+    - google-cloud-resource-manager==1.17.0
+    - google-cloud-storage==3.12.0
+    - google-crc32c==1.8.0
+    - google-resumable-media==2.10.0
+    - googleapis-common-protos==1.75.0
+    - grpc-google-iam-v1==0.14.4
+    - grpcio==1.81.1
+    - grpcio-status==1.81.1
+    - h11==0.16.0
+    - hf-xet==1.5.1
+    - httpcore==1.0.9
+    - httpx==0.28.1
     - idna==3.18
+    - itsdangerous==2.2.0
+    - Jinja2==3.1.6
     - jiter==0.15.0
+    - markdown-it-py==4.2.0
+    - MarkupSafe==3.0.3
+    - mdurl==0.1.2
+    - packaging==26.2
+    - proto-plus==1.28.0
+    - protobuf==6.33.6
     - pyasn1==0.6.3
     - pyasn1-modules==0.4.2
     - pycparser==3.0
+    - pydantic==2.13.4
+    - pydantic-core==2.46.4
+    - Pygments==2.20.0
+    - pyOpenSSL==26.3.0
+    - python-dateutil==2.9.0.post0
+    - PyYAML==6.0.3
+    - requests==2.34.2
+    - rich==15.0.0
+    - shellingham==1.5.4
+    - six==1.17.0
+    - sniffio==1.3.1
+    - tenacity==9.1.4
     - tqdm==4.68.2
+    - typer==0.25.1
     - typing-extensions==4.15.0
     - typing-inspection==0.4.2
     - urllib3==2.7.0
+    - websockets==16.0
+    - Werkzeug==3.1.8

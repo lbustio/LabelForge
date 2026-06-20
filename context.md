@@ -49,8 +49,9 @@ contexto externo.
 
 ```
 LabelForge/
-├── main_label.py          → Entrypoint CLI (llama a scripts/label_persuasion.py)
-├── main_webapp.py         → Entrypoint webapp Flask (con --host, --port, --debug)
+├── setup_env.py           → ⚠️ EJECUTAR PRIMERO — detecta HW, instala backends, escribe hw_profile.json
+├── main_cli.py          → Entrypoint CLI (verifica hw_profile, llama a scripts/label_persuasion.py)
+├── main_webapp.py         → Entrypoint webapp Flask (verifica hw_profile, con --host, --port, --debug)
 ├── scripts/
 │   ├── label_persuasion.py    → Pipeline principal: LLM calls, rate limiter, checkpoints, consenso
 │   ├── arbiters_config.json   → Configuración central: árbitros, principios, prompts, parámetros
@@ -58,26 +59,32 @@ LabelForge/
 │   ├── arbiters_io.py         → Export/import cifrado de árbitros (compartido CLI + webapp)
 │   ├── secrets_io.py          → Escritura/lectura controlada de secrets/secrets.env
 │   ├── provider_preflight.py  → Validación previa de credenciales/proveedores
-│   └── utils.py               → Helpers numéricos compartidos (safe_int, safe_float, etc.)
+│   ├── hw_detection.py        → Detección multiplataforma de OS/CPU/RAM/GPU/NPU
+│   ├── local_models.py        → Catálogo dinámico GGUF (consulta LLMs en paralelo), cache, descarga HF
+│   ├── local_models_config.json → Prompts y selección de modelos LLM para el catálogo (editable sin tocar código)
+│   └── utils.py               → Helpers numéricos + ensure_project_dirs() para crear dirs al arrancar
 ├── webapp/
 │   ├── app.py                 → Backend Flask: endpoints REST + SSE
 │   └── templates/
 │       ├── base.html          → Layout global con sistema de colores semántico
 │       ├── index.html         → Dashboard (árbitros, outputs, estado)
-│       ├── arbiters.html      → CRUD de árbitros
+│       ├── arbiters.html      → CRUD de árbitros (tab "Local GGUF" reemplaza "Ollama")
 │       ├── principles.html    → Edición de principios y preview del prompt
 │       ├── processing.html    → Parámetros de procesamiento y rate limits
 │       └── run.html           → Ejecución, logs SSE, métricas en vivo, resultados
 ├── tests/
 │   └── test_pipeline.py       → 9 pruebas unitarias (utils, métricas, seguridad)
+├── models/                    → Cache de modelos GGUF locales (excluido del repo)
+│   ├── hw_profile.json        → Perfil de hardware + backends instalados (generado por setup_env.py)
+│   └── *.gguf                 → Modelos descargados
 ├── data/                      → ⚠️ PRIVADO — excluido del repo (.gitignore)
 ├── output/                    → CSVs etiquetados generados (no en repo)
 ├── checkpoints/               → ⚠️ PRIVADO — estado de ejecuciones (excluido del repo)
-├── logs/                      → Logs de ejecuciones (excluidos del repo)
+├── logs/                      → Logs de ejecuciones Y de setup (excluidos del repo)
+│   └── setup_YYYYMMDD_HHMMSS.log  → Log del último setup_env.py
 ├── secrets/                   → Credenciales locales (NUNCA subir a repo)
 ├── secrets.env.example        → Plantilla pública de variables de entorno
-├── requirements.txt           → 7 dependencias directas (incluye openpyxl)
-├── environment.yml            → Entorno Conda
+├── requirements.txt           → Dependencias directas (huggingface_hub, psutil, flask, etc. — llama-cpp-python excluido: lo instala setup_env.py)
 ├── README.md                  → Documentación pública del proyecto
 ├── bitacora.md                → Historial detallado de decisiones de desarrollo
 └── context.md                 → Este archivo — contexto de transferencia
@@ -142,24 +149,20 @@ El pipeline guarda estado de forma granular — **por árbitro y por claim**:
 ## 5. Árbitros configurados actualmente
 
 La configuración actual tiene **tres árbitros** (número impar para evitar empates en consenso):
-dos usan **Vertex AI** con autenticación ADC (no API key) y uno usa **Anthropic Claude** con
-`ANTHROPIC_API_KEY` desde `secrets/secrets.env`.
+uno usa **Vertex AI** con autenticación ADC (no API key), uno usa **OpenAI** con `OPENAI_API_KEY`
+y uno usa **Anthropic Claude** con `ANTHROPIC_API_KEY`, ambas desde `secrets/secrets.env`.
 
 | ID | Nombre | Persona | Modelo | Proveedor |
 |---|---|---|---|---|
-| `arb1` | Psicólogo Clínico | Viviana Inés Fuentes | `gemini-2.5-pro` | `vertex_gemini` |
-| `arb3` | Investigador Forense | Rodrigo Santana | `gemini-2.5-flash` | `vertex_gemini` |
-| `arb4` | Psicólogo Forense | Claudio Codencio | `claude-sonnet-4-6` | `anthropic` |
+| `arb1` | Psicólogo Clínico | Germinio | `gemini-2.5-pro` | `vertex_gemini` |
+| `arb3` | Investigador Forense | Gepetencio | `gpt-4o` | `openai` |
+| `arb4` | Psicólogo Forense | Claudio | `claude-sonnet-4-6` | `anthropic` |
 
-**Decisión de diseño — diversidad de modelos:** los tres árbitros usan modelos distintos
-(Pro, Flash, Sonnet) para garantizar independencia real de criterio. Dos árbitros con
-los mismos pesos y temperatura 0.1 producirían acuerdo correlacionado artificialmente,
-lo que inflaría el Fleiss Kappa sin reflejo de consenso genuino.
-
-**Pendiente estratégico:** incorporar un cuarto árbitro de una familia completamente
-distinta (p.ej. GPT-4o, Llama 3) para máxima diversidad de arquitectura. Requiere setup
-adicional de API. Cuando se haga, volver a 4 árbitros implica revisar el sistema de
-consenso (actualmente mayoría simple de 3).
+**Decisión de diseño — diversidad de modelos y familias:** los tres árbitros usan modelos
+de **tres proveedores distintos** (Vertex AI/Gemini, OpenAI/GPT, Anthropic/Claude) para
+garantizar independencia real de criterio. Dos árbitros del mismo proveedor con temperatura 0.1
+producirían acuerdo correlacionado artificialmente, inflando el Fleiss Kappa sin reflejar
+consenso genuino.
 
 **Proyecto GCP para árbitros Vertex**: `cloud-computing-cybersec-inaoe`  
 **Región Vertex**: `us-central1`  
@@ -275,18 +278,30 @@ originales del dataset y agrega:
   "name": "Nombre público",
   "persona": "Nombre del personaje",
   "provider": {
-    "type": "vertex_gemini | gemini | anthropic | openai | ollama | openai_compat",
+    "type": "vertex_gemini | gemini | anthropic | openai | openai_compat | llama_cpp",
     "model": "gemini-2.5-pro",
     "api_key_env": "GEMINI_API_KEY",
     "api_key_override": "",
     "base_url": "",
     "vertex_project": "mi-proyecto-gcp",
-    "vertex_location": "us-central1"
+    "vertex_location": "us-central1",
+    "model_path": "",
+    "n_ctx": 4096
   },
   "generation_config": { "temperature": 0.1, "max_output_tokens": 2048 },
   "system_prompt": "..."
 }
 ```
+
+**Campos específicos de `llama_cpp`:**
+- `model_path`: ruta relativa al `.gguf` dentro del proyecto (ej: `models/llama-3.2-3b-instruct-q4_k_m.gguf`).
+- `n_ctx`: tamaño de la ventana de contexto (default 4096).
+- GPU offloading es **automático**: si `llama-cpp-python` detecta GPU, se usan todas las capas (`n_gpu_layers=-1`); si no, CPU (`n_gpu_layers=0`). No se persiste en config.
+- No requiere `api_key_env`, `base_url` ni `vertex_project`.
+
+**Nota sobre Ollama:** el provider `ollama` fue eliminado del frontend. Quien necesite
+Ollama puede usar `openai_compat` con `base_url=http://localhost:11434/v1`. El tab
+"Ollama (local)" fue reemplazado por "Local (GGUF)" que usa `llama_cpp` nativo.
 
 **Regla de secretos:** `api_key_override` existe por compatibilidad histórica pero
 no debe usarse para configuraciones nuevas. Las claves reales viven en
@@ -304,9 +319,9 @@ AES-256-GCM; el archivo visible solo contiene metadatos técnicos (`salt`, `nonc
 - Webapp: pestaña `/arbiters`, botones **Importar** y **Exportar**.
 - CLI:
   ```bash
-  python main_label.py --export-arbiters backup.lfarb
-  python main_label.py --import-arbiters backup.lfarb
-  python main_label.py --import-arbiters backup.lfarb --replace-arbiters
+  python main_cli.py --export-arbiters backup.lfarb
+  python main_cli.py --import-arbiters backup.lfarb
+  python main_cli.py --import-arbiters backup.lfarb --replace-arbiters
   ```
 
 La importación por defecto fusiona por ID y conserva los demás árbitros. Con
@@ -345,7 +360,7 @@ Si `text_column` no existe en el archivo, el pipeline termina con error descript
 | Parámetro | Default | Descripción |
 |---|---|---|
 | `free_only_mode` | `false` | Estado actual para pruebas; si se activa, bloquea proveedores fuera de lista blanca |
-| `allowed_provider_types` | `["gemini","vertex_gemini","anthropic","ollama","openai_compat"]` | Lista blanca de proveedores autorizados |
+| `allowed_provider_types` | `["gemini","vertex_gemini","anthropic","openai","openai_compat","llama_cpp"]` | Lista blanca de proveedores autorizados |
 | `allow_remote_openai_compat` | `false` | Bloquea endpoints OpenAI-compat remotos |
 | `max_total_tokens` | `0` | Límite global de tokens (0 = sin límite) |
 | `pause_on_quota_error` | `true` | Pausar ante error de cuota |
@@ -453,6 +468,14 @@ OPENAI_API_KEY=...           # Para proveedor "openai"
 # Vertex AI (no requiere API key — usa ADC)
 GOOGLE_CLOUD_PROJECT=cloud-computing-cybersec-inaoe
 VERTEX_LOCATION=us-central1
+# GOOGLE_APPLICATION_CREDENTIALS se detecta automáticamente desde secrets/*.json
+
+# HuggingFace (para descarga rápida de modelos GGUF)
+HF_TOKEN=hf_xxx...           # Sin token: ~200-300 KB/s. Con token: varios MB/s
+
+# Seguridad — OBLIGATORIO si la app está expuesta en internet
+LABELFORGE_PASSWORD=...      # Sin esto: solo localhost. Con esto: Basic Auth en red.
+LABELFORGE_SECRET_KEY=...    # Clave Flask. Generar: python -c "import secrets; print(secrets.token_hex(32))"
 
 # Servidor web (opcionales)
 # LABELFORGE_HOST=127.0.0.1
@@ -469,10 +492,10 @@ Las claves pueden editarse manualmente o guardarse desde las interfaces:
   `secrets/secrets.env` y se refresca la grilla de modelos.
 - CLI:
   ```bash
-  python main_label.py --set-provider-key gemini
-  python main_label.py --set-provider-key anthropic
-  python main_label.py --set-provider-key openai
-  python main_label.py --set-provider-key openai_compat --base-url http://localhost:11434/v1
+  python main_cli.py --set-provider-key gemini
+  python main_cli.py --set-provider-key anthropic
+  python main_cli.py --set-provider-key openai
+  python main_cli.py --set-provider-key openai_compat --base-url http://localhost:11434/v1
   ```
 
 Mapa de variables por proveedor:
@@ -484,7 +507,7 @@ Mapa de variables por proveedor:
 | `openai` | `OPENAI_API_KEY` |
 | `openai_compat` | `OPENAI_API_KEY` |
 | `vertex_gemini` | No usa API key directa; usa ADC/GCP |
-| `ollama` | Normalmente no usa API key |
+| `llama_cpp` | No usa API key; el modelo es un archivo `.gguf` local |
 
 ### Rate limits por proveedor/modelo
 
@@ -494,11 +517,12 @@ no deben duplicar tablas ni reglas de throttling.
 
 - `gemini`: usa perfiles publicados de Gemini API/AI Studio cuando hay match por
   modelo o familia (`limit_kind="published"`).
-- `vertex_gemini`, `anthropic`, `openai`, `openai_compat` y `ollama`: usan perfiles
+- `vertex_gemini`, `anthropic`, `openai`, `openai_compat`: usan perfiles
   por modelo/familia como fallback conservador (`limit_kind="account_dependent"`).
-  Sus cuotas reales dependen de cuenta, proyecto, región, tier, organización,
-  proveedor compatible o hardware local, por lo que la UI debe mostrarlas como
-  orientativas y ajustables.
+  Sus cuotas reales dependen de cuenta, proyecto, región, tier, organización o
+  proveedor compatible, por lo que la UI debe mostrarlas como orientativas.
+- `llama_cpp`: sin rate limits. El backend retorna `limit_kind="local"` y la UI
+  oculta la sección de rate limits para árbitros de este tipo.
 
 ---
 
@@ -509,40 +533,138 @@ no deben duplicar tablas ni reglas de throttling.
 git clone https://github.com/lbustio/LabelForge.git
 cd LabelForge
 
-# 2. Crear entorno (opción A: Conda — recomendado)
-conda env create -f environment.yml
-conda activate LabelForge
-
-# 2. Crear entorno (opción B: pip)
+# 2. Crear entorno virtual (pip — recomendado para control de backends locales)
 python -m venv .venv
 source .venv/bin/activate   # Linux/macOS
 .venv\Scripts\activate      # Windows
-pip install -r requirements.txt
 
-# 3. Configurar variables de entorno
+# 3. Ejecutar el script de setup de hardware (OBLIGATORIO antes de arrancar)
+#    Detecta CPU/GPU/NPU, instala las dependencias base y el backend de
+#    inferencia local óptimo para este equipo. Loguea todo en logs/setup_*.log
+python setup_env.py
+
+# 4. Verificar que el setup terminó sin errores (el propio script lo indica)
+#    Si hubo errores → revisar logs/setup_YYYYMMDD_HHMMSS.log antes de continuar
+
+# 5. Configurar variables de entorno
 cp secrets.env.example secrets/secrets.env
 # Editar secrets/secrets.env con las API keys correspondientes
 
-# 4. Autenticar Vertex AI (si se usan árbitros vertex_gemini)
-# Opción A: service account JSON, sin login interactivo local
-set GOOGLE_APPLICATION_CREDENTIALS=secrets\service-account.json
+# 6. Autenticar Vertex AI (si se usan árbitros vertex_gemini)
+# Opción A: service account JSON
+set GOOGLE_APPLICATION_CREDENTIALS=secrets\service-account.json   # Windows
+export GOOGLE_APPLICATION_CREDENTIALS=secrets/service-account.json  # Linux/macOS
 
 # Opción B: Google Cloud CLI
 gcloud auth application-default login
 gcloud auth application-default set-quota-project cloud-computing-cybersec-inaoe
 
-# 5. Verificar instalación
+# 7. Verificar instalación
 python -m unittest tests/test_pipeline.py
 
-# 6. Arrancar la webapp
+# 8. Arrancar la webapp
 python main_webapp.py
 # Abrir http://127.0.0.1:7860 en el navegador
 
 # O ejecutar el pipeline CLI directamente
-python main_label.py --limit 10
+python main_cli.py --limit 10
 ```
 
+**Nota:** `main_webapp.py` y `main_cli.py` verifican al arrancar que `models/hw_profile.json`
+existe y tiene `setup_ok = true`. Si no, abortan con instrucción de ejecutar `setup_env.py`.
+
 ---
+
+## 11b. Convenciones de logging
+
+Todo el proyecto usa **un único formato** de logging para que los logs del pipeline,
+del setup y de cualquier módulo futuro sean coherentes y filtrables del mismo modo.
+
+### Formato estándar
+
+```python
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_PATH, encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
+)
+```
+
+Ejemplo de línea real:
+```
+2026-06-16 02:32:09,029 [INFO] Config cargado: 3 arbitros, 5 principios
+```
+
+### Reglas que aplican a todos los módulos
+
+| Regla | Detalle |
+|---|---|
+| Formato único | `%(asctime)s [%(levelname)s] %(message)s` — sin variaciones |
+| Directorio único | `logs/` — tanto runs como setup |
+| Nomenclatura | `run_YYYYMMDD_HHMMSS.log` / `setup_YYYYMMDD_HHMMSS.log` |
+| Dual output | `FileHandler` (archivo) + `StreamHandler` (consola) siempre |
+| Secciones | `=== NOMBRE DE SECCIÓN ===` para marcar fases |
+| Loggers ruidosos | Silenciar al nivel WARNING: `httpx`, `httpcore`, `anthropic`, `openai`, `google`, `pip`, `urllib3` |
+| Subprocesos | Salida de `pip install` capturada línea a línea → escrita como `[INFO]`; errores como `[ERROR]` con stderr completo |
+| Niveles | `DEBUG` para trazas internas, `INFO` para flujo normal, `WARNING` para degradaciones recuperables, `ERROR` para fallos |
+
+### Logging del servidor Flask (`webapp/app.py`)
+
+El servidor Flask usa un logger dedicado `labelforge.http` (con su propio `StreamHandler`)
+que **reemplaza** el access log ruidoso de Werkzeug:
+
+```
+# Antes (Werkzeug por defecto — inútil):
+127.0.0.1 - - [19/Jun/2026 20:24:03] "GET / HTTP/1.1" 200 -
+
+# Ahora (formato del proyecto):
+2026-06-19 20:24:03,123 [INFO]  GET   /                          200  (12ms)
+2026-06-19 20:24:05,456 [INFO]  POST  /api/arbiters              201  (8ms)
+2026-06-19 20:24:56,789 [WARNING] GET /api/nonexistent           404  (1ms)
+```
+
+Implementación en `webapp/app.py`:
+- `logging.getLogger("werkzeug").setLevel(logging.ERROR)` — silencia el access log de Werkzeug
+- `@app.before_request` → guarda `g._t0 = time.perf_counter()`
+- `@app.after_request` → loguea `METHOD /path → STATUS (Xms)` con nivel INFO/WARNING/ERROR según código
+- Filtra automáticamente `/static/` y `/favicon.ico`; silencia 304 (caché)
+
+### Secciones estándar del log de setup (`setup_env.py`)
+
+```
+=== LABELFORGE SETUP ===
+=== DETECTANDO HARDWARE ===
+=== INSTALANDO REQUIREMENTS BASE ===
+=== INSTALANDO BACKEND NPU (OpenVINO) ===       # si aplica
+=== INSTALANDO llama-cpp-python ===
+=== VERIFICANDO IMPORTS CRITICOS ===
+=== VERIFICANDO DIRECTORIOS DEL PROYECTO ===
+=== ESCRIBIENDO hw_profile.json ===
+=== RESUMEN FINAL ===
+```
+
+**Flujo de `setup_env.py` (post-2026-06-19 fix):**
+- `install_base_requirements()` filtra `llama-cpp-python` del requirements.txt con archivo temporal antes de pasárselo a pip — evita intentar compilarlo sin MSVC
+- El flujo **nunca aborta** por fallos de pip: loguea error y continúa. `hw_profile.json` **siempre** se escribe aunque `llama-cpp-python` falle
+- Para CUDA (Windows): prueba wheels precompiladas en orden `cu126 → cu124 → cu121 → compilación desde fuente`. Detecta versión exacta de CUDA con `nvidia-smi` para elegir el índice correcto (`https://abetlen.github.io/llama-cpp-python/whl/cuXXX`). No requiere MSVC ni CMake si el wheel existe.
+
+### Parque de máquinas y su backend de inferencia local
+
+| Máquina | OS | GPU/NPU | Backend llama.cpp | Backend NPU |
+|---|---|---|---|---|
+| iMac i9 | macOS | AMD Radeon (PCIe) | Vulkan (MoltenVK) | — |
+| Servidor | Linux | NVIDIA A100 40 GB | CUDA | — |
+| Laptop | Windows | NVIDIA RTX 5050 8 GB VRAM, 23 GB RAM | CUDA (prebuilt wheel) | — |
+| PC desktop | Windows | Sin GPU dedicada | CPU (AVX2) | — |
+| ASUS NUC 14 PRO | Windows | Intel Arc + AI Boost | Vulkan | OpenVINO |
+
+**ASUS NUC — aclaración importante:** el Intel AI Boost NPU NO es soportado por
+`llama-cpp-python`. Se usa OpenVINO como ruta de inferencia independiente para el NPU.
+El Intel Arc GPU se usa vía Vulkan (o SYCL si oneAPI está disponible).
+La prioridad de selección en runtime: NPU (OpenVINO) → GPU (llama-cpp-python) → CPU.
 
 ## 12. Dependencias directas
 
@@ -550,10 +672,20 @@ python main_label.py --limit 10
 google-genai==2.8.0             # Gemini AI Studio
 google-cloud-aiplatform==1.157.0  # Vertex AI
 anthropic==0.109.1              # Claude
-openai==2.41.1                  # GPT + endpoints compatibles (Ollama, etc.)
+openai==2.41.1                  # GPT + endpoints compatibles (openai_compat)
 flask==3.1.3                    # Webapp
 python-dotenv==1.2.2            # Carga de secrets/secrets.env
+openpyxl                        # Lectura de archivos Excel (.xlsx)
+llama-cpp-python                # Modelos locales GGUF (provider llama_cpp)
+huggingface_hub                 # Descarga de modelos desde Hugging Face
+psutil                          # Detección de RAM y hardware del sistema
 ```
+
+**Nota sobre `llama-cpp-python`:** **no está en `requirements.txt`**. Lo instala `setup_env.py`
+según el hardware detectado. Para CUDA en Windows usa wheels precompiladas del índice
+`https://abetlen.github.io/llama-cpp-python/whl/cuXXX` (no requiere MSVC ni CMake).
+Para Metal (macOS) y ROCm (Linux AMD) compila desde fuente. La aplicación detecta
+automáticamente qué soporte GPU está disponible en tiempo de ejecución.
 
 No hay dependencias de análisis de datos (numpy, pandas, etc.) — las métricas de
 acuerdo están implementadas directamente en `scripts/agreement_metrics.py` con Python
@@ -587,6 +719,8 @@ safe_int(value, default=None)       # str/float → int, None si falla
 safe_float(value, default=None)     # cualquier → float, None si falla
 safe_binary_int(value)              # → 0, 1, o None
 number(value, default=0)            # → type(default)(value), o default si falla
+ensure_project_dirs(root: Path)     # crea logs/, output/, checkpoints/, models/, secrets/, scripts/, data/, archive/
+                                    # si no existen; retorna lista de Path creados; llamado al arrancar por ambos entrypoints
 ```
 
 ### `scripts/label_persuasion.py` — funciones clave
@@ -664,7 +798,7 @@ El puerto 5000 está ocupado por AirPlay Receiver en macOS 12+ Monterey. El 7860
 libre en macOS, Windows y Linux, y es reconocido en el ecosistema ML/AI (Gradio,
 HuggingFace Spaces). No requiere privilegios de root.
 
-### Por qué dos entrypoints (main_label.py y main_webapp.py)
+### Por qué dos entrypoints (main_cli.py y main_webapp.py)
 Separación de responsabilidades: el CLI no debe depender de Flask, y la webapp no
 debe ejecutar directamente el pipeline en el mismo proceso (usa un subproceso).
 
@@ -703,9 +837,9 @@ respuestas en versiones recientes de Gemini.
 - Soporte de entrada CSV y Excel con sheet y columna configurables (webapp + CLI)
 - Pestaña `/processing` corregida tras mezcla de JS legacy: ya no muestra código
   como texto y usa solo el flujo actual de drag & drop/upload
-- Webapp Flask con 38 endpoints, 5 páginas y streaming SSE
-- 4 árbitros configurados: 3 con Vertex AI (`gemini-2.5-pro`, `gemini-2.5-flash`)
-  y 1 con Anthropic Claude (`claude-haiku-4-5-20251001`)
+- Webapp Flask con 48 endpoints, 5 páginas y streaming SSE
+- 3 árbitros configurados: 1 Vertex AI (`arb1/gemini-2.5-pro`), 1 OpenAI (`arb3/gpt-4o`)
+  y 1 Anthropic Claude (`arb4/claude-sonnet-4-6`)
 - JSONDecodeError solucionado: `max_output_tokens` 256→2048 y thinking desactivado
   en gemini-2.5-flash (gemini-2.5-pro no soporta `thinking_budget=0`)
 - Controles de ejecución deshabilitados durante proceso activo en `/run`
@@ -731,9 +865,92 @@ respuestas en versiones recientes de Gemini.
 - Checkpoints y outputs de ejecuciones — excluidos del repo
 - Se harán públicos al concluir el estudio y publicar el paper
 
+### ✅ Completado también (2026-06-19) — soporte nativo de modelos locales GGUF
+
+Implementación completa de 10 pasos + 4 adiciones mid-sesión:
+
+1. `scripts/hw_detection.py` — detecta OS/CPU/RAM/GPU/NPU multiplataforma ✅
+2. `setup_env.py` — instala backends según HW, escribe `models/hw_profile.json`, loguea en `logs/setup_*.log` ✅
+3. `scripts/local_models.py` — catálogo dinámico (consulta Gemini+Anthropic+OpenAI en paralelo), cache, descarga HF ✅
+4. `scripts/label_persuasion.py` — `_call_local()`, `_call_llama_cpp()`, `_call_openvino()`, `PROVIDER_CALLERS["llama_cpp"]` ✅
+5. `scripts/provider_preflight.py` — `_check_llama_cpp()`: hw_profile + import + archivo .gguf ✅
+6. `scripts/rate_limits.py` — `limit_kind="local"` para `llama_cpp` (delay 0, sin límites) ✅
+7. `webapp/app.py` — `/api/local/hardware|recommended|cached|download|model`, carga hw_profile al arrancar ✅
+8. `webapp/templates/arbiters.html` — tab "Local (GGUF)" reemplaza "Ollama", modal de descarga con HW y recomendados ✅
+9. `main_cli.py` + `main_webapp.py` — `ensure_project_dirs()` + `_check_hw_profile_if_needed()` al arrancar ✅
+10. `.gitignore`, `requirements.txt`, `environment.yml` actualizados; paquetes instalados en venv ✅
+
+**Adiciones mid-sesión:**
+- `ensure_project_dirs(root)` en `scripts/utils.py` — crea los 8 directorios requeridos al arrancar ambos entrypoints
+- Catálogo GGUF dinámico: consulta 3 LLMs en paralelo (ThreadPoolExecutor), sintetiza por votos, TTL 7 días en `models/catalog_cache.json`; fallback a `_FALLBACK_CATALOG` si ningún LLM disponible
+- `scripts/local_models_config.json` — prompts del catálogo y selección de modelos LLM, editables sin tocar código
+- Versiones instaladas (conda env `LabelForge` en Windows): `psutil 7.2.2`, `huggingface_hub 1.20.1`. `llama-cpp-python` se instala por máquina vía `setup_env.py` (no se incluye en el entorno base). En iMac i9: `llama-cpp-python 0.3.30` con GPU offload activo (AMD Radeon Pro 580X via Metal).
+
+### ✅ Completado también (2026-06-19, sesión posterior) — fixes de setup, logging y modal GGUF
+
+**Bugs de `setup_env.py` corregidos:**
+- `requirements.txt` incluía `llama-cpp-python>=0.3.0` → pip intentaba compilarlo desde fuente sin MSVC → abortaba → `hw_profile.json` nunca se escribía. **Fix:** eliminado de requirements.txt; `install_base_requirements()` filtra la línea con archivo temporal.
+- El flujo llamaba `_abort()` ante fallos de pip, impidiendo que `hw_profile.json` se escribiera. **Fix:** `install_base_requirements()` retorna `bool`; el flujo principal siempre escribe `hw_profile.json` independientemente de errores parciales.
+- Para CUDA en Windows: antes intentaba compilar con `CMAKE_ARGS="-DGGML_CUDA=on"` sin MSVC. **Fix:** ahora prueba en orden wheels precompiladas `cu126 → cu124 → cu121` con `--prefer-binary`, detectando la versión de CUDA desde `nvidia-smi`. Compilación desde fuente solo como último recurso.
+
+**Logging del servidor Flask:**
+- Werkzeug access log silenciado; reemplazado por logger `labelforge.http` con formato del proyecto.
+- `before_request` + `after_request` hooks: loguean `METHOD /path → STATUS (Xms)` con nivel según código HTTP.
+- Filtro de ruido: `/static/`, `/favicon.ico`, 304 Not Modified no se loguean.
+
+**Modal de gestión de modelos GGUF (`arbiters.html`):**
+- `modal-dialog-scrollable` añadido: el modal tiene scrollbar interno.
+- Nueva sección "Modelos descargados": lista GGUFs en `models/` con botones eliminar y re-descargar.
+- Nueva sección "Descargar por nombre": campos repo_id + filename para descargar cualquier GGUF directamente desde HuggingFace.
+- `models/models.json` ahora persiste `repo_id` de cada modelo descargado (para el botón re-descargar).
+- `fits_in_memory` corregido: antes retornaba `False` para todos cuando `hw_profile.json` no existía (porque `effective_mem = 0 * 0.6 = 0`). Ahora:
+  - Si hw_profile existe: calcula fit real contra VRAM/RAM.
+  - Si hw_profile no existe: intenta obtener RAM de `psutil` (sistema en vivo) como fallback.
+  - Solo `None` (botón mostrado sin garantía) si absolutamente no hay datos de HW.
+  - En frontend: `fits_in_memory === false` → "No cabe" en rojo; `null` → botón Descargar (sin datos HW).
+- `catalog_cache.json` invalidado (tenía repos inventados por LLMs, e.g. `bartowski/Llama-3-8B-Instruct-GGUF` que no existe).
+- `hf_hub_download`: eliminado parámetro deprecado `local_dir_use_symlinks=False`.
+
+**Auto-ID de árbitros:**
+- Al abrir "Nuevo árbitro", el campo ID se pre-rellena con `arbX` donde X es el consecutivo del ID más alto existente (`arb1`, `arb3`, `arb4` → sugiere `arb5`).
+
+### ✅ Completado también (2026-06-19, sesión de seguridad) — hardening para despliegue en internet
+
+La app pasó de ser localhost-only a ser expuesta en internet. Se realizó una auditoría completa; los hallazgos con confianza ≥ 8/10 fueron corregidos.
+
+**Vulnerabilidades corregidas:**
+- **Path traversal en download:** `filename` del POST `/api/local/download` no validado → podía sobrescribir `secrets/secrets.env`. Fix: misma validación que el DELETE (`/`, `\`, `..`, extensión `.gguf`).
+- **Stored XSS en árbitros:** `a.name`, `a.persona`, `a.system_prompt`, `a.id`, `p.model`, `p.base_url` interpolados en `innerHTML` sin `escapeHtml()`. Fix: `escapeHtml()` aplicado a todos.
+- **Reflected XSS en panel HW:** campos del hardware profile interpolados en `innerHTML`. Fix: `escapeHtml()` en todos los campos del bloque de HW.
+- **SSRF via `base_url`:** campo del POST pasado directamente al SDK de OpenAI → GET a cualquier URL del servidor. Fix: `_validate_base_url()` bloquea esquemas no-http(s) e IPs link-local (169.254.x.x).
+- **Sin autenticación:** HTTP Basic Auth añadido globalmente. `LABELFORGE_PASSWORD` en secrets.env habilita acceso en red. Sin contraseña: solo localhost.
+- **Sin límite de upload:** `MAX_CONTENT_LENGTH = 50 MB`.
+- **Sin cabeceras de seguridad:** CSP, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff` en todas las respuestas HTML.
+
+**Falsos positivos descartados:**
+- Path traversal via `model_path`: `normalize_arbiter()` usa allowlist explícita — `model_path` se descarta en ingesta.
+- Sin auth para herramienta local: era por diseño (localhost-only). Ya no aplica.
+
+### 🔴 Vulnerabilidades pendientes — NO corregidas aún (ver bitácora para detalles)
+
+> **Importante:** estas vulnerabilidades están documentadas pero no corregidas. Leer la entrada de la bitácora del 2026-06-19 (parte 2) antes de abordarlas para no repetir el análisis.
+
+| ID | Descripción corta | Severidad | Archivo(s) |
+|---|---|---|---|
+| V-PEND-1 | `api_key_override` persiste en `arbiters_config.json` (git). Si se usa, la key queda en el repo. | Media | `scripts/arbiters_io.py` → `normalize_arbiter()` |
+| V-PEND-2 | `/api/provider-key` escribe API keys al disco. Sabotaje posible con auth comprometida. | Baja-media | `webapp/app.py` → `api_provider_key()` |
+| V-PEND-3 | Sin protección CSRF. Basic Auth en caché del navegador puede ser abusado cross-site. | Media | `webapp/app.py` — todos los endpoints POST/PUT/DELETE |
+
+**V-PEND-1 — solución propuesta:** en `normalize_arbiter()`, si `api_key_override` es no vacío, moverlo a `secrets/secrets.env` y vaciar el campo antes de persistir en JSON.
+
+**V-PEND-2 — solución propuesta:** que `/api/provider-key` solo funcione desde localhost, independientemente de la autenticación global.
+
+**V-PEND-3 — solución propuesta:** migrar de Basic Auth a session-based auth con cookies `SameSite=Strict` (bloquea CSRF por diseño), o añadir Flask-WTF con tokens CSRF.
+
 ### 🔜 Pendientes / Mejoras futuras identificadas
-- Ejecutar el pipeline completo sobre el dataset y obtener resultados finales
-- Analizar métricas agregadas de acuerdo inter-árbitros para el paper
+
+- Ejecutar el pipeline completo sobre el dataset y obtener resultados finales para el paper
+- Analizar métricas agregadas de acuerdo inter-árbitros (Fleiss/Cohen/Krippendorff)
 - Evaluar si agregar soporte para etiquetado con justificaciones en modo producción
 - Posible expansión a otras taxonomías o datasets
 
@@ -748,5 +965,5 @@ respuestas en versiones recientes de Gemini.
 
 ---
 
-*Última actualización: 2026-06-13 — métricas por entrada, frontera backend/frontend, colores unificados y badges separados para acuerdo observado + Fleiss Kappa.*
+*Última actualización: 2026-06-19 — corrección documental: árbitros actualizados (arb3 cambió a openai/gpt-4o), endpoint count corregido a 48, personas sincronizadas con arbiters_config.json, nota de versiones de paquetes por entorno aclarada.*
 

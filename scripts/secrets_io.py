@@ -1,5 +1,7 @@
+import json
 import os
 from pathlib import Path
+from typing import Optional
 
 
 PROVIDER_API_KEY_ENV = {
@@ -77,3 +79,45 @@ def set_secret_value(path: Path, key: str, value: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
     os.environ[key] = value
+
+
+def resolve_gcp_credentials(base_dir: Path) -> Optional[str]:
+    """
+    Garantiza que GOOGLE_APPLICATION_CREDENTIALS apunte a un archivo válido,
+    sin depender de rutas absolutas en secrets.env.
+
+    Orden de resolución:
+      1. Si ya está seteada y el archivo existe → se normaliza a absoluta.
+      2. Si está seteada con ruta relativa → se resuelve contra base_dir.
+      3. Si no está seteada o la ruta no existe → auto-detecta el primer
+         JSON de tipo service_account en secrets/.
+
+    Retorna la ruta absoluta resuelta, o None si no se encontró nada.
+    """
+    base_dir = Path(base_dir).resolve()
+    secrets_d = base_dir / "secrets"
+
+    current = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+    if current:
+        p = Path(current)
+        if not p.is_absolute():
+            p = base_dir / p
+        if p.exists():
+            resolved = str(p.resolve())
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = resolved
+            return resolved
+        # Ruta configurada pero no existe → caer a auto-detección
+
+    # Auto-detección: primer JSON de service_account en secrets/
+    if secrets_d.is_dir():
+        for candidate in sorted(secrets_d.glob("*.json")):
+            try:
+                data = json.loads(candidate.read_text(encoding="utf-8"))
+                if data.get("type") == "service_account":
+                    resolved = str(candidate.resolve())
+                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = resolved
+                    return resolved
+            except Exception:
+                continue
+
+    return None

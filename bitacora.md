@@ -2065,3 +2065,708 @@ con 4 árbitros hay riesgo de empate 2-2 y se necesitaría mayoría ponderada o 
 **Verificación:**
 - `python -c "import json; json.load(open('scripts/arbiters_config.json'))"` — JSON válido.
 - Árbitros activos confirmados: `['arb1', 'arb3', 'arb4']`.
+
+---
+
+### 2026-06-19 — Diseño de soporte nativo para modelos locales GGUF (llama-cpp-python)
+
+**Autor/agente:** Claude Sonnet 4.6 (sesión de diseño — SIN implementación aún).
+
+**Objetivo:** permitir que cualquier árbitro use un modelo GGUF local sin depender de
+servidores externos (Ollama, LM Studio, llama.cpp server, etc.). El usuario solo
+apunta a un archivo `.gguf` y el backend lo carga directamente en el mismo proceso Python.
+
+**Contexto / motivación:**
+
+Los árbitros actuales usan APIs de nube (Gemini Vertex, Anthropic, OpenAI). Para
+maximizar la independencia de modelos y reducir costes en producción, se quiere añadir
+árbitros locales basados en modelos cuantizados (.gguf). Se descartaron los servidores
+externos (Ollama, LM Studio, llama.cpp server) porque agregan complejidad de
+configuración y dependencias fuera del proyecto, especialmente cuando otros usuarios
+del equipo repliquen el entorno.
+
+**Decisiones de diseño tomadas:**
+
+1. **Nuevo provider `llama_cpp`** en `label_persuasion.py`.
+   - Usa la librería `llama-cpp-python` directamente en proceso.
+   - `llama-cpp-python` se importa como dependencia **opcional**: solo se carga si
+     existe al menos un árbitro con `type: llama_cpp`. Así no rompe entornos que no
+     usan modelos locales.
+   - Se añade a `requirements.txt` y `environment.yml` para que se instale al crear
+     el entorno desde cero.
+
+2. **GPU auto-detectada, transparente al usuario.**
+   - Al cargar el modelo, se detecta si `llama-cpp-python` fue compilado con soporte
+     GPU (`llama_cpp.llama_supports_gpu_offload()`).
+   - Si hay GPU: `n_gpu_layers = -1` (todas las capas en GPU).
+   - Si no hay GPU: `n_gpu_layers = 0` (CPU only).
+   - El usuario no configura este parámetro; el backend lo resuelve solo.
+   - `n_ctx` (ventana de contexto) tiene default 4096, configurable por árbitro.
+
+3. **Cache de modelo cargado en memoria** (`_LLAMA_MODEL_CACHE` dict global).
+   - Cargar un GGUF tarda entre 5 y 30 segundos. Se carga una vez y se reutiliza.
+   - La clave del cache es `(model_path, n_ctx)`.
+   - En el contexto de CLI (proceso independiente): el cache vive mientras el proceso
+     corre — comportamiento correcto.
+   - En el contexto de webapp (subproceso): cada run carga el modelo una sola vez al
+     inicio. Aceptable porque la carga es pequeña comparada con la duración del run.
+
+4. **Tab "Ollama (local)" reemplazado por "Local (GGUF)"** en `arbiters.html`.
+   - Ollama desaparece del frontend (queda disponible vía `openai_compat` para quien
+     lo necesite, pero sin tab propio).
+   - El nuevo tab muestra los modelos GGUF del directorio de cache como una grilla.
+   - No tiene sección de API key ni rate limits (modelos locales no tienen límites).
+   - Tiene un botón "Descargar modelos" que abre el flujo de descarga asistida.
+   - El "modelo seleccionado" es el nombre del archivo `.gguf`.
+
+5. **Cache de modelos en `BASE_DIR/models/`** (dentro del proyecto, no en `~/.cache`).
+   - Portable y visible: el usuario sabe exactamente dónde están los archivos.
+   - Incluye `models/models.json` como índice con metadata (nombre, tamaño, repo HF, fecha).
+   - El directorio `models/` se añade a `.gitignore`.
+
+6. **Inventario de hardware en arranque de la webapp.**
+   - Al levantar la webapp, si el directorio `models/` está vacío, se muestra un banner
+     no intrusivo: "No tienes modelos locales. [Configurar]".
+   - El flujo de setup detecta: RAM total, GPU y VRAM disponible, CPU cores.
+   - Con ese inventario, el backend sugiere modelos que caben en el hardware del usuario
+     (ver tabla de criterios abajo).
+   - La descarga usa `huggingface_hub` en background con progreso visible (SSE o polling).
+   - Una vez descargados, los modelos aparecen en el grid del tab Local.
+
+**Tabla de criterios de recomendación de modelos:**
+
+| RAM/VRAM disponible | Modelos recomendados |
+|---|---|
+| ≥ 8 GB GPU VRAM | Llama 3.2 8B Q5_K_M, Mistral 7B Q5_K_M |
+| 4–8 GB GPU VRAM | Llama 3.2 3B Q8_0, Phi-3 Mini Q8_0 |
+| < 4 GB GPU o solo CPU con ≥ 16 GB RAM | Llama 3.2 8B Q4_K_M |
+| Solo CPU con 8–16 GB RAM | Llama 3.2 3B Q4_K_M, Mistral 7B Q4_K_M |
+| Solo CPU con < 8 GB RAM | Llama 3.2 1B Q8_0, Phi-3 Mini Q4_K_M |
+
+Fuente de descarga: Hugging Face (repos curados: bartowski, lmstudio-community).
+
+**Config JSON del árbitro con `llama_cpp`:**
+
+```json
+{
+  "type": "llama_cpp",
+  "model": "llama-3.2-3b-instruct-q4_k_m.gguf",
+  "model_path": "models/llama-3.2-3b-instruct-q4_k_m.gguf",
+  "n_ctx": 4096,
+  "api_key_env": "",
+  "api_key_override": "",
+  "base_url": "",
+  "vertex_project": "",
+  "vertex_location": "us-central1"
+}
+```
+
+`model` = nombre del archivo (para UI y logs). `model_path` = ruta relativa al GGUF.
+`n_ctx` = tamaño de contexto; la GPU offloading es automática y no se guarda en config.
+
+**Nuevas piezas a crear/modificar:**
+
+| Pieza | Tipo | Descripción |
+|---|---|---|
+| `scripts/local_models.py` | Nuevo módulo | HW detection, recomendaciones, descarga vía huggingface_hub, índice de cache |
+| `scripts/label_persuasion.py` | Modificar | `_call_llama_cpp()`, `_LLAMA_MODEL_CACHE`, `_detect_gpu_layers()`, entrada en `PROVIDER_CALLERS` |
+| `scripts/provider_preflight.py` | Modificar | Preflight para `llama_cpp`: verificar que el archivo existe y `llama-cpp-python` está instalado |
+| `scripts/rate_limits.py` | Modificar | Retornar "sin límites" para `llama_cpp` |
+| `webapp/app.py` | Modificar | Nuevos endpoints: `/api/local/hardware`, `/api/local/recommended`, `/api/local/cached`, `/api/local/download` (SSE de progreso), `/api/models` ampliar para `llama_cpp` |
+| `webapp/templates/arbiters.html` | Modificar | Tab "Ollama" → "Local (GGUF)", nuevo panel de ruta de modelo, sin API key, sin rate limits, botón de descarga |
+| `webapp/templates/base.html` | Posible | Añadir enlace o ruta a setup local si aplica |
+| `requirements.txt` | Modificar | Añadir `llama-cpp-python`, `huggingface_hub`, `psutil` |
+| `environment.yml` | Modificar | Mismo |
+| `.gitignore` | Modificar | Añadir `models/` |
+
+**Pendiente (implementación):**
+
+Todo lo anterior está decidido en diseño pero **no implementado**. La próxima sesión
+debe comenzar por implementar en este orden:
+1. `scripts/local_models.py` (módulo base de detección y cache).
+2. Backend `_call_llama_cpp()` + cache + `PROVIDER_CALLERS`.
+3. Preflight y rate limits para `llama_cpp`.
+4. Endpoints en `webapp/app.py`.
+5. Frontend: tab Local (GGUF) + flujo de descarga.
+
+**Criterios de calidad para la implementación:**
+- `llama-cpp-python` debe ser import opcional (try/except en el módulo).
+- El cache de modelo debe sobrevivir múltiples claims dentro del mismo run.
+- El flujo de descarga debe poder cancelarse sin dejar el archivo corrupto en cache.
+- El preflight debe dar un mensaje claro si el archivo `.gguf` no existe o está incompleto.
+
+---
+
+### 2026-06-19 — Diseño de setup_env.py: instalación guiada por hardware con prioridad NPU → GPU → CPU
+
+**Autor/agente:** Claude Sonnet 4.6 (sesión de diseño — SIN implementación aún).
+
+**Objetivo:** crear un script de setup que se ejecuta UNA VEZ por máquina, antes de
+arrancar cualquier entrypoint (`main_webapp.py` o `main_label.py`). El script detecta
+el hardware disponible, instala el backend de inferencia más eficiente para ese hardware
+y deja un perfil persistente en `models/hw_profile.json`. Los entrypoints leen ese
+perfil al arrancar; si no existe o tiene errores, abortan con un mensaje claro.
+
+**Contexto del parque de máquinas objetivo:**
+
+| Máquina | OS | GPU/NPU | RAM/VRAM | Uso |
+|---|---|---|---|---|
+| iMac i9 | macOS | AMD Radeon (PCIe) | 8 GB RAM | webapp |
+| Servidor | Linux | NVIDIA A100 | 40 GB VRAM | CLI |
+| Laptop | Windows | RTX 4050 + AMD CPU | 8 GB VRAM | webapp |
+| PC desktop | Windows | Sin GPU dedicada | 24 GB RAM | webapp |
+| ASUS NUC 14 PRO | Windows | Intel Arc + Intel NPU | 24 GB compartida | webapp |
+
+**Prioridad de hardware decidida: NPU → GPU → CPU**
+
+El script intenta instalar soporte en ese orden. Si un nivel falla (error de instalación,
+HW no detectado, driver ausente), baja al siguiente y lo registra en el log.
+
+**Decisión crítica: Camino B — dos rutas de inferencia**
+
+- **Ruta NPU:** Intel AI Boost (NUC) → `openvino` + `optimum[openvino]`
+  El NPU de Intel Core Ultra NO es soportado por `llama-cpp-python`. Requiere OpenVINO.
+  Se añade `_call_openvino()` en `label_persuasion.py` como ruta de inferencia alternativa.
+- **Ruta GPU/CPU:** todos los demás casos → `llama-cpp-python` compilado para el backend
+  correcto según el hardware detectado (CUDA / ROCm / Vulkan / Metal / CPU).
+
+El dispatch en `PROVIDER_CALLERS["llama_cpp"]` llama a `_call_local()`, que lee
+`hw_profile.json` y decide qué ruta usar.
+
+**Mapa de hardware → backend de llama-cpp-python:**
+
+| Hardware | Backend | Comando de instalación |
+|---|---|---|
+| NVIDIA GPU | CUDA | `pip install llama-cpp-python --extra-index-url .../whl/cu121` |
+| AMD GPU + Linux | ROCm | `CMAKE_ARGS="-DGGML_HIPBLAS=on" pip install llama-cpp-python` |
+| Intel Arc | Vulkan | `pip install llama-cpp-python --extra-index-url .../whl/vulkan` |
+| AMD Radeon macOS | Vulkan (MoltenVK) | mismo wheel Vulkan |
+| Apple Silicon | Metal | `CMAKE_ARGS="-DGGML_METAL=on" pip install llama-cpp-python` |
+| Sin GPU / fallback | CPU | `pip install llama-cpp-python` |
+
+**Convención de logging del setup — IDÉNTICA al pipeline existente:**
+
+El sistema de logging del pipeline (`label_persuasion.py`) usa:
+- Formato: `%(asctime)s [%(levelname)s] %(message)s`
+- Timestamp con milisegundos: `2026-06-16 02:32:09,029 [INFO] mensaje`
+- Secciones delimitadas: `=== NOMBRE DE SECCIÓN ===`
+- Dual output: `FileHandler` (archivo) + `StreamHandler` (consola)
+- Loggers ruidosos silenciados al nivel WARNING: `httpx`, `httpcore`, `pip`, `urllib3`
+- Directorio: `logs/` (ya gestionado por el pipeline)
+- Nombre del archivo: `setup_YYYYMMDD_HHMMSS.log` (análogo a `run_YYYYMMDD_HHMMSS.log`)
+
+El setup sigue las mismas reglas. No hay un formato alternativo — todo al mismo `logs/`.
+
+**Secciones del log de setup (con delimitadores `===`):**
+
+```
+=== LABELFORGE SETUP ===
+2026-06-19 10:00:00,000 [INFO] Python 3.12.4 — OK
+2026-06-19 10:00:00,010 [INFO] Entorno virtual activo: /path/to/.venv
+
+=== DETECTANDO HARDWARE ===
+2026-06-19 10:00:00,020 [INFO] OS: Windows 11
+2026-06-19 10:00:00,030 [INFO] CPU: Intel Core Ultra i7-155H — 16 cores — AVX2: sí
+2026-06-19 10:00:00,040 [INFO] RAM: 32.0 GB
+2026-06-19 10:00:00,050 [INFO] NPU detectado: Intel AI Boost (Neural Processing Unit)
+2026-06-19 10:00:00,060 [INFO] GPU detectada: Intel Arc Xe-LPG — VRAM compartida ~24 GB
+
+=== INSTALANDO DEPENDENCIAS BASE ===
+2026-06-19 10:00:01,000 [INFO] pip install -r requirements.txt
+2026-06-19 10:00:15,000 [INFO] Dependencias base instaladas correctamente
+
+=== INSTALANDO BACKEND NPU (OpenVINO) ===
+2026-06-19 10:00:15,010 [INFO] Intentando instalar openvino + optimum[openvino]...
+2026-06-19 10:00:45,000 [INFO] OpenVINO 2024.5.0 instalado — OK
+
+=== INSTALANDO BACKEND GPU (llama-cpp-python Vulkan) ===
+2026-06-19 10:00:45,010 [INFO] Intentando instalar llama-cpp-python con backend Vulkan...
+2026-06-19 10:01:00,000 [INFO] llama-cpp-python 0.3.x instalado — GPU offload: sí
+
+=== VERIFICANDO INSTALACIÓN ===
+2026-06-19 10:01:00,010 [INFO] import llama_cpp — OK
+2026-06-19 10:01:00,020 [INFO] llama_cpp.llama_supports_gpu_offload() — True
+2026-06-19 10:01:00,030 [INFO] import openvino — OK
+2026-06-19 10:01:00,040 [INFO] Perfil guardado en models/hw_profile.json
+
+=== RESUMEN ===
+2026-06-19 10:01:00,050 [INFO] Backend NPU : OpenVINO 2024.5.0 — ACTIVO
+2026-06-19 10:01:00,060 [INFO] Backend GPU : llama-cpp-python Vulkan — ACTIVO
+2026-06-19 10:01:00,070 [INFO] Backend CPU : llama-cpp-python CPU — DISPONIBLE (fallback)
+2026-06-19 10:01:00,080 [INFO] Setup completado sin errores. Puedes arrancar main_webapp.py o main_label.py
+```
+
+Si una instalación falla:
+```
+2026-06-19 10:00:50,000 [WARNING] OpenVINO no se pudo instalar: <traceback resumido>
+2026-06-19 10:00:50,010 [WARNING] Backend NPU desactivado — usando GPU como mejor opción disponible
+```
+
+**Salida del subprocess de pip:** capturada línea a línea y escrita como `[INFO]` al log.
+Los errores de pip van como `[ERROR]` con el stderr completo.
+
+**Artefacto `models/hw_profile.json`:**
+
+```json
+{
+  "setup_date": "2026-06-19T10:01:00",
+  "setup_log": "logs/setup_20260619_100000.log",
+  "os": "Windows",
+  "python_version": "3.12.4",
+  "cpu": {
+    "vendor": "Intel", "model": "Core Ultra i7-155H",
+    "cores_physical": 14, "avx2": true, "avx512": false
+  },
+  "ram_gb": 32.0,
+  "npu": {
+    "detected": true, "vendor": "Intel", "type": "AI Boost",
+    "backend": "openvino", "ok": true, "version": "2024.5.0"
+  },
+  "gpu": {
+    "detected": true, "vendor": "Intel", "name": "Arc Xe-LPG",
+    "vram_gb": null, "shared_memory": true,
+    "backend": "vulkan", "ok": true
+  },
+  "best_backend": "npu",
+  "setup_ok": true
+}
+```
+
+**Integración con los entrypoints:**
+
+`main_webapp.py` y `main_label.py` verifican al arrancar:
+1. `models/hw_profile.json` existe → si no: error + instrucción de ejecutar `setup_env.py`
+2. `setup_ok == true` → si no: error + referencia al log de setup
+3. Si OK → `local_models.py` carga los parámetros del perfil sin re-detectar nada
+
+**Nuevas piezas a crear/modificar (adicional a las ya listadas):**
+
+| Pieza | Tipo | Descripción |
+|---|---|---|
+| `setup_env.py` | Nuevo — raíz | Script principal de setup; detecta HW, instala, verifica, escribe hw_profile.json |
+| `scripts/hw_detection.py` | Nuevo módulo | Detección de OS/CPU/RAM/GPU/NPU; usado por setup_env.py y local_models.py en runtime |
+| `main_webapp.py` | Modificar | Verificar hw_profile.json al arrancar antes de importar la app Flask |
+| `main_label.py` | Modificar | Mismo chequeo |
+| `logs/setup_*.log` | Artefacto | Generado por setup_env.py con formato idéntico al de los run logs |
+| `models/hw_profile.json` | Artefacto | Perfil persistente del HW + backends instalados |
+| `.gitignore` | Modificar | Añadir `models/hw_profile.json` (es local por máquina) |
+
+**Criterios de calidad para la implementación del setup:**
+- El script debe funcionar en los tres OS sin dependencias de shell externas (solo stdlib + lo que instala).
+- La captura de salida de pip debe ser línea a línea (no buffered) para que el log muestre progreso real.
+- Si el entorno virtual no está activo, abortar con error claro antes de instalar nada.
+- Un segundo `python setup_env.py` debe ser idempotente: detectar que el backend ya está instalado y verificarlo sin reinstalar (a menos que `--force` se pase).
+- Todo error debe quedar en el log; la consola solo muestra resumen final (+ errores).
+
+**Pendiente (implementación):**
+
+Completo en diseño. Implementar en el orden del todos.md actualizado.
+
+---
+
+### 2026-06-19 — Implementación completa: soporte nativo GGUF, setup de hardware y catálogo dinámico
+
+**Autor/agente:** Claude Sonnet 4.6.
+
+**Objetivo:** implementar los 10 pasos del plan diseñado en las entradas anteriores de esta fecha, más las adiciones surgidas durante la sesión.
+
+**Pasos implementados:**
+
+1. **`scripts/hw_detection.py`** (nuevo): detección multiplataforma de OS/CPU/RAM/GPU/NPU.
+   - GPU: NVIDIA (`nvidia-smi`) → AMD Linux (`rocm-smi`) / Windows (WMI/registry) → Intel Arc (WMI/`lspci`) → Apple Silicon (`sysctl`) → ATI Radeon macOS (`system_profiler`).
+   - NPU: WMI query para "Neural"/"AI Boost" en Windows, `lspci` en Linux.
+   - Función `detect_all()` retorna dict completo compatible con `hw_profile.json`.
+
+2. **`setup_env.py`** (nuevo, raíz): script de setup único por máquina.
+   - Logging idéntico al pipeline: `%(asctime)s [%(levelname)s] %(message)s`, FileHandler + StreamHandler, `logs/setup_YYYYMMDD_HHMMSS.log`.
+   - Flujo: verificar Python ≥3.10 → verificar venv → detectar HW → instalar `requirements.txt` base → instalar backend NPU (OpenVINO, opcional) → instalar `llama-cpp-python` con el backend correcto → verificar imports → `ensure_project_dirs()` → escribir `models/hw_profile.json` → imprimir resumen.
+   - Flag `--force` para reinstalar aunque ya esté hecho.
+   - `_LLAMA_INSTALL_MAP`: dict `backend → (env_vars, pip_args)` para CUDA/ROCm/Metal/Vulkan/CPU.
+
+3. **`scripts/local_models.py`** (nuevo): módulo central de modelos locales.
+   - `_LLAMA_MODEL_CACHE: dict = {}` + `_cache_lock = threading.Lock()` — cache thread-safe de instancias Llama.
+   - `build_dynamic_catalog(hw_profile, force)`: consulta Gemini, Anthropic y OpenAI en paralelo (`ThreadPoolExecutor(max_workers=3)`), sintetiza por número de votos, cache 7 días en `models/catalog_cache.json`, fallback a `_FALLBACK_CATALOG` si ningún LLM disponible.
+   - `recommended_models(hw_profile, force_refresh)`: filtra por `effective_mem`, ordena por fits/votos/tamaño.
+   - `get_or_load_llama(model_path, n_ctx)`: carga con `n_gpu_layers=-1` si hay soporte GPU, `n_gpu_layers=0` si no.
+   - `download_model(repo_id, filename, expected_sha256)`: `hf_hub_download()` + verificación SHA-256.
+   - Lectura de `n_layers` directamente del header binario GGUF (sin cargar el modelo completo).
+
+4. **`scripts/label_persuasion.py`** (modificado):
+   - `_call_llama_cpp(arbiter, prompt_user)`: import opcional con `try/except`, cache vía `get_or_load_llama()`, `create_chat_completion()` con `response_format={"type":"json_object"}`.
+   - `_call_openvino(arbiter, prompt_user)`: import opcional de `optimum.intel.OVModelForCausalLM`, ruta NPU.
+   - `_call_local(arbiter, prompt_user)`: dispatcher que lee `hw_profile.json`; si `best_backend == "npu"` intenta OpenVINO primero, cae a `llama_cpp` si falla.
+   - `PROVIDER_CALLERS["llama_cpp"] = _call_local`.
+   - En `call_arbiter()`: `if prov_type != "llama_cpp": rate_limiter.wait()` — no hay delay para modelos locales.
+
+5. **`scripts/provider_preflight.py`** (modificado):
+   - `_check_llama_cpp(arb_id, provider)`: verifica que `hw_profile.json` exista y `setup_ok=true`, que `llama_cpp` sea importable, y que el `model_path` exista como archivo `.gguf`. Mensaje accionable si algo falta.
+
+6. **`scripts/rate_limits.py`** (modificado):
+   - `get_rate_limit_profile()`: early return para `llama_cpp` con `limit_kind="local"`, todos los límites `None`.
+   - `compute_min_delay()`: early return para `limit_kind="local"` con `min_delay_s=0`, `safe_delay_s=0`.
+
+7. **`webapp/app.py`** (modificado):
+   - Carga `models/hw_profile.json` al arrancar (`_load_hw_profile()`); si falta, loguea warning y continúa (no aborta la webapp).
+   - `_list_local_gguf_models()`: lista archivos `.gguf` en `models/` con ruta y tamaño.
+   - Nuevas rutas: `GET /api/local/hardware`, `GET /api/local/recommended`, `GET /api/local/cached`, `POST /api/local/download`, `GET /api/local/download/<job_id>` (SSE), `DELETE /api/local/model/<filename>`.
+   - `POST /api/models` ampliado: para `llama_cpp` retorna lista de GGUFs locales.
+   - `_download_jobs: dict` + `_download_jobs_lock` para descargas en background.
+
+8. **`webapp/templates/arbiters.html`** (modificado):
+   - Tab `data-provider="ollama"` → `data-provider="llama_cpp"`, label "Local (GGUF)", ícono `bi-cpu`.
+   - `selectProvider("llama_cpp")`: oculta API key, oculta rate limits, muestra sección local-gguf con campo `n_ctx` y botón "Descargar modelos".
+   - `saveArbiter()` para `llama_cpp`: añade `model_path` (ruta relativa del GGUF) y `n_ctx`.
+   - Modal `downloadModal`: sección de inventario HW, lista de recomendados con badge de votos (★N), barra de progreso SSE, botón "Refrescar".
+   - Funciones JS: `openDownloadModal()`, `loadRecommended(forceRefresh)`, `startDownload(repoId, filename, btn)`.
+
+9. **`main_label.py`** y **`main_webapp.py`** (modificados):
+   - `ensure_project_dirs(ROOT)` llamado al inicio.
+   - `_check_hw_profile_if_needed()` en `main_label.py`: solo verifica `hw_profile.json` si hay árbitros `llama_cpp` en el config actual; no fuerza setup si el usuario solo usa APIs cloud.
+
+10. **`.gitignore`** (modificado): añadidos `models/*.gguf`, `models/hw_profile.json`, `models/models.json`.
+
+**Adiciones mid-sesión:**
+
+**ensure_project_dirs():** el usuario pidió que los entrypoints verifiquen y creen todos los directorios necesarios. Se añadió a `scripts/utils.py`:
+```python
+REQUIRED_DIRS = [root/"logs", root/"output", root/"checkpoints", root/"models",
+                 root/"secrets", root/"scripts", root/"data", root/"archive"]
+```
+Retorna lista de `Path` creados. Llamado por ambos entrypoints y por `setup_env.py`.
+
+**Catálogo dinámico (en lugar de lista estática):** el usuario rechazó la lista `RECOMMENDED_CATALOG` hardcodeada porque quedaría obsoleta. Se implementó `build_dynamic_catalog()` que consulta en paralelo los LLMs ya configurados (Gemini, Anthropic, OpenAI), sintetiza respuestas por votos, mantiene cache de 7 días en `models/catalog_cache.json`, y cae a `_FALLBACK_CATALOG` de 6 modelos si ningún LLM está disponible.
+
+**Prompts a archivo de configuración:** el usuario pidió que los prompts del catálogo no estuvieran hardcodeados en código. Se creó `scripts/local_models_config.json` con:
+- `catalog.cache_ttl_days`: TTL de la caché del catálogo.
+- `catalog.llm_models`: qué modelo usar de cada proveedor (ej. `"gemini": "gemini-2.5-flash"`).
+- `catalog.system_prompt`: prompt de sistema para la consulta.
+- `catalog.user_prompt_template`: template con `{hw_summary}` como placeholder.
+
+**Paquetes instalados en venv:** `requirements.txt` fue reescrito con todas las dependencias directas (incluyendo `llama-cpp-python`, `huggingface_hub`, `psutil`, `openpyxl`). `environment.yml` actualizado con las mismas adiciones. Paquetes verificados en el venv del iMac:
+- `psutil 7.2.2` ✅
+- `huggingface_hub 1.20.1` ✅
+- `llama_cpp 0.3.30` ✅ — GPU offload: True (AMD Radeon Pro 580X detectada via Metal)
+
+**Verificación realizada:**
+
+- `py_compile` sobre todos los archivos nuevos y modificados: sin errores de sintaxis.
+- Import verificado: `psutil`, `huggingface_hub`, `llama_cpp` importan correctamente en el venv.
+- `llama_cpp.llama_supports_gpu_offload()` → `True` en iMac i9 con AMD Radeon Pro 580X.
+- Metal backend activo: `ggml_metal_device_init: GPU name: MTL0 (AMD Radeon Pro 580X)`.
+
+**Archivos tocados:**
+
+- `scripts/hw_detection.py` (nuevo)
+- `setup_env.py` (nuevo)
+- `scripts/local_models.py` (nuevo)
+- `scripts/local_models_config.json` (nuevo)
+- `scripts/label_persuasion.py`
+- `scripts/provider_preflight.py`
+- `scripts/rate_limits.py`
+- `scripts/utils.py`
+- `webapp/app.py`
+- `webapp/templates/arbiters.html`
+- `main_label.py`
+- `main_webapp.py`
+- `.gitignore`
+- `requirements.txt`
+- `environment.yml`
+- `bitacora.md`
+- `context.md`
+- `todos.md`
+- `README.md`
+
+---
+
+### 2026-06-19 — Correcciones: setup_env.py, logging Flask, modal GGUF y auto-ID de árbitros
+
+**Autor/agente:** Claude Sonnet 4.6.
+
+**Objetivo:** resolver varios bugs y carencias detectados al usar el sistema por primera vez en Windows con GPU NVIDIA RTX 5050.
+
+---
+
+#### 1. Bug crítico: `setup_env.py` nunca escribía `hw_profile.json`
+
+**Causa raíz:** `requirements.txt` incluía `llama-cpp-python>=0.3.0`. Al ejecutar `pip install -r requirements.txt`, pip intentaba compilar `llama-cpp-python` desde fuente pero Windows no tiene MSVC/CMake. Pip retornaba código 1 → `_abort()` ejecutaba `sys.exit(1)` → el setup terminaba antes de detectar hardware o escribir `hw_profile.json`.
+
+**Fixes aplicados:**
+
+- `requirements.txt`: eliminada la línea `llama-cpp-python>=0.3.0` (comentada con instrucciones). `llama-cpp-python` **nunca debe estar en `requirements.txt`**; requiere compilación con flags de GPU o wheel precompilada específica al hardware.
+
+- `environment.yml`: actualizado el comentario del bloque llama-cpp-python para explicar por qué está comentado.
+
+- `setup_env.py — install_base_requirements()`: ahora filtra las líneas de `llama-cpp-python` del `requirements.txt` usando un archivo temporal antes de pasarlo a pip. Retorna `bool` en lugar de llamar `_abort()`. El flujo principal loguea el error pero **continúa**.
+
+- `setup_env.py` — flujo principal: el `hw_profile.json` **siempre se escribe** independientemente de si los requirements o `llama-cpp-python` fallaron. Antes, cualquier fallo de pip abortaba antes de llegar a `write_hw_profile()`.
+
+#### 2. Bug: instalación de `llama-cpp-python` en Windows CUDA fallaba
+
+**Causa:** `_LLAMA_INSTALL_MAP["cuda"]` usaba `CMAKE_ARGS="-DGGML_CUDA=on"` que compila desde fuente. Sin MSVC instalado en Windows, falla con "no such file or directory: nmake".
+
+**Fix:** `_LLAMA_INSTALL_MAP` reestructurado. Para cada backend, ahora hay una **lista de intentos en orden**:
+
+```python
+"cuda": [
+    ({}, ["--prefer-binary", "--extra-index-url", ".../cu126"]),  # wheel CUDA 12.6
+    ({}, ["--prefer-binary", "--extra-index-url", ".../cu124"]),  # wheel CUDA 12.4
+    ({}, ["--prefer-binary", "--extra-index-url", ".../cu121"]),  # wheel CUDA 12.1
+    ({"CMAKE_ARGS": "-DGGML_CUDA=on"}, ["--force-reinstall"]),   # último recurso: fuente
+]
+```
+
+`--prefer-binary` dice a pip que prefiera un `.whl` precompilado sobre compilar `sdist`. Las wheels provienen del índice de abetlen en GitHub (`https://abetlen.github.io/llama-cpp-python/whl/cuXXX`). No requieren MSVC.
+
+Añadida detección de versión CUDA vía `nvidia-smi` para elegir el índice correcto primero:
+```python
+def _detect_cuda_version() -> str:
+    out = subprocess.check_output(["nvidia-smi"], ...)
+    m = re.search(r"CUDA Version:\s*(\d+\.\d+)", out)
+    ...
+```
+
+Añadido `import re` que faltaba en `setup_env.py`.
+
+**Hardware del equipo donde se descubrió:** NVIDIA GeForce RTX 5050 Laptop GPU (8 GB VRAM), 23.2 GB RAM, Windows 11, AMD Ryzen 12 núcleos. Backend óptimo: `cuda`.
+
+#### 3. Bug: logging de acceso de Flask/Werkzeug era inútil
+
+**Síntoma:** el servidor imprimía `127.0.0.1 - - [19/Jun/2026 20:24:03] "GET / HTTP/1.1" 200 -` para cada request — sin método útil, sin timing, sin contexto.
+
+**Fix en `webapp/app.py`:**
+- Importado `g` de Flask.
+- `logging.getLogger("werkzeug").setLevel(logging.ERROR)` — silencia el access log de Werkzeug.
+- Logger dedicado `labelforge.http` con `StreamHandler` y formato del proyecto.
+- `@app.before_request`: guarda `g._t0 = time.perf_counter()`.
+- `@app.after_request`: loguea `METHOD /path → STATUS (Xms)`. Level INFO para 2xx, WARNING para 4xx, ERROR para 5xx. Silencia `/static/`, `/favicon.ico` y 304.
+
+Resultado:
+```
+2026-06-19 20:24:03,123 [INFO]  GET   /                 200  (12ms)
+2026-06-19 20:24:56,789 [INFO]  GET   /api/arbiters/preflight  200  (2ms)
+```
+
+#### 4. Bug: modal de modelos GGUF mostraba "No cabe" para todos los modelos
+
+**Causa:** cuando `hw_profile.json` no existe, `_HW_PROFILE = {}` → `ram_gb = 0`, `vram_gb = 0` → `effective_mem = 0 * 0.6 = 0` → `model["size_gb"] > 0` → `fits_in_memory = False` para todos.
+
+**Fix en `scripts/local_models.py`:**
+- `hw_known = bool(ram_gb or vram_gb)` — detecta si hay datos reales de HW.
+- Cuando no hay datos en hw_profile, intenta obtener RAM vía `psutil.virtual_memory()` como fallback en vivo.
+- `fits_in_memory = (size_gb <= effective_mem) if hw_known else None`.
+- Sort actualizado: `m["fits_in_memory"] is False` (antes `not m["fits_in_memory"]` que trata `None` como falsy).
+
+**Fix en `webapp/templates/arbiters.html`:**
+- `fits_in_memory === false` (estricto) → "No cabe" en rojo con tooltip.
+- `fits_in_memory !== false` (incluye `null`) → botón Descargar.
+- Borde e intensidad de texto del item ahora usan `=== false` en lugar de truthy/falsy.
+
+#### 5. Mejoras al modal de gestión de modelos GGUF
+
+**Problema:** el modal no tenía scrollbar, no listaba los modelos ya descargados, y no permitía descargar por nombre.
+
+**Fixes en `webapp/templates/arbiters.html`:**
+- `modal-dialog-scrollable` añadido al `downloadModal`.
+- Nueva sección "Modelos descargados": lista todos los `.gguf` en `models/` con tamaño, capas (si legible del header GGUF) y botones **Eliminar** y **Re-descargar**.
+- Nueva sección "Descargar por nombre": campos `repo_id` (ej: `bartowski/Llama-3.2-3B-Instruct-GGUF`) + `filename` (ej: `Llama-3.2-3B-Instruct-Q4_K_M.gguf`). Permite descargar cualquier GGUF de HuggingFace directamente.
+- `openDownloadModal()`: ahora carga modelos descargados Y recomendados en paralelo (`Promise.all`).
+- `startDownload()` exitoso: refresca también la lista de modelos descargados.
+
+**Fix en `scripts/local_models.py`:**
+- `list_cached_models()`: lee `models/models.json` (si existe) para añadir `repo_id` a cada modelo, necesario para el botón re-descargar.
+- `_update_models_json()`: ahora persiste `repo_id` junto con `filename`, `path`, `size_gb`.
+- `download_model()`: eliminado parámetro deprecado `local_dir_use_symlinks=False` de `hf_hub_download`.
+
+#### 6. Bug: catálogo dinámico tenía repos de HuggingFace inventados por los LLMs
+
+**Síntoma:** al descargar modelos, el error era `401 Client Error — Repository Not Found` porque el `repo_id` estaba mal (ej: `bartowski/Llama-3-8B-Instruct-GGUF` en lugar de `bartowski/Meta-Llama-3-8B-Instruct-GGUF`).
+
+**Fix:** eliminado `models/catalog_cache.json`. Se regenerará en el próximo uso del modal, ya sea consultando los LLMs configurados o usando el catálogo estático `_FALLBACK_CATALOG` en `local_models.py` (cuyos repo IDs sí son correctos).
+
+**Lección:** el catálogo dinámico generado por LLMs puede tener repo IDs incorrectos. En el futuro sería útil validar los repo IDs contra la API de HuggingFace antes de cachear.
+
+#### 7. Auto-ID de árbitros
+
+**Petición:** al abrir "Nuevo árbitro", el campo ID debería sugerirse automáticamente.
+
+**Fix en `webapp/templates/arbiters.html`:**
+- Nueva función `nextArbId(arbiters)`: encuentra el número más alto en IDs con patrón `arb\d+` y retorna `arb{max+1}`.
+- `openModal(null)`: pre-rellena `#arb-id` con `nextArbId(arbiters)` en lugar de dejarlo vacío.
+
+#### Archivos tocados
+
+- `requirements.txt`
+- `environment.yml`
+- `setup_env.py`
+- `scripts/local_models.py`
+- `webapp/app.py`
+- `webapp/templates/arbiters.html`
+- `models/catalog_cache.json` (eliminado)
+- `context.md`
+- `bitacora.md`
+
+---
+
+### 2026-06-19 — Auditoría de seguridad y corrección de vulnerabilidades (parte 1: código)
+
+**Autor/agente:** Claude Sonnet 4.6.
+
+**Contexto que motivó la auditoría:**
+
+El usuario decidió que la webapp será expuesta en internet (no solo en localhost). Se realizó una auditoría de seguridad completa con un agente especializado, seguida de verificación de falsos positivos por agentes paralelos para cada hallazgo. El resultado fue 4 vulnerabilidades reales corregidas y 2 descartadas como falsos positivos.
+
+---
+
+#### Vulnerabilidades encontradas y corregidas
+
+**1. Path traversal en descarga de modelos GGUF**
+
+- **Archivo:** `webapp/app.py` — `api_local_download()` (POST `/api/local/download`)
+- **Descripción:** El campo `filename` del body JSON se pasaba directamente a `download_model()` sin validación. `download_model()` construía `dest = MODELS_DIR / filename`. Con un filename como `../secrets/secrets.env`, Python construye la ruta `models/../secrets/secrets.env` que el SO resuelve a `secrets/secrets.env`, fuera del directorio `models/`. Un atacante podría sobrescribir `secrets/secrets.env` (u otros archivos del proyecto en el directorio padre) con contenido controlado descargado desde una URL remota.
+- **Por qué el DELETE no tenía este bug pero el POST sí:** `api_local_delete_model()` ya validaba `"/" in filename or "\\" in filename`, pero esa validación nunca se aplicó al endpoint de descarga cuando se creó.
+- **Fix aplicado:** Añadida la misma validación que ya tenía DELETE, extendida con `.gguf`:
+  ```python
+  if not filename.endswith(".gguf") or "/" in filename or "\\" in filename or ".." in filename:
+      return jsonify({"error": "Nombre de archivo inválido"}), 400
+  ```
+
+**2. Stored XSS en la tarjeta de árbitros**
+
+- **Archivo:** `webapp/templates/arbiters.html` — función `renderList()`
+- **Descripción:** Los campos `a.name`, `a.persona`, `a.system_prompt`, `a.id` y `p.model` se interpolaban directamente en el `innerHTML` del contenedor de tarjetas mediante template literals. Un árbitro con `name: "<img src=x onerror=alert(document.cookie)>"` se almacenaría en `arbiters_config.json` vía POST `/api/arbiters` y ejecutaría JavaScript en el navegador de cualquier usuario que cargara `/arbiters`.
+- **Agravante:** La función `escapeHtml()` ya existía en el mismo archivo (usada en otros contextos), lo que confirma que su ausencia aquí fue un olvido, no una decisión de diseño.
+- **Fix aplicado:** Todos los campos de datos de usuario en `renderList()` envueltos con `escapeHtml()`:
+  - `a.name`, `a.persona`, `a.system_prompt`, `a.id`, `p.model`, `p.base_url`
+  - Los atributos `onclick="openModal('...')"` y `onclick="askDelete('...')"` también, ya que `escapeHtml()` escapa comillas simples a `&#039;`.
+
+**3. Reflected XSS en el panel de hardware**
+
+- **Archivo:** `webapp/templates/arbiters.html` — función de carga del perfil HW (llama a `/api/local/hardware`)
+- **Descripción:** Los valores de `hw.os`, `hw.cpu.vendor`, `hw.ram_gb`, `gpu.name`, `npu.vendor`, `npu.type` y `hw.best_backend` se interpolaban sin escapar en `hwBody.innerHTML`. Estos valores provienen de `models/hw_profile.json` generado por `setup_env.py`. Si alguien modifica `hw_profile.json` directamente (o si la detección de hardware devuelve un valor inesperado), podría ejecutarse JS en la página.
+- **Severidad menor que los anteriores** porque el origen es un archivo local generado internamente, no input de usuario remoto. Aun así es corregible de forma trivial.
+- **Fix aplicado:** `escapeHtml()` aplicado a todos los campos interpolados en el bloque de hardware.
+
+**4. SSRF via `base_url` en proveedor `openai_compat`**
+
+- **Archivo:** `webapp/app.py` — `_list_openai_compat_models()` (llamada desde POST `/api/models` y POST `/api/provider-key`)
+- **Descripción:** El campo `base_url` del body JSON se pasaba directamente a `openai.OpenAI(base_url=base_url)`. El SDK de OpenAI inmediatamente hace un GET a `{base_url}/models` para listar modelos. Sin validación de esquema o host, un atacante podía enviar `base_url: "http://169.254.169.254/"` para acceder al endpoint de metadatos de instancias cloud (AWS IMDS, GCP metadata server). La respuesta parcial del error se devolvía en el JSON de error (hasta 260 chars), convirtiendo el endpoint en un oráculo SSRF limitado.
+- **Fix aplicado:** Nueva función `_validate_base_url()` que:
+  - Rechaza esquemas que no sean `http` o `https`
+  - Bloquea IPs link-local (169.254.x.x) — cloud metadata endpoints
+  - Bloquea hostnames conocidos de metadatos internos (`metadata.google.internal`, etc.)
+  - Permite localhost y redes privadas (necesarios para Ollama/APIs locales)
+
+---
+
+#### Falsos positivos descartados
+
+**Path traversal via `model_path`** (confianza inicial: alta; tras verificación: 2/10):
+La hipótesis era que POST `/api/arbiters` con `model_path: "../secrets/secrets.env"` permitiría que `llama_cpp.Llama()` abriera un archivo arbitrario. Verificación de código: `normalize_arbiter()` en `scripts/arbiters_io.py` usa una **allowlist explícita** de campos de proveedor y descarta silenciosamente `model_path`. El campo nunca se persiste vía API. Falso positivo confirmado.
+
+**Sin autenticación** (clasificado antes como alta severidad para herramienta local):
+Con el modelo de amenaza original (localhost-only), la ausencia de auth era por diseño. Al cambiar el threat model a internet-facing, esto se convirtió en una vulnerabilidad real — manejada en la entrada siguiente.
+
+---
+
+**Archivos tocados:**
+
+- `webapp/app.py`
+- `webapp/templates/arbiters.html`
+
+---
+
+### 2026-06-19 — Auditoría de seguridad y corrección de vulnerabilidades (parte 2: despliegue en internet)
+
+**Autor/agente:** Claude Sonnet 4.6.
+
+**Contexto:**
+
+La app pasó de ser "solo localhost" a "expuesta en internet". Esto cambia completamente el threat model: el atacante ya no necesita estar en la misma máquina. Con ~40 endpoints sin autenticación, cualquier persona en internet podía ejecutar el pipeline (quemando créditos de API), borrar árbitros, sobreescribir la configuración, o descargar modelos hasta llenar el disco.
+
+---
+
+#### Cambios implementados
+
+**1. HTTP Basic Auth global (`LABELFORGE_PASSWORD`)**
+
+- **Archivo:** `webapp/app.py` — bloque de autenticación añadido después de `_log_http` (línea ~112)
+- **Mecanismo:**
+  - Nueva variable de entorno `LABELFORGE_PASSWORD` en `secrets/secrets.env`
+  - Si la variable **no está configurada**: solo se permite acceso desde `127.0.0.1` o `::1` (localhost). Cualquier otra IP recibe 403. Este es el comportamiento seguro por defecto: si alguien despliega sin leer la documentación, la app no queda expuesta.
+  - Si la variable **está configurada**: HTTP Basic Auth estándar. El navegador muestra el diálogo nativo de usuario/contraseña. El usuario puede ser cualquier string; solo importa la contraseña. Se usa `secrets.compare_digest()` para comparación resistente a timing attacks.
+- **Rutas exentas:** `/static/` y `/favicon.ico` (recursos que el navegador carga antes de autenticar).
+- **Sin nuevas dependencias:** implementado con `base64` y `secrets` de la stdlib de Python.
+
+**Por qué Basic Auth y no sesiones o JWT:**
+Para una herramienta de investigación de un solo investigador, Basic Auth es suficiente, sin estado, funciona en el navegador y en curl/scripts, y no requiere una pantalla de login adicional. El HTTPS (configurado a nivel de nginx) hace que Basic Auth sea seguro en tránsito.
+
+**2. `app.secret_key` desde variable de entorno**
+
+- `app.secret_key` ahora se lee de `LABELFORGE_SECRET_KEY` en secrets.env. Si no está configurado, se genera uno aleatorio en cada reinicio (las sesiones no persisten entre reinicios). Para producción, generar con `python -c "import secrets; print(secrets.token_hex(32))"`.
+
+**3. Límite de tamaño de uploads (50 MB)**
+
+- `app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024`
+- Flask devuelve 413 automáticamente si se supera. Sin este límite, cualquier atacante podía enviar archivos arbitrariamente grandes a `/api/dataset/upload` para agotar el disco.
+
+**4. Cabeceras de seguridad HTTP en todas las respuestas HTML**
+
+Añadidas en el hook `@app.after_request`:
+- `Content-Security-Policy`: restringe las fuentes de scripts, estilos, fuentes e imágenes. Permite `unsafe-inline` para JS/CSS (necesario para la app actual) y CDN de Bootstrap (`cdn.jsdelivr.net`) para iconos y fuentes.
+- `X-Frame-Options: DENY`: previene clickjacking (la app no puede ser embebida en un iframe).
+- `X-Content-Type-Options: nosniff`: previene MIME sniffing en navegadores antiguos.
+
+---
+
+#### Pendientes de infraestructura (no código, deben hacerse antes de desplegar)
+
+Estas acciones son responsabilidad del operador/administrador, no del código. Se documentan aquí para que no se olviden al desplegar:
+
+1. **HTTPS obligatorio**: configurar nginx como reverse proxy con certificado Let's Encrypt. Flask HTTP en internet expone las credenciales de Basic Auth en claro (aunque estén codificadas en base64, son trivialmente decodificables). Sin HTTPS, la autenticación no protege nada contra un atacante en la red.
+
+2. **Configurar la contraseña**: añadir a `secrets/secrets.env`:
+   ```
+   LABELFORGE_PASSWORD=<mínimo 20 caracteres aleatorios>
+   LABELFORGE_SECRET_KEY=<python -c "import secrets; print(secrets.token_hex(32))">
+   ```
+
+3. **No usar `--debug` en producción**: el modo debug de Flask expone un REPL interactivo en el navegador si ocurre una excepción. Ya está desactivado por defecto; verificar que el proceso de arranque no lo active.
+
+---
+
+#### Vulnerabilidades conocidas pendientes (para abordar en una sesión futura)
+
+Estas vulnerabilidades **no han sido corregidas** en esta sesión. Se documentan con suficiente detalle para que puedan abordarse sin necesidad de re-auditar el código.
+
+**V-PEND-1: `api_key_override` persistido en texto plano en `arbiters_config.json`**
+
+- **Archivo:** `scripts/arbiters_config.json` (versionado en git)
+- **Descripción:** `normalize_arbiter()` en `scripts/arbiters_io.py` conserva el campo `api_key_override` de cada árbitro cuando se guarda. Si un usuario pega una API key real en el campo "Clave de API" de la UI y la webapp la guarda en `api_key_override` en lugar de (o además de) en `secrets/secrets.env`, esa key quedaría en el JSON. `arbiters_config.json` está versionado en git: si el usuario hace commit sin revisar, la key se publicaría en el repositorio.
+- **Estado actual:** Los tres árbitros configurados tienen `api_key_override: ""` (vacío) y usan `api_key_env` apuntando a las variables de entorno. El riesgo es operacional, no de código.
+- **Solución propuesta:** En `normalize_arbiter()`, si `api_key_override` es no vacío, moverlo automáticamente a `secrets/secrets.env` y reemplazarlo por cadena vacía antes de persistir en el JSON. Esto convertiría el campo en un "buzón transitorio" que nunca persiste en disco.
+- **Prioridad:** Media. Bajo control mientras el equipo sepa no usar `api_key_override`.
+
+**V-PEND-2: `/api/provider-key` escribe API keys al disco sin restricción adicional**
+
+- **Archivo:** `webapp/app.py` — `api_provider_key()` (POST `/api/provider-key`)
+- **Descripción:** Este endpoint recibe una API key del usuario, la verifica contra el proveedor LLM (bueno), y si la verificación pasa, llama a `set_secret_value(SECRETS_ENV_PATH, env_var, api_key)` para escribirla en `secrets/secrets.env`. Con autenticación ahora en vigor, solo usuarios autenticados pueden usarlo. Sin embargo, si la contraseña de LabelForge se compromete, un atacante podría usar este endpoint para sobreescribir las API keys de Gemini/Anthropic/OpenAI con claves vacías o inválidas, rompiendo el pipeline de investigación.
+- **Impacto:** Denegación de servicio / sabotaje (no exfiltración de datos existentes).
+- **Solución propuesta:** Añadir una confirmación de contraseña secundaria antes de cualquier escritura en `secrets/secrets.env`, similar a cómo sudo pide contraseña incluso a usuarios ya autenticados en su sesión. Alternativa más simple: hacer que `/api/provider-key` solo funcione desde localhost independientemente de la autenticación global.
+- **Prioridad:** Baja-media. Solo explotable por atacantes ya autenticados en la app.
+
+**V-PEND-3: Sin CSRF en endpoints de modificación de estado**
+
+- **Archivo:** `webapp/app.py` — todos los endpoints POST/PUT/DELETE
+- **Descripción:** HTTP Basic Auth enviada por el navegador en cada request hace que las peticiones cross-site también incluyan las credenciales automáticamente. Un sitio web malicioso podría embeber una imagen o script que haga POST a `http://tu-servidor/api/run/start`, y el navegador incluiría las credenciales Basic Auth guardadas en caché, iniciando el pipeline sin que el usuario lo sepa.
+- **Mitigación parcial existente:** `X-Frame-Options: DENY` previene que la app sea embebida en iframes (bloquea algunos vectores). Los endpoints que reciben JSON con `Content-Type: application/json` son menos vulnerables porque los navegadores no envían CSRF con ese Content-Type por defecto desde formularios HTML.
+- **Solución propuesta:** Añadir un token CSRF (usando Flask-WTF o una implementación manual con `secrets.token_hex()` guardado en sesión). Alternativamente, migrar de Basic Auth a session-based auth con cookies `SameSite=Strict`, que bloquea CSRF por diseño.
+- **Prioridad:** Media. Solo explotable si la app tiene usuarios que visitan sitios maliciosos mientras tienen sesión activa.
+
+---
+
+**Archivos tocados:**
+
+- `webapp/app.py`
+- `secrets.env.example`
+- `bitacora.md`
+- `context.md`

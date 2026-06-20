@@ -643,6 +643,87 @@ def _call_openai_compat(arbiter: dict, prompt_user: str) -> tuple:
     return response.choices[0].message.content, usage_dict
 
 
+def _call_llama_cpp(arbiter: dict, prompt_user: str) -> tuple:
+    from scripts.local_models import get_or_load_llama
+
+    provider = arbiter["provider"]
+    model_path = provider.get("model_path") or provider.get("model", "")
+    n_ctx = int(provider.get("n_ctx", 4096))
+    gen_cfg = arbiter.get("generation_config", {})
+
+    llama = get_or_load_llama(model_path, n_ctx=n_ctx)
+
+    response = llama.create_chat_completion(
+        messages=[
+            {"role": "system", "content": arbiter["system_prompt"]},
+            {"role": "user", "content": prompt_user},
+        ],
+        temperature=float(gen_cfg.get("temperature", 0.1)),
+        max_tokens=int(gen_cfg.get("max_output_tokens", 2048)),
+        response_format={"type": "json_object"},
+    )
+    content = response["choices"][0]["message"]["content"]
+    usage = response.get("usage", {})
+    usage_dict = {
+        "prompt_tokens": usage.get("prompt_tokens", 0),
+        "completion_tokens": usage.get("completion_tokens", 0),
+    }
+    return content, usage_dict
+
+
+def _call_openvino(arbiter: dict, prompt_user: str) -> tuple:
+    try:
+        from optimum.intel import OVModelForCausalLM
+        from transformers import AutoTokenizer, pipeline
+    except ImportError as exc:
+        raise RuntimeError(
+            f"OpenVINO/optimum no instalado para inferencia NPU: {exc}. "
+            "Ejecuta 'python setup_env.py' en un sistema con Intel AI Boost."
+        ) from exc
+
+    provider = arbiter["provider"]
+    model_path = provider.get("model_path") or provider.get("model", "")
+    gen_cfg = arbiter.get("generation_config", {})
+
+    full_path = model_path if Path(model_path).is_absolute() else str(BASE_DIR / model_path)
+
+    tokenizer = AutoTokenizer.from_pretrained(full_path)
+    model = OVModelForCausalLM.from_pretrained(full_path, device="NPU")
+    pipe = pipeline("text-generation", model=model, tokenizer=tokenizer)
+
+    messages = [
+        {"role": "system", "content": arbiter["system_prompt"]},
+        {"role": "user", "content": prompt_user},
+    ]
+    prompt_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    result = pipe(
+        prompt_text,
+        max_new_tokens=int(gen_cfg.get("max_output_tokens", 2048)),
+        temperature=float(gen_cfg.get("temperature", 0.1)),
+        do_sample=True,
+    )
+    generated = result[0]["generated_text"][len(prompt_text):]
+    return generated, {"prompt_tokens": 0, "completion_tokens": 0}
+
+
+def _call_local(arbiter: dict, prompt_user: str) -> tuple:
+    """Dispatcher: NPU (OpenVINO) si disponible, sino llama-cpp-python."""
+    try:
+        from scripts.local_models import load_hw_profile
+        hw = load_hw_profile()
+        best = hw.get("best_backend", "cpu")
+    except FileNotFoundError:
+        best = "cpu"
+
+    if best == "npu":
+        try:
+            return _call_openvino(arbiter, prompt_user)
+        except Exception as exc:
+            log.warning("[local] NPU falló (%s) — recayendo en llama-cpp-python", exc)
+
+    return _call_llama_cpp(arbiter, prompt_user)
+
+
 PROVIDER_CALLERS = {
     "gemini":        _call_gemini,
     "vertex_gemini": _call_vertex_gemini,
@@ -650,6 +731,7 @@ PROVIDER_CALLERS = {
     "openai":        _call_openai_compat,
     "ollama":        _call_openai_compat,
     "openai_compat": _call_openai_compat,
+    "llama_cpp":     _call_local,
 }
 
 
@@ -684,7 +766,8 @@ def build_user_prompt(task_cfg: dict, claim: str, max_chars: int) -> str:
     output_instruction = build_output_instruction(task_cfg)
     principles_catalog = build_principles_catalog(task_cfg)
     prompt = template.format(
-        claim=claim[:max_chars],
+        item=claim[:max_chars],
+        claim=claim[:max_chars],  # backward compat with old templates using {claim}
         principles_catalog=principles_catalog,
         output_instruction=output_instruction,
         output_schema=output_instruction,
@@ -843,7 +926,8 @@ def call_arbiter(
         return None
 
     prompt_user = build_user_prompt(task_cfg, claim, max_chars)
-    rate_limiter.wait()
+    if prov_type != "llama_cpp":
+        rate_limiter.wait()
 
     try:
         t0 = time.perf_counter()
@@ -1641,6 +1725,7 @@ def main():
         "start",
         run_id=run_id,
         total_rows=total,
+        dataset_total_rows=len(rows),
         output_file=output_path.name,
         output_path=str(output_path),
         input_file=str(input_file),

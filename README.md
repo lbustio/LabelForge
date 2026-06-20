@@ -33,7 +33,8 @@ flowchart TD
         Gemini[Google Gemini / Vertex AI]
         Anthropic[Anthropic Claude]
         OpenAI[OpenAI GPT]
-        Local[Ollama / OpenAI Compat]
+        Local[GGUF Local - llama_cpp]
+        Compat[OpenAI Compat / Ollama]
     end
 
     subgraph Data [Datos]
@@ -85,7 +86,8 @@ El sistema analiza y evalúa la presencia (1) o ausencia (0) de cinco tácticas 
 *   **Contabilidad Exhaustiva de Latencia**: El tiempo exacto de cada petición al LLM se mide con `time.perf_counter()` y se almacena en el CSV. Cada entrada incluye tiempo total y promedio; el reporte final incluye latencia promedio, mínima, máxima y total acumulada por árbitro.
 *   **Política de Seguridad (`free_only_mode`)**: Bloquea proveedores con riesgo de cargo (Vertex AI, Anthropic, OpenAI) cuando el modo seguro está activo, evitando consumo accidental de tokens de pago durante pruebas.
 *   **Dataset Configurable (CSV y Excel)**: El archivo de entrada, la hoja de cálculo (solo Excel) y la columna de texto son configurables desde la webapp o la CLI sin tocar código. Soporta `.csv`, `.xlsx` y `.xls`.
-*   **Soporte Multimodelo y Multiproveedor**: Integra los SDKs oficiales de Google GenAI (`google-genai`), Vertex AI (`google-cloud-aiplatform`), Anthropic (`anthropic`) y OpenAI (`openai`), además de APIs locales u open-source compatibles con el protocolo de OpenAI (Ollama, LM Studio, vLLM).
+*   **Modelos Locales GGUF (sin servidores externos)**: El provider `llama_cpp` usa `llama-cpp-python` directamente en proceso para ejecutar modelos GGUF locales. Detecta GPU automáticamente (`n_gpu_layers=-1` con GPU, `0` en CPU). Incluye catálogo dinámico que consulta LLMs en paralelo para recomendaciones adaptadas al hardware, descarga asistida desde Hugging Face con verificación de integridad, cache en `models/` y rate limits desactivados. El setup de hardware se configura una sola vez con `python setup_env.py`.
+*   **Soporte Multimodelo y Multiproveedor**: Integra los SDKs oficiales de Google GenAI (`google-genai`), Vertex AI (`google-cloud-aiplatform`), Anthropic (`anthropic`) y OpenAI (`openai`), además de APIs locales u open-source compatibles con el protocolo de OpenAI (Ollama, LM Studio, vLLM) y modelos GGUF locales via `llama-cpp-python`.
 *   **Gestión Segura de Árbitros y Secretos**: Los árbitros pueden exportarse/importarse en archivos `.lfarb` cifrados con contraseña. Las API keys se verifican antes de guardarse en `secrets/secrets.env`, y la lógica de cifrado/secretos está centralizada en módulos Python compartidos por WebApp y CLI.
 *   **Preflight de Proveedores**: Antes de iniciar un run, el backend valida credenciales/configuración de cada proveedor y devuelve instrucciones accionables (WebApp, CLI, `secrets/secrets.env`, service account o `gcloud`) sin esperar a que falle una entrada a mitad del procesamiento.
 *   **Logs Interactivos en la WebApp**: Utiliza Server-Sent Events (SSE) para transmitir la salida de consola de Python directamente a la pantalla de ejecución web en tiempo real (incluyendo el reporte de tokens y latencia al final).
@@ -94,30 +96,38 @@ El sistema analiza y evalúa la presencia (1) o ausencia (0) de cinco tácticas 
 
 ## 📂 Estructura del Proyecto
 
-*   **[`main_label.py`](file:///e:/Code/python/OpenCode/LabelForge/main_label.py)**: Punto de entrada principal para ejecutar el etiquetado a través de la terminal.
-*   **[`main_webapp.py`](file:///e:/Code/python/OpenCode/LabelForge/main_webapp.py)**: Punto de entrada para inicializar la aplicación web Flask en modo local.
+*   **[`setup_env.py`](setup_env.py)**: ⚠️ **Ejecutar primero** — detecta hardware, instala el backend de inferencia local adecuado (CUDA/ROCm/Metal/Vulkan/CPU/NPU) y escribe `models/hw_profile.json`. Ver sección de instalación.
+*   **[`main_cli.py`](main_cli.py)**: Punto de entrada principal para ejecutar el etiquetado a través de la terminal.
+*   **[`main_webapp.py`](main_webapp.py)**: Punto de entrada para inicializar la aplicación web Flask en modo local.
 *   **`scripts/`**:
-    *   **[`label_persuasion.py`](file:///e:/Code/python/OpenCode/LabelForge/scripts/label_persuasion.py)**: Contiene la lógica central del pipeline: controladores de API por proveedor, limitador dinámico de peticiones, procesamiento de checkpoints, consenso, **medición de tokens y latencia por llamada y por entrada**, diagnóstico de consenso por entrada y generación del reporte final.
-    *   **[`arbiters_config.json`](file:///e:/Code/python/OpenCode/LabelForge/scripts/arbiters_config.json)**: Archivo JSON central que almacena la configuración de los principios, los árbitros, los prompts del sistema y los parámetros del limitador de velocidad.
-    *   **[`agreement_metrics.py`](file:///e:/Code/python/OpenCode/LabelForge/scripts/agreement_metrics.py)**: Módulo compartido de cálculo de métricas de acuerdo inter-árbitros (Fleiss Kappa, Cohen's Kappa, Krippendorff's Alpha).
-    *   **[`arbiters_io.py`](file:///e:/Code/python/OpenCode/LabelForge/scripts/arbiters_io.py)**: Módulo compartido para exportar/importar árbitros en archivos `.lfarb` cifrados, validar el formato y fusionar/reemplazar configuraciones.
-    *   **[`secrets_io.py`](file:///e:/Code/python/OpenCode/LabelForge/scripts/secrets_io.py)**: Módulo compartido para mapear proveedores a variables de entorno y escribir `secrets/secrets.env` de forma controlada.
-    *   **[`provider_preflight.py`](file:///e:/Code/python/OpenCode/LabelForge/scripts/provider_preflight.py)**: Módulo compartido para validar credenciales/configuración de proveedores antes de ejecutar el pipeline.
-    *   **[`utils.py`](file:///e:/Code/python/OpenCode/LabelForge/scripts/utils.py)**: Helper utilitario para parseo numérico y tipos de datos seguros.
+    *   **[`label_persuasion.py`](scripts/label_persuasion.py)**: Contiene la lógica central del pipeline: controladores de API por proveedor (incluyendo `llama_cpp` local), limitador dinámico de peticiones, procesamiento de checkpoints, consenso, **medición de tokens y latencia por llamada y por entrada**, diagnóstico de consenso por entrada y generación del reporte final.
+    *   **[`arbiters_config.json`](scripts/arbiters_config.json)**: Archivo JSON central que almacena la configuración de los principios, los árbitros, los prompts del sistema y los parámetros del limitador de velocidad.
+    *   **[`agreement_metrics.py`](scripts/agreement_metrics.py)**: Módulo compartido de cálculo de métricas de acuerdo inter-árbitros (Fleiss Kappa, Cohen's Kappa, Krippendorff's Alpha).
+    *   **[`arbiters_io.py`](scripts/arbiters_io.py)**: Módulo compartido para exportar/importar árbitros en archivos `.lfarb` cifrados, validar el formato y fusionar/reemplazar configuraciones.
+    *   **[`secrets_io.py`](scripts/secrets_io.py)**: Módulo compartido para mapear proveedores a variables de entorno y escribir `secrets/secrets.env` de forma controlada.
+    *   **[`provider_preflight.py`](scripts/provider_preflight.py)**: Módulo compartido para validar credenciales/configuración de proveedores antes de ejecutar el pipeline (incluye verificación de `llama_cpp`).
+    *   **[`hw_detection.py`](scripts/hw_detection.py)**: Detección multiplataforma de OS/CPU/RAM/GPU/NPU. Usado por `setup_env.py` durante el setup y por `local_models.py` en runtime.
+    *   **[`local_models.py`](scripts/local_models.py)**: Catálogo dinámico de modelos GGUF (consulta LLMs en paralelo), cache en memoria (`_LLAMA_MODEL_CACHE`), descarga desde Hugging Face con verificación de integridad.
+    *   **[`local_models_config.json`](scripts/local_models_config.json)**: Prompts y selección de modelos LLM para el catálogo dinámico. Editable sin tocar código.
+    *   **[`utils.py`](scripts/utils.py)**: Helper utilitario para parseo numérico y `ensure_project_dirs()` (crea directorios requeridos al arrancar).
 *   **`webapp/`**:
-    *   **[`app.py`](file:///e:/Code/python/OpenCode/LabelForge/webapp/app.py)**: Backend Flask de la aplicación web que gestiona los servicios API, el renderizado de plantillas, la ejecución del subproceso CLI de etiquetado y los endpoints de métricas. Lee datos ya calculados por el pipeline y solo calcula respaldos para CSV antiguos.
+    *   **[`app.py`](webapp/app.py)**: Backend Flask de la aplicación web que gestiona los servicios API, el renderizado de plantillas, la ejecución del subproceso CLI de etiquetado y los endpoints de métricas. Lee datos ya calculados por el pipeline y solo calcula respaldos para CSV antiguos.
     *   **`templates/`**:
-        *   [`base.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/base.html): Estructura HTML común y hoja de estilos globales (diseño web oscuro y premium con Bootstrap).
-        *   [`index.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/index.html): Panel de control con estadísticas rápidas (árbitros, principios, salidas generadas, entradas en checkpoint).
-        *   [`arbiters.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/arbiters.html): Panel de gestión de árbitros (CRUD completo, asignación de modelos, tokens y claves API).
-        *   [`principles.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/principles.html): Visualización y edición de los principios de persuasión y la plantilla del prompt del usuario.
-        *   [`processing.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/processing.html): Panel de configuración de parámetros de red, checkpoints y cálculos de tiempos/delays recomendados.
-        *   [`run.html`](file:///e:/Code/python/OpenCode/LabelForge/webapp/templates/run.html): Interfaz interactiva de lanzamiento y monitorización del proceso de etiquetado con streaming de logs por SSE, métricas en vivo y resultados. Su JavaScript se limita a interacción visual y formato de valores.
+        *   [`base.html`](webapp/templates/base.html): Estructura HTML común y hoja de estilos globales (diseño web oscuro y premium con Bootstrap).
+        *   [`index.html`](webapp/templates/index.html): Panel de control con estadísticas rápidas (árbitros, principios, salidas generadas, entradas en checkpoint).
+        *   [`arbiters.html`](webapp/templates/arbiters.html): Panel de gestión de árbitros (CRUD completo, asignación de modelos, tokens y claves API).
+        *   [`principles.html`](webapp/templates/principles.html): Visualización y edición de los principios de persuasión y la plantilla del prompt del usuario.
+        *   [`processing.html`](webapp/templates/processing.html): Panel de configuración de parámetros de red, checkpoints y cálculos de tiempos/delays recomendados.
+        *   [`run.html`](webapp/templates/run.html): Interfaz interactiva de lanzamiento y monitorización del proceso de etiquetado con streaming de logs por SSE, métricas en vivo y resultados. Su JavaScript se limita a interacción visual y formato de valores.
+*   **`models/`**: Cache de modelos GGUF locales y perfil de hardware. **Excluido del repositorio.** Contiene:
+    *   `hw_profile.json` — perfil de hardware generado por `setup_env.py` (local por máquina).
+    *   `*.gguf` — modelos descargados desde Hugging Face.
+    *   `catalog_cache.json` — caché del catálogo dinámico de recomendaciones (TTL 7 días).
 *   **`data/`**: Directorio para los archivos de datos de entrada. El dataset principal (`data/all_datasets_en_es/all_datasets_en_es.csv`) es **privado** (investigación en curso) y está excluido del repositorio mediante `.gitignore`. Se publicará al concluir el estudio.
 *   **`output/`**: Carpeta de destino para los datasets etiquetados resultantes (`labeled_YYYYMMDD_HHMMSS.csv`).
 *   **`checkpoints/`**: Almacena el estado intermedio de ejecuciones: `checkpoint.json`, `failed_queue.jsonl`, `run_state.json`, `claim_results.jsonl` y `arbiter_results.jsonl`. **Excluido del repositorio** (datos de estado local privados).
-*   **`logs/`**: Almacena los registros detallados de cada ejecución del pipeline (`run_YYYYMMDD_HHMMSS.log`), incluyendo el reporte completo de tokens y latencia al final.
-*   **`tests/`**: Contiene la suite de pruebas unitarias automáticas ([`test_pipeline.py`](file:///e:/Code/python/OpenCode/LabelForge/tests/test_pipeline.py)) para auditar el correcto funcionamiento de utilidades, métricas y seguridad.
+*   **`logs/`**: Almacena los registros detallados de cada ejecución del pipeline (`run_YYYYMMDD_HHMMSS.log`) y del setup de hardware (`setup_YYYYMMDD_HHMMSS.log`).
+*   **`tests/`**: Contiene la suite de pruebas unitarias automáticas ([`test_pipeline.py`](tests/test_pipeline.py)) para auditar el correcto funcionamiento de utilidades, métricas y seguridad.
 
 ---
 
@@ -125,24 +135,46 @@ El sistema analiza y evalúa la presencia (1) o ausencia (0) de cinco tácticas 
 
 ### 1. Requisitos de Software
 *   Python 3.10 o superior (Recomendado 3.11)
-*   Conda / Miniconda (opcional, recomendado para entornos aislados)
+*   Conda / Miniconda (opcional) o `venv` estándar
 
-### 2. Configuración del Entorno de Conda
-Puedes recrear el entorno de desarrollo usando el archivo [`environment.yml`](file:///e:/Code/python/OpenCode/LabelForge/environment.yml):
+### 2. Crear entorno e instalar dependencias base
+
+Con `venv` (recomendado para control de backends locales):
+
+```bash
+python -m venv .venv
+source .venv/bin/activate   # Linux/macOS
+.venv\Scripts\activate      # Windows
+
+pip install -r requirements.txt
+```
+
+Con Conda:
 
 ```bash
 conda env create -f environment.yml
 conda activate LabelForge
 ```
 
-Alternativamente, si utilizas un entorno de Python estándar (`venv`), instala las dependencias fijadas en [`requirements.txt`](file:///e:/Code/python/OpenCode/LabelForge/requirements.txt):
+### 3. ⚠️ Ejecutar el setup de hardware (OBLIGATORIO antes de arrancar)
+
+`setup_env.py` detecta tu hardware, instala el backend de inferencia local óptimo
+(`llama-cpp-python` con soporte CUDA/ROCm/Metal/Vulkan/CPU, y OpenVINO si hay NPU Intel)
+y escribe `models/hw_profile.json`. Los entrypoints leen ese perfil al arrancar.
 
 ```bash
-pip install -r requirements.txt
+python setup_env.py
 ```
 
-### 3. Configuración de Variables de Entorno (`secrets/secrets.env`)
-Crea el archivo [`secrets/secrets.env`](file:///e:/Code/python/OpenCode/LabelForge/secrets/secrets.env) dentro de la carpeta local `secrets/`, copiando la plantilla [`secrets.env.example`](file:///e:/Code/python/OpenCode/LabelForge/secrets.env.example), y edítalo para incluir tus credenciales y claves API de los diferentes proveedores que desees utilizar:
+El log completo queda en `logs/setup_YYYYMMDD_HHMMSS.log`. Si el setup tiene errores, consulta
+ese archivo antes de continuar. Si ya tienes el entorno configurado, es idempotente:
+detecta que el backend ya está instalado y solo verifica. Usa `--force` para reinstalar.
+
+> **Nota:** si no planeas usar modelos locales GGUF (solo APIs cloud), puedes omitir
+> este paso, pero los entrypoints mostrarán una advertencia al arrancar.
+
+### 4. Configuración de Variables de Entorno (`secrets/secrets.env`)
+Crea el archivo `secrets/secrets.env` dentro de la carpeta local `secrets/`, copiando la plantilla [`secrets.env.example`](secrets.env.example), y edítalo para incluir tus credenciales y claves API de los diferentes proveedores que desees utilizar:
 
 ```env
 # Google Gemini (API Key estándar)
@@ -168,7 +200,7 @@ VERTEX_LOCATION=us-central1
 > evitar ese conflicto. Si necesitas otro puerto, define `LABELFORGE_PORT` en
 > `secrets/secrets.env` o usa el argumento `--port` en la línea de comandos.
 
-### 4. Autenticación para Vertex AI (Google Cloud)
+### 5. Autenticación para Vertex AI (Google Cloud)
 
 Si usas `vertex_gemini` como proveedor, debes autenticarte con Application Default Credentials (ADC). Vertex AI no usa API key directa como Gemini AI Studio, Claude u OpenAI.
 
@@ -189,9 +221,9 @@ gcloud auth application-default set-quota-project TU_PROJECT_ID
 
 Esto guarda las credenciales localmente para que el SDK de Vertex AI las use de forma automática sin necesidad de una API Key en `secrets/secrets.env`.
 
-Para proveedores con API key (`gemini`, `anthropic`, `openai`, `openai_compat`), la ruta recomendada es la WebApp: pestaña **Arbitros**, pega la clave en **Clave de API** y pulsa verificar. Si prefieres CLI: `python main_label.py --set-provider-key anthropic` (cambia el proveedor según corresponda). Ollama no usa key, pero debe tener `base_url`, por ejemplo `http://localhost:11434/v1`.
+Para proveedores con API key (`gemini`, `anthropic`, `openai`, `openai_compat`), la ruta recomendada es la WebApp: pestaña **Arbitros**, pega la clave en **Clave de API** y pulsa verificar. Si prefieres CLI: `python main_cli.py --set-provider-key anthropic` (cambia el proveedor según corresponda). Ollama no usa key, pero debe tener `base_url`, por ejemplo `http://localhost:11434/v1`.
 
-### 5. Ejecución de Pruebas Unitarias
+### 6. Ejecución de Pruebas Unitarias
 
 El proyecto cuenta con pruebas automáticas para garantizar la estabilidad y consistencia de las métricas matemáticas y helpers de conversión. Ejecútalas usando:
 
@@ -232,32 +264,32 @@ Puedes especificar argumentos adicionales en consola:
 
 ### Opción B: Ejecución por Terminal (CLI)
 
-Para ejecutar el pipeline directamente desde consola sin usar el servidor web, utiliza el script [`main_label.py`](file:///e:/Code/python/OpenCode/LabelForge/main_label.py):
+Para ejecutar el pipeline directamente desde consola sin usar el servidor web, utiliza el script [`main_cli.py`](main_cli.py):
 
 ```bash
 # Procesar únicamente las primeras 10 entradas para prueba
-python main_label.py --limit 10
+python main_cli.py --limit 10
 
 # Procesar todo el dataset completo
-python main_label.py
+python main_cli.py
 
 # Utilizar un archivo de configuración JSON personalizado y procesar 50 entradas
-python main_label.py --config scripts/mi_configuracion.json --limit 50
+python main_cli.py --config scripts/mi_configuracion.json --limit 50
 
 # Especificar un archivo CSV diferente y la columna de texto
-python main_label.py --input data/otro_dataset.csv --column texto
+python main_cli.py --input data/otro_dataset.csv --column texto
 
 # Archivo Excel: indicar sheet y columna
-python main_label.py --input data/dataset.xlsx --sheet "Datos" --column "Noticia"
+python main_cli.py --input data/dataset.xlsx --sheet "Datos" --column "Noticia"
 
 # Verificar y guardar una API key en secrets/secrets.env
-python main_label.py --set-provider-key anthropic
-python main_label.py --set-provider-key openai --api-key "sk-..."
+python main_cli.py --set-provider-key anthropic
+python main_cli.py --set-provider-key openai --api-key "sk-..."
 
 # Exportar/importar árbitros cifrados
-python main_label.py --export-arbiters backup.lfarb
-python main_label.py --import-arbiters backup.lfarb
-python main_label.py --import-arbiters backup.lfarb --replace-arbiters
+python main_cli.py --export-arbiters backup.lfarb
+python main_cli.py --import-arbiters backup.lfarb
+python main_cli.py --import-arbiters backup.lfarb --replace-arbiters
 ```
 
 #### Argumentos soportados en CLI:
@@ -387,6 +419,7 @@ Si una entrada falla permanentemente después de la cola de reintentos, el conse
 | `GET` | `/api/run/current-stats` | Métricas en vivo del run activo (tokens, latencia, progreso) |
 | `GET` | `/api/run/logs` | Stream SSE de logs en tiempo real |
 | `GET` | `/api/run/stats` | Estadísticas de tokens, latencia, diagnóstico de consenso por entrada y métricas agregadas de acuerdo del último CSV |
+| `GET` | `/api/run/principle-counts` | Conteo de etiquetas positivas por principio del run activo |
 
 ### Árbitros
 
@@ -399,6 +432,7 @@ Si una entrada falla permanentemente después de la cola de reintentos, el conse
 | `DELETE` | `/api/arbiters/<arb_id>` | Elimina un árbitro; puede dejar la lista vacía |
 | `POST` | `/api/arbiters/export` | Exporta los árbitros a un archivo `.lfarb` cifrado |
 | `POST` | `/api/arbiters/import` | Importa árbitros desde un `.lfarb` cifrado (merge o replace) |
+| `GET` | `/api/arbiters/preflight` | Valida credenciales/configuración de todos los árbitros antes de ejecutar |
 
 ### Principios y configuración
 
@@ -423,6 +457,17 @@ Si una entrada falla permanentemente después de la cola de reintentos, el conse
 
 Los perfiles de rate limit viven en `scripts/rate_limits.py` y se consumen desde el backend. Para `gemini` se usan límites publicados de Gemini API/AI Studio cuando el modelo coincide con la tabla conocida. Para `vertex_gemini`, `anthropic`, `openai`, `openai_compat` y `ollama`, la UI muestra perfiles por modelo o familia como fallback conservador y los marca como `account_dependent`, porque las cuotas reales dependen de cuenta, proyecto, región, tier, organización o hardware local.
 
+### Modelos locales GGUF
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| `GET` | `/api/local/hardware` | Perfil de hardware detectado por `setup_env.py` (`hw_profile.json`) |
+| `GET` | `/api/local/recommended` | Modelos GGUF recomendados para el hardware actual (catálogo dinámico) |
+| `GET` | `/api/local/cached` | Lista de modelos GGUF descargados en `models/` con ruta y tamaño |
+| `POST` | `/api/local/download` | Inicia descarga de un modelo GGUF desde Hugging Face en background |
+| `GET` | `/api/local/download/<job_id>` | Stream SSE de progreso de descarga (bytes descargados / total) |
+| `DELETE` | `/api/local/model/<filename>` | Elimina un modelo GGUF del cache local |
+
 ### Dataset de entrada
 
 | Método | Endpoint | Descripción |
@@ -439,6 +484,7 @@ Los perfiles de rate limit viven en `scripts/rate_limits.py` y se consumen desde
 | `GET` | `/api/outputs` | Lista los CSVs generados en `output/` con metadata |
 | `GET` | `/outputs/<name>` | Descarga un CSV de salida por nombre |
 | `DELETE` | `/api/outputs/<name>` | Elimina un CSV de salida |
+| `POST` | `/api/outputs/archive-all` | Archiva todos los CSVs de salida en `archive/` |
 | `GET` | `/api/checkpoint/status` | Estado del checkpoint actual y del run pausado |
 | `POST` | `/api/checkpoint/clear` | Limpia el checkpoint y todos los archivos de estado |
 | `GET` | `/api/failed-queue` | Cola de entradas fallidas pendientes de reintento |
@@ -490,7 +536,8 @@ Para configuraciones nuevas, `provider.api_key_override` debe permanecer vacío.
 | `openai` | `OPENAI_API_KEY` |
 | `openai_compat` | `OPENAI_API_KEY` |
 | `vertex_gemini` | ADC/Google Cloud, sin API key directa |
-| `ollama` | Sin API key por defecto |
+| `ollama` / `openai_compat` local | Sin API key por defecto |
+| `llama_cpp` | Sin API key — el modelo es un archivo `.gguf` local en `models/` |
 
 Los árbitros se pueden exportar como `.lfarb`, un JSON técnico que contiene un
 `ciphertext` cifrado con contraseña. El contenido sensible (prompts, modelos y

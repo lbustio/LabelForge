@@ -133,6 +133,9 @@ htmlcov/
 *.pth
 *.onnx
 models/
+models/*.gguf
+models/hw_profile.json
+models/models.json
 artifacts/
 
 # ---------------------------------------------------------------------------
