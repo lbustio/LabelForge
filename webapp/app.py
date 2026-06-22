@@ -26,12 +26,12 @@ except Exception:  # pragma: no cover - optional until OAuth mode is enabled
     OAuth = None
 
 # ---------------------------------------------------------------------------
-# InicializaciÃ³n de CUDA (debe ir antes de cualquier import que use llama_cpp)
+# Inicialización de CUDA (debe ir antes de cualquier import que use llama_cpp)
 # ---------------------------------------------------------------------------
 from labelforge_core.cuda_init import _ensure_cuda_ready as _cuda_ready
 _cuda_ready()
 
-# Forzar importaciÃ³n de llama_cpp ahora (mientras CUDA estÃ¡ listo) para que
+# Forzar importación de llama_cpp ahora (mientras CUDA está listo) para que
 # quede cacheado en sys.modules y los imports posteriores no fallen.
 try:
     import llama_cpp as _llama_cpp_  # noqa: F401
@@ -39,7 +39,7 @@ except Exception:
     pass
 
 # ---------------------------------------------------------------------------
-# MÃ³dulo compartido de mÃ©tricas de acuerdo y utilidades
+# Módulo compartido de métricas de acuerdo y utilidades
 # ---------------------------------------------------------------------------
 from labelforge_core.agreement_metrics import compute_agreement_metrics
 from labelforge_core.arbiters_io import (
@@ -78,10 +78,10 @@ load_dotenv(SECRETS_ENV_PATH)
 resolve_gcp_credentials(BASE_DIR)
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB mÃ¡ximo por upload
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB máximo por upload
 
 # ---------------------------------------------------------------------------
-# Logging â€” silencia Werkzeug, reemplaza con log de requests legible
+# Logging  -  silencia Werkzeug, reemplaza con log de requests legible
 # ---------------------------------------------------------------------------
 import logging as _logging
 
@@ -115,7 +115,7 @@ def _log_http(response):
     status  = response.status_code
     if status == 304:
         return response
-    msg = f"{request.method:<5} {path}  â†’  {status}  ({elapsed}ms)"
+    msg = f"{request.method:<5} {path}   ->   {status}  ({elapsed}ms)"
     if status >= 500:
         _req_log.error(msg)
     elif status >= 400:
@@ -137,7 +137,7 @@ def _log_http(response):
 
 
 # ---------------------------------------------------------------------------
-# AutenticaciÃ³n â€” login local SQLite, con OAuth2 solo si se activa explicitamente
+# Autenticación  -  login local SQLite, con OAuth2 solo si se activa explicitamente
 # ---------------------------------------------------------------------------
 import base64 as _b64
 import secrets as _sec
@@ -691,7 +691,7 @@ def _require_auth():
 
 
 # ---------------------------------------------------------------------------
-# Hardware profile (no aborta la webapp si falta â€” solo lo logea)
+# Hardware profile (no aborta la webapp si falta  -  solo lo logea)
 # ---------------------------------------------------------------------------
 
 @app.before_request
@@ -714,7 +714,7 @@ def _load_hw_profile() -> dict:
     if not HW_PROFILE_PATH.exists():
         _log.warning(
             "models/hw_profile.json no encontrado. "
-            "Los modelos locales GGUF no estarÃ¡n disponibles. "
+            "Los modelos locales GGUF no estarán disponibles. "
             "Ejecuta 'python setup_env.py' para habilitarlos."
         )
         return {}
@@ -1229,7 +1229,7 @@ def _validate_base_url(base_url: str) -> None:
         if addr.is_link_local:
             raise ValueError("base_url no puede apuntar a direcciones link-local (169.254.x.x).")
     except ValueError:
-        pass  # hostname, not an IP literal â€” allowed
+        pass  # hostname, not an IP literal  -  allowed
 
 
 def _list_openai_compat_models(api_key: str, base_url: str) -> list:
@@ -1256,7 +1256,7 @@ def _list_local_gguf_models() -> list:
         result.append({
             "id": gguf.name,
             "display_name": gguf.stem,
-            "task_description": f"Modelo local GGUF â€” {size_gb} GB",
+            "task_description": f"Modelo local GGUF  -  {size_gb} GB",
             "path": str(gguf.relative_to(BASE_DIR)),
             "size_gb": size_gb,
         })
@@ -1401,14 +1401,14 @@ def api_rate_limits_summary():
 
 @app.route("/api/local/hardware", methods=["GET"])
 def api_local_hardware():
-    """Retorna hw_profile.json (leÃ­do fresco en cada llamada)."""
+    """Retorna hw_profile.json (leído fresco en cada llamada)."""
     return jsonify(_load_hw_profile())
 
 
 @app.route("/api/local/recommended", methods=["GET"])
 def api_local_recommended():
     """
-    Retorna lista de modelos recomendados segÃºn el hardware.
+    Retorna lista de modelos recomendados según el hardware.
     Query param: ?refresh=1 para forzar nueva consulta a los LLMs.
     Siempre lee hw_profile.json fresco para reflejar cambios post-setup.
     """
@@ -1463,7 +1463,7 @@ def api_local_download():
     if not repo_id or not filename:
         return jsonify({"error": "repo_id y filename son obligatorios"}), 400
     if not _valid_gguf_filename(filename):
-        return jsonify({"error": "Nombre de archivo invÃ¡lido"}), 400
+        return jsonify({"error": "Nombre de archivo inválido"}), 400
 
     job_id = f"{int(time.time())}_{uuid.uuid4().hex[:8]}_{filename}"
     job = {
@@ -1527,7 +1527,7 @@ def api_local_download_status(job_id: str):
         return jsonify({"error": "job no encontrado"}), 404
 
     def generate():
-        # Ping inicial: establece la conexiÃ³n SSE antes de que llegue el primer dato
+        # Ping inicial: establece la conexión SSE antes de que llegue el primer dato
         yield ": ping\n\n"
         while True:
             with _download_jobs_lock:
@@ -1568,7 +1568,7 @@ def api_local_cancel_download(job_id: str):
 def api_local_delete_model(filename: str):
     """Elimina un archivo GGUF del cache."""
     if not _valid_gguf_filename(filename):
-        return jsonify({"error": "Nombre de archivo invÃ¡lido"}), 400
+        return jsonify({"error": "Nombre de archivo inválido"}), 400
     target = MODELS_DIR / filename
     if not target.exists():
         return jsonify({"error": "Archivo no encontrado"}), 404
@@ -1583,7 +1583,7 @@ def api_local_move_model(filename: str):
     if not _is_localhost():
         return jsonify({"error": "Mover modelos a rutas arbitrarias solo se permite desde localhost"}), 403
     if not _valid_gguf_filename(filename):
-        return jsonify({"error": "Nombre de archivo invÃƒÂ¡lido"}), 400
+        return jsonify({"error": "Nombre de archivo inválido"}), 400
 
     body = request.get_json(silent=True) or {}
     destination_dir = (body.get("destination_dir") or "").strip()
@@ -1619,7 +1619,7 @@ def api_local_archive():
 def api_local_archive_model(filename: str):
     """Mueve un GGUF descargado a models/archive/ para guardarlo fuera del cache activo."""
     if not _valid_gguf_filename(filename):
-        return jsonify({"error": "Nombre de archivo invÃƒÂ¡lido"}), 400
+        return jsonify({"error": "Nombre de archivo inválido"}), 400
     try:
         from labelforge_core.local_models import archive_model
         archive_model(filename)
@@ -1637,7 +1637,7 @@ def api_local_archive_model(filename: str):
 def api_local_restore_model(filename: str):
     """Restaura un GGUF desde models/archive/ hacia models/."""
     if not _valid_gguf_filename(filename):
-        return jsonify({"error": "Nombre de archivo invÃƒÂ¡lido"}), 400
+        return jsonify({"error": "Nombre de archivo inválido"}), 400
     try:
         from labelforge_core.local_models import restore_model
         restore_model(filename)
@@ -1655,7 +1655,7 @@ def api_local_restore_model(filename: str):
 def api_local_delete_archived_model(filename: str):
     """Elimina permanentemente un GGUF archivado."""
     if not _valid_gguf_filename(filename):
-        return jsonify({"error": "Nombre de archivo invÃƒÂ¡lido"}), 400
+        return jsonify({"error": "Nombre de archivo inválido"}), 400
     try:
         from labelforge_core.local_models import delete_archived_model
         delete_archived_model(filename)
@@ -2917,6 +2917,6 @@ if __name__ == "__main__":
     import os as _os
     _host = _os.environ.get("LABELFORGE_HOST", "127.0.0.1")
     _port = int(_os.environ.get("LABELFORGE_PORT", "7860"))
-    print(f"  LabelForge  â†’  http://{_host}:{_port}")
+    print(f"  LabelForge   ->   http://{_host}:{_port}")
     app.run(debug=True, host=_host, port=_port, threaded=True)
 

@@ -30,18 +30,19 @@ import warnings
 import getpass
 import ast
 import re
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-# Silenciar warnings de deprecaciÃ³n del SDK de Vertex AI
+# Silenciar warnings de deprecación del SDK de Vertex AI
 warnings.filterwarnings("ignore", category=UserWarning, module="vertexai")
 
 from dotenv import load_dotenv
 
 # ---------------------------------------------------------------------------
-# MÃ³dulo compartido de mÃ©tricas de acuerdo
+# Módulo compartido de métricas de acuerdo
 # ---------------------------------------------------------------------------
 from labelforge_core.agreement_metrics import (
     CONSENSUS_METRIC_KEYS,
@@ -87,6 +88,8 @@ LOG_PATH           = LOGS_DIR / f"run_{RUN_ID}.log"
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -449,12 +452,12 @@ class DynamicRateLimiter:
     def on_rate_limit(self):
         self.consec_ok = 0
         self.delay     = min(self.max_delay, self.delay * self.rl_mult)
-        log.warning(f"Rate limiter: 429 detectado, delay â†’ {self.delay:.2f}s")
+        log.warning(f"Rate limiter: 429 detectado, delay  ->  {self.delay:.2f}s")
 
     def on_server_error(self):
         self.consec_ok = 0
         self.delay     = min(self.max_delay, self.delay * self.srv_mult)
-        log.warning(f"Rate limiter: error servidor, delay â†’ {self.delay:.2f}s")
+        log.warning(f"Rate limiter: error servidor, delay  ->  {self.delay:.2f}s")
 
 
 def classify_llm_error(exc: Exception) -> dict:
@@ -723,7 +726,7 @@ def _call_local(arbiter: dict, prompt_user: str) -> tuple:
         try:
             return _call_openvino(arbiter, prompt_user)
         except Exception as exc:
-            log.warning("[local] NPU fallÃ³ (%s) â€” recayendo en llama-cpp-python", exc)
+            log.warning("[local] NPU falló (%s)  -  recayendo en llama-cpp-python", exc)
 
     return _call_llama_cpp(arbiter, prompt_user)
 
@@ -962,7 +965,7 @@ def call_arbiter(
 
         rate_limiter.on_success()
         total_tokens = int(usage.get("prompt_tokens", 0) or 0) + int(usage.get("completion_tokens", 0) or 0)
-        log.info(f"[{arb_id}] llamada OK â€” latencia={latency_s:.3f}s tokens={total_tokens}")
+        log.info(f"[{arb_id}] llamada OK  -  latencia={latency_s:.3f}s tokens={total_tokens}")
         return result
 
     except Exception as e:
@@ -1474,7 +1477,7 @@ def process_claim(
     arb_results = dict(partial_arbiter_results.get(row_key, {}))
     for arb in arbiters:
         if arb["id"] in arb_results:
-            log.info(f"[entrada {row_index}] Arbitro {arb['id']} ya completado â€” reutilizando checkpoint")
+            log.info(f"[entrada {row_index}] Arbitro {arb['id']} ya completado  -  reutilizando checkpoint")
             continue
         result = call_arbiter(arb, claim, rate_limiters[arb["id"]], task_cfg, proc_cfg)
         if result is None:
@@ -1483,7 +1486,7 @@ def process_claim(
             cfg["_last_failure_kind"] = arb.get("_last_error_kind", "unknown")
             cfg["_last_failure_retryable"] = arb.get("_last_retryable", True)
             cfg["_pause_requested"] = bool(arb.get("_last_pause_recommended", True))
-            log.warning(f"[entrada {row_index}] Arbitro {arb['id']} fallo â€” entrada encolada â€” {reason[:240]}")
+            log.warning(f"[entrada {row_index}] Arbitro {arb['id']} fallo  -  entrada encolada  -  {reason[:240]}")
             return None
         arb_results[arb["id"]] = result
         partial_arbiter_results.setdefault(row_key, {})[arb["id"]] = result
@@ -1511,9 +1514,9 @@ def process_claim(
     add_entry_usage_metrics(record, arbiters)
     entry_consensus_metrics = add_entry_consensus_metrics(record, arbiters, principles)
     log.info(
-        f"[entrada {row_index}] OK â€” "
+        f"[entrada {row_index}] OK  -  "
         + " ".join(f"{p}={consensus[p]}" for p in principles)
-        + " â€” "
+        + "  -  "
         + format_entry_consensus_metrics(entry_consensus_metrics, principles)
     )
     return record
@@ -1766,7 +1769,7 @@ def main():
         claim = row.get(text_column, "").strip()
 
         if not claim:
-            log.warning(f"[entrada {i}] Vacia â€” saltando")
+            log.warning(f"[entrada {i}] Vacia  -  saltando")
             results[str(i)] = {f: "" for f in build_extra_fieldnames(arbiters, principles)}
             append_claim_result(i, results[str(i)], "skipped")
             save_checkpoint(max_persisted_index(results), results)
@@ -1838,7 +1841,7 @@ def main():
             idx    = item["index"]
             existing = results.get(str(idx))
             if existing and is_record_final(existing, principles):
-                log.info(f"[entrada {idx}] Ya tiene resultado final â€” saltando cola de fallidos")
+                log.info(f"[entrada {idx}] Ya tiene resultado final  -  saltando cola de fallidos")
                 continue
             claim  = item["row"].get(text_column, "").strip()
             cfg.pop("_pause_requested", None)

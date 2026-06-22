@@ -105,7 +105,7 @@ def _check_llama_cpp(arb_id: str, provider: dict) -> list[str]:
         import llama_cpp  # noqa: F401
     except ImportError:
         issues.append(
-            f"{arb_id}: llama-cpp-python no estÃ¡ instalado. "
+            f"{arb_id}: llama-cpp-python no está instalado. "
             "Ejecuta 'python setup_env.py' para instalarlo con soporte GPU correcto."
         )
 
@@ -114,7 +114,7 @@ def _check_llama_cpp(arb_id: str, provider: dict) -> list[str]:
     if not model_path:
         issues.append(
             f"{arb_id}: llama_cpp requiere provider.model_path con la ruta al archivo .gguf. "
-            "Descarga un modelo desde la webapp (Ãrbitros â†’ Descargar modelos)."
+            "Descarga un modelo desde la webapp (Árbitros  ->  Descargar modelos)."
         )
     else:
         base_dir = Path(__file__).resolve().parent.parent
@@ -122,7 +122,7 @@ def _check_llama_cpp(arb_id: str, provider: dict) -> list[str]:
         if not full_path.exists():
             issues.append(
                 f"{arb_id}: modelo GGUF no encontrado: {model_path}. "
-                "DescÃ¡rgalo desde la webapp (Ãrbitros â†’ Descargar modelos)."
+                "Descárgalo desde la webapp (Árbitros  ->  Descargar modelos)."
             )
         elif full_path.suffix.lower() != ".gguf":
             issues.append(

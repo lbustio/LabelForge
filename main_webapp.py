@@ -75,7 +75,7 @@ def main():
     )
     args = parser.parse_args()
 
-    print(f"  LabelForge  â†’  http://{args.host}:{args.port}")
+    print(f"  LabelForge   ->   http://{args.host}:{args.port}")
     status = auth_status()
     if status["mode"] == "disabled":
         print("  Auth        →  desactivado explicitamente con LABELFORGE_AUTH_DISABLED=1")
