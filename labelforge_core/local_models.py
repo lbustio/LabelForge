@@ -1,15 +1,15 @@
-"""
+﻿"""
 local_models.py
 ---------------
-Gestión de modelos GGUF locales para LabelForge.
+GestiÃ³n de modelos GGUF locales para LabelForge.
 
 Responsabilidades:
-  - Leer hw_profile.json para parámetros de runtime
+  - Leer hw_profile.json para parÃ¡metros de runtime
   - Listar GGUFs cacheados en models/
-  - Calcular n_gpu_layers óptimo según tamaño del modelo vs VRAM disponible
+  - Calcular n_gpu_layers Ã³ptimo segÃºn tamaÃ±o del modelo vs VRAM disponible
   - Cache de modelos Llama cargados (evita recargar en cada llamada)
-  - Catálogo de modelos recomendados por tier de hardware
-  - Descarga desde Hugging Face con verificación de integridad
+  - CatÃ¡logo de modelos recomendados por tier de hardware
+  - Descarga desde Hugging Face con verificaciÃ³n de integridad
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from scripts.paths import (
+from labelforge_core.paths import (
     BASE_DIR,
     HW_PROFILE_PATH,
     MODELS_DIR,
@@ -35,7 +35,7 @@ from scripts.paths import (
 
 log = logging.getLogger(__name__)
 
-from scripts.cuda_init import _ensure_cuda_ready as _cuda_ready
+from labelforge_core.cuda_init import _ensure_cuda_ready as _cuda_ready
 _cuda_ready()
 
 MODELS_JSON   = MODELS_DIR / "models.json"
@@ -75,8 +75,8 @@ def _catalog_llm_model(provider: str) -> str:
     return _load_catalog_cfg().get("llm_models", {}).get(provider, defaults.get(provider, ""))
 
 # ---------------------------------------------------------------------------
-# Cache de modelos Llama cargados — evita recargar en cada llamada de arbiter
-# Clave: (model_path_str, n_ctx)  Valor: (instancia Llama, último acceso float)
+# Cache de modelos Llama cargados â€” evita recargar en cada llamada de arbiter
+# Clave: (model_path_str, n_ctx)  Valor: (instancia Llama, Ãºltimo acceso float)
 # ---------------------------------------------------------------------------
 _LLAMA_MODEL_CACHE: dict = {}   # {key: (Llama, last_access_time)}
 _cache_lock = threading.Lock()
@@ -89,7 +89,7 @@ _cache_lock = threading.Lock()
 def load_hw_profile() -> dict:
     if not HW_PROFILE.exists():
         raise FileNotFoundError(
-            f"No se encontró {HW_PROFILE}. "
+            f"No se encontrÃ³ {HW_PROFILE}. "
             "Ejecuta 'python setup_env.py' antes de usar modelos locales."
         )
     with open(HW_PROFILE, encoding="utf-8") as f:
@@ -97,12 +97,12 @@ def load_hw_profile() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# GGUF metadata — leer número de capas sin cargar el modelo
+# GGUF metadata â€” leer nÃºmero de capas sin cargar el modelo
 # ---------------------------------------------------------------------------
 
 def _read_gguf_n_layers(model_path: Path) -> Optional[int]:
     """
-    Lee el número de capas del modelo desde los metadatos GGUF.
+    Lee el nÃºmero de capas del modelo desde los metadatos GGUF.
     Formato GGUF: magic(4) + version(4) + n_tensors(8) + n_kv(8) + kv_pairs...
     Busca la clave 'llama.block_count' o 'general.architecture' + '.block_count'.
     """
@@ -152,13 +152,13 @@ def _read_gguf_n_layers(model_path: Path) -> Optional[int]:
 
 
 # ---------------------------------------------------------------------------
-# Cálculo de parámetros óptimos
+# CÃ¡lculo de parÃ¡metros Ã³ptimos
 # ---------------------------------------------------------------------------
 
 def get_optimal_params(model_path: str, n_ctx: int = 4096, hw_profile: Optional[dict] = None) -> dict:
     """
-    Calcula {n_gpu_layers, n_threads, n_batch} óptimos para un modelo GGUF
-    según el hardware disponible en hw_profile.json.
+    Calcula {n_gpu_layers, n_threads, n_batch} Ã³ptimos para un modelo GGUF
+    segÃºn el hardware disponible en hw_profile.json.
     """
     path = Path(model_path)
     if not path.is_absolute():
@@ -175,7 +175,7 @@ def get_optimal_params(model_path: str, n_ctx: int = 4096, hw_profile: Optional[
     best  = hw_profile.get("best_backend", "cpu")
 
     cores = cpu.get("cores_physical", 4) or 4
-    n_threads = max(1, min(cores, 8))  # Limitar para dejar núcleos al sistema
+    n_threads = max(1, min(cores, 8))  # Limitar para dejar nÃºcleos al sistema
 
     # Sin GPU o backend CPU: todo en CPU
     if not gpu.get("detected") or best == "cpu":
@@ -192,14 +192,14 @@ def get_optimal_params(model_path: str, n_ctx: int = 4096, hw_profile: Optional[
     elif vram_gb:
         effective_vram = vram_gb * 0.90
     else:
-        # VRAM desconocida — modo conservador: usar 4 GB estimado
+        # VRAM desconocida â€” modo conservador: usar 4 GB estimado
         effective_vram = 4.0
 
     if model_size_g == 0 or model_size_g <= effective_vram * 0.9:
-        # Todo el modelo cabe en VRAM (o no sabemos el tamaño)
+        # Todo el modelo cabe en VRAM (o no sabemos el tamaÃ±o)
         n_gpu_layers = -1
     else:
-        # Carga parcial: calcular cuántas capas caben
+        # Carga parcial: calcular cuÃ¡ntas capas caben
         n_layers = _read_gguf_n_layers(path)
         if n_layers and n_layers > 0:
             ratio = effective_vram / model_size_g
@@ -209,13 +209,13 @@ def get_optimal_params(model_path: str, n_ctx: int = 4096, hw_profile: Optional[
         else:
             # No pudimos leer capas: modo seguro, solo CPU
             n_gpu_layers = 0
-            log.warning("[local_models] No se pudo leer n_layers de %s — modo CPU", path.name)
+            log.warning("[local_models] No se pudo leer n_layers de %s â€” modo CPU", path.name)
 
     return {"n_gpu_layers": n_gpu_layers, "n_threads": n_threads, "n_batch": 512}
 
 
 # ---------------------------------------------------------------------------
-# Catálogo fallback (usado cuando los LLMs no están disponibles)
+# CatÃ¡logo fallback (usado cuando los LLMs no estÃ¡n disponibles)
 # ---------------------------------------------------------------------------
 
 _FALLBACK_CATALOG = [
@@ -223,43 +223,43 @@ _FALLBACK_CATALOG = [
         "repo_id": "bartowski/Llama-3.2-1B-Instruct-GGUF",
         "filename": "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
         "size_gb": 0.8, "ram_min_gb": 4, "tier": "micro",
-        "description": "Llama 3.2 1B — muy rápido, ideal para CPU o sistemas con poca RAM",
+        "description": "Llama 3.2 1B â€” muy rÃ¡pido, ideal para CPU o sistemas con poca RAM",
     },
     {
         "repo_id": "bartowski/Llama-3.2-3B-Instruct-GGUF",
         "filename": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
         "size_gb": 2.0, "ram_min_gb": 6, "tier": "small",
-        "description": "Llama 3.2 3B — balance calidad/velocidad para sistemas medianos",
+        "description": "Llama 3.2 3B â€” balance calidad/velocidad para sistemas medianos",
     },
     {
         "repo_id": "bartowski/Llama-3.1-8B-Instruct-GGUF",
         "filename": "Llama-3.1-8B-Instruct-Q4_K_M.gguf",
         "size_gb": 4.9, "ram_min_gb": 8, "tier": "medium",
-        "description": "Llama 3.1 8B — buena calidad, requiere al menos 8 GB RAM/VRAM",
+        "description": "Llama 3.1 8B â€” buena calidad, requiere al menos 8 GB RAM/VRAM",
     },
     {
         "repo_id": "bartowski/Mistral-7B-Instruct-v0.3-GGUF",
         "filename": "Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
         "size_gb": 4.1, "ram_min_gb": 8, "tier": "medium",
-        "description": "Mistral 7B — excelente para clasificación estructurada",
+        "description": "Mistral 7B â€” excelente para clasificaciÃ³n estructurada",
     },
     {
         "repo_id": "bartowski/Qwen2.5-7B-Instruct-GGUF",
         "filename": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
         "size_gb": 4.7, "ram_min_gb": 8, "tier": "medium",
-        "description": "Qwen 2.5 7B — buena alternativa a Mistral 7B",
+        "description": "Qwen 2.5 7B â€” buena alternativa a Mistral 7B",
     },
     {
         "repo_id": "bartowski/Llama-3.3-70B-Instruct-GGUF",
         "filename": "Llama-3.3-70B-Instruct-Q4_K_M.gguf",
         "size_gb": 43.0, "ram_min_gb": 48, "tier": "large",
-        "description": "Llama 3.3 70B — máxima calidad, requiere GPU con 40+ GB VRAM",
+        "description": "Llama 3.3 70B â€” mÃ¡xima calidad, requiere GPU con 40+ GB VRAM",
     },
 ]
 
 
 # ---------------------------------------------------------------------------
-# Catálogo dinámico — consultado a los LLMs configurados
+# CatÃ¡logo dinÃ¡mico â€” consultado a los LLMs configurados
 # ---------------------------------------------------------------------------
 
 
@@ -271,7 +271,7 @@ def _hw_summary(hw: dict) -> str:
         f"OS: {hw.get('os', '?')}",
         f"CPU: {cpu.get('vendor', '?')} {cpu.get('model', '?')} ({cpu.get('cores_physical', '?')} cores)",
         f"RAM: {hw.get('ram_gb', '?')} GB",
-        f"GPU: {gpu.get('name', 'none')} — VRAM: {gpu.get('vram_gb') or 'shared/unknown'} GB"
+        f"GPU: {gpu.get('name', 'none')} â€” VRAM: {gpu.get('vram_gb') or 'shared/unknown'} GB"
         + (" (shared memory)" if gpu.get("shared_memory") else ""),
         f"NPU: {npu.get('vendor', '') + ' ' + npu.get('type', '') if npu.get('detected') else 'none'}",
         f"Best backend: {hw.get('best_backend', 'cpu')}",
@@ -302,7 +302,7 @@ def _query_gemini(hw: dict) -> list[dict]:
         )
         return _parse_llm_catalog_response(response.text)
     except Exception as exc:
-        log.warning("[catalog] Gemini falló: %s", exc)
+        log.warning("[catalog] Gemini fallÃ³: %s", exc)
         return []
 
 
@@ -322,7 +322,7 @@ def _query_anthropic(hw: dict) -> list[dict]:
         )
         return _parse_llm_catalog_response(message.content[0].text)
     except Exception as exc:
-        log.warning("[catalog] Anthropic falló: %s", exc)
+        log.warning("[catalog] Anthropic fallÃ³: %s", exc)
         return []
 
 
@@ -345,7 +345,7 @@ def _query_openai(hw: dict) -> list[dict]:
         )
         return _parse_llm_catalog_response(response.choices[0].message.content)
     except Exception as exc:
-        log.warning("[catalog] OpenAI falló: %s", exc)
+        log.warning("[catalog] OpenAI fallÃ³: %s", exc)
         return []
 
 
@@ -402,9 +402,9 @@ def _parse_llm_catalog_response(raw: str) -> list[dict]:
 
 def _synthesize_catalog(responses: list[list[dict]]) -> list[dict]:
     """
-    Fusiona las respuestas de múltiples LLMs.
-    Los modelos recomendados por más proveedores aparecen primero.
-    Desduplicación por filename (case-insensitive).
+    Fusiona las respuestas de mÃºltiples LLMs.
+    Los modelos recomendados por mÃ¡s proveedores aparecen primero.
+    DesduplicaciÃ³n por filename (case-insensitive).
     """
     counts: dict[str, int] = {}
     by_filename: dict[str, dict] = {}
@@ -420,16 +420,16 @@ def _synthesize_catalog(responses: list[list[dict]]) -> list[dict]:
             if key not in by_filename:
                 by_filename[key] = item
             else:
-                # Si la descripción es más larga, usarla
+                # Si la descripciÃ³n es mÃ¡s larga, usarla
                 if len(item.get("description", "")) > len(by_filename[key].get("description", "")):
                     by_filename[key]["description"] = item["description"]
 
-    # Ordenar: mayor votos primero, luego por tamaño
+    # Ordenar: mayor votos primero, luego por tamaÃ±o
     ranked = sorted(
         by_filename.values(),
         key=lambda m: (-counts[m["filename"].lower()], m["size_gb"]),
     )
-    # Añadir campo de consenso
+    # AÃ±adir campo de consenso
     for m in ranked:
         m["consensus_votes"] = counts[m["filename"].lower()]
 
@@ -458,15 +458,15 @@ def build_dynamic_catalog(hw_profile: dict, force: bool = False) -> list[dict]:
     """
     Consulta en paralelo a todos los LLMs disponibles (Gemini, Anthropic, OpenAI)
     para obtener recomendaciones de modelos GGUF adaptadas al hardware.
-    Usa caché de 7 días. Fallback al catálogo estático si todo falla.
+    Usa cachÃ© de 7 dÃ­as. Fallback al catÃ¡logo estÃ¡tico si todo falla.
     """
     if not force:
         cached = _load_catalog_cache()
         if cached:
-            log.info("[catalog] Usando catálogo en caché (%d modelos)", len(cached))
+            log.info("[catalog] Usando catÃ¡logo en cachÃ© (%d modelos)", len(cached))
             return cached
 
-    log.info("[catalog] Consultando LLMs para catálogo dinámico de modelos GGUF…")
+    log.info("[catalog] Consultando LLMs para catÃ¡logo dinÃ¡mico de modelos GGUFâ€¦")
 
     queries = [
         ("Gemini",    _query_gemini),
@@ -482,19 +482,19 @@ def build_dynamic_catalog(hw_profile: dict, force: bool = False) -> list[dict]:
             try:
                 result = fut.result()
                 if result:
-                    log.info("[catalog] %s aportó %d modelos", name, len(result))
+                    log.info("[catalog] %s aportÃ³ %d modelos", name, len(result))
                     responses.append(result)
                 else:
-                    log.info("[catalog] %s: sin clave o sin modelos válidos", name)
+                    log.info("[catalog] %s: sin clave o sin modelos vÃ¡lidos", name)
             except Exception as exc:
                 log.warning("[catalog] %s error: %s", name, exc)
 
     if not responses:
-        log.warning("[catalog] Ningún LLM respondió — usando catálogo fallback")
+        log.warning("[catalog] NingÃºn LLM respondiÃ³ â€” usando catÃ¡logo fallback")
         return _FALLBACK_CATALOG
 
     catalog = _synthesize_catalog(responses)
-    log.info("[catalog] Catálogo dinámico: %d modelos únicos (de %d LLMs)", len(catalog), len(responses))
+    log.info("[catalog] CatÃ¡logo dinÃ¡mico: %d modelos Ãºnicos (de %d LLMs)", len(catalog), len(responses))
     _save_catalog_cache(catalog)
     return catalog
 
@@ -503,7 +503,7 @@ def recommended_models(hw_profile: Optional[dict] = None, force_refresh: bool = 
     """
     Retorna modelos recomendados para el hardware disponible.
     Consulta LLMs configurados para obtener recomendaciones actualizadas.
-    Usa caché de 7 días. Fallback al catálogo estático si no hay LLMs disponibles.
+    Usa cachÃ© de 7 dÃ­as. Fallback al catÃ¡logo estÃ¡tico si no hay LLMs disponibles.
     """
     if hw_profile is None:
         try:
@@ -523,7 +523,7 @@ def recommended_models(hw_profile: Optional[dict] = None, force_refresh: bool = 
         try:
             import psutil
             ram_gb = round(psutil.virtual_memory().total / (1024 ** 3), 1)
-            log.debug("[local_models] hw_profile vacío — usando RAM del sistema: %.1f GB", ram_gb)
+            log.debug("[local_models] hw_profile vacÃ­o â€” usando RAM del sistema: %.1f GB", ram_gb)
         except Exception:
             pass
 
@@ -553,7 +553,7 @@ ARCHIVE_DIR = MODELS_DIR / "archive"
 
 
 class DownloadCancelled(RuntimeError):
-    """Señal interna para cancelar una descarga GGUF en curso."""
+    """SeÃ±al interna para cancelar una descarga GGUF en curso."""
 
 # Familias conocidas de modelos GGUF para parseo de nombre
 _GGUF_FAMILIES = [
@@ -581,17 +581,17 @@ _GGUF_FAMILIES = [
 
 
 def _parse_gguf_metadata(filename: str) -> dict:
-    """Extrae familia, parámetros, cuantización y variante de un nombre de archivo GGUF."""
+    """Extrae familia, parÃ¡metros, cuantizaciÃ³n y variante de un nombre de archivo GGUF."""
     stem = Path(filename).stem
 
-    # Cuantización: al final del stem (Q4_K_M, Q8_0, F16, IQ3_XS, etc.)
+    # CuantizaciÃ³n: al final del stem (Q4_K_M, Q8_0, F16, IQ3_XS, etc.)
     m = re.search(
         r'[-_]((?:IQ\d+_\w+|Q\d+(?:_K(?:_[SML])?)?|F16|F32|BF16))$',
         stem, re.IGNORECASE,
     )
     quant = m.group(1).upper() if m else ""
 
-    # Recuento de parámetros: ej. 3B, 7B, 13B, 0.5B, 1.5B
+    # Recuento de parÃ¡metros: ej. 3B, 7B, 13B, 0.5B, 1.5B
     m = re.search(r'[-_](\d+(?:\.\d+)?[Bb])', stem)
     params = m.group(1).upper() if m else ""
 
@@ -650,7 +650,7 @@ def list_cached_models() -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Gestión del archivo de modelos (models/archive/)
+# GestiÃ³n del archivo de modelos (models/archive/)
 # ---------------------------------------------------------------------------
 
 def list_archived_models() -> list[dict]:
@@ -774,7 +774,7 @@ def _sha256_file(path: Path, chunk_size: int = 1 << 20) -> str:
 def _resolve_gguf_filename(repo_id: str, filename: str) -> str:
     """
     Si el filename exacto no existe en el repo, busca coincidencia insensible
-    a mayúsculas entre los archivos .gguf del repositorio.
+    a mayÃºsculas entre los archivos .gguf del repositorio.
     Retorna el nombre correcto o el original si no se puede resolver.
     """
     try:
@@ -786,7 +786,7 @@ def _resolve_gguf_filename(repo_id: str, filename: str) -> str:
         matches = [f for f in gguf_files if f.lower() == filename_lower]
         if matches:
             log.warning(
-                "[local_models] Nombre corregido para %s: %s → %s",
+                "[local_models] Nombre corregido para %s: %s â†’ %s",
                 repo_id, filename, matches[0],
             )
             return matches[0]
@@ -817,10 +817,10 @@ def _hf_token() -> Optional[str]:
 
 def _stream_download(url: str, dest: Path, progress_callback=None) -> None:
     """
-    Descarga con streaming, progreso en tiempo real y soporte de reanudación.
+    Descarga con streaming, progreso en tiempo real y soporte de reanudaciÃ³n.
 
-    - Si existe un archivo .part de una descarga anterior, envía Range: bytes=N-
-      para continuar desde donde quedó (el servidor debe soportar HTTP 206).
+    - Si existe un archivo .part de una descarga anterior, envÃ­a Range: bytes=N-
+      para continuar desde donde quedÃ³ (el servidor debe soportar HTTP 206).
     - El .part NO se borra en caso de error, permitiendo reintentar y reanudar.
     - timeout=(15, 120): 15 s para conectar, 120 s entre chunks (evita stalls).
     """
@@ -851,16 +851,16 @@ def _stream_download(url: str, dest: Path, progress_callback=None) -> None:
         # Si el servidor ignora el Range y devuelve 200 en vez de 206,
         # empezar de cero para evitar datos duplicados/corruptos
         if resumed and r.status_code == 200:
-            log.warning("[local_models] El servidor no soporta Range — reiniciando desde 0")
+            log.warning("[local_models] El servidor no soporta Range â€” reiniciando desde 0")
             resumed = 0
             headers.pop("Range", None)
 
         content_length = int(r.headers.get("content-length", 0))
-        total      = resumed + content_length  # tamaño completo del archivo
+        total      = resumed + content_length  # tamaÃ±o completo del archivo
         downloaded = resumed
         last_logged_pct = (resumed * 100 // total) if total else -1
 
-        # Notificar el progreso inicial (útil cuando se reanuda)
+        # Notificar el progreso inicial (Ãºtil cuando se reanuda)
         if progress_callback and total and resumed:
             progress_callback(downloaded, total)
 
@@ -881,7 +881,7 @@ def _stream_download(url: str, dest: Path, progress_callback=None) -> None:
                 else:
                     mb = int(downloaded / 1_048_576)
                     if mb % 100 == 0 and mb != last_logged_pct:
-                        log.info("[local_models] %s: %.0f MB descargados…",
+                        log.info("[local_models] %s: %.0f MB descargadosâ€¦",
                                  dest.name, downloaded / 1_048_576)
                         last_logged_pct = mb
 
@@ -897,7 +897,7 @@ def download_model(
 ) -> Path:
     """
     Descarga un modelo GGUF desde Hugging Face Hub a models/ con progreso en tiempo real.
-    Intenta corregir automáticamente el nombre del archivo si hay un 404.
+    Intenta corregir automÃ¡ticamente el nombre del archivo si hay un 404.
     progress_callback(downloaded_bytes, total_bytes) se llama durante la descarga.
     Lanza RuntimeError si falla o el SHA256 no coincide.
     """
@@ -923,7 +923,7 @@ def download_model(
         raise
     except Exception as exc:
         exc_str = str(exc)
-        # 404 → intentar con nombre corregido (diferencias de mayúsculas/minúsculas)
+        # 404 â†’ intentar con nombre corregido (diferencias de mayÃºsculas/minÃºsculas)
         if any(k in exc_str for k in ("404", "Not Found", "not found")):
             corrected = _resolve_gguf_filename(repo_id, filename)
             if corrected != filename:
@@ -975,7 +975,7 @@ def download_model(
 
 
 def _update_models_json(model_path: Path, repo_id: str = "", description: str = ""):
-    """Actualiza models/models.json con el modelo recién descargado."""
+    """Actualiza models/models.json con el modelo reciÃ©n descargado."""
     registry: list = []
     if MODELS_JSON.exists():
         try:
@@ -1052,7 +1052,7 @@ def get_or_load_llama(model_path: str, n_ctx: int = 4096, **llama_kwargs):
         if not path.exists():
             raise FileNotFoundError(
                 f"Modelo GGUF no encontrado: {path}. "
-                "Descárgalo desde la webapp (Árbitros → Descargar modelos)."
+                "DescÃ¡rgalo desde la webapp (Ãrbitros â†’ Descargar modelos)."
             )
         optimal = get_optimal_params(str(path), n_ctx)
 
@@ -1079,7 +1079,7 @@ def get_or_load_llama(model_path: str, n_ctx: int = 4096, **llama_kwargs):
                     lru_name = Path(lru_key[0]).name
                     del _LLAMA_MODEL_CACHE[lru_key]
                     log.warning(
-                        "[local_models] Fallo al cargar '%s' (%s) — "
+                        "[local_models] Fallo al cargar '%s' (%s) â€” "
                         "evictando '%s' (LRU) y reintentando",
                         path.name, exc, lru_name,
                     )
@@ -1092,3 +1092,4 @@ def clear_model_cache():
     with _cache_lock:
         _LLAMA_MODEL_CACHE.clear()
     log.info("[local_models] Cache de modelos Llama vaciada")
+

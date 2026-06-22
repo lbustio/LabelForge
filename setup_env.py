@@ -1,9 +1,9 @@
-"""
+﻿"""
 setup_env.py
 ------------
-Script de setup único para LabelForge con soporte de modelos locales GGUF.
+Script de setup Ãºnico para LabelForge con soporte de modelos locales GGUF.
 
-Ejecutar UNA VEZ por máquina, ANTES de main_webapp.py o main_cli.py:
+Ejecutar UNA VEZ por mÃ¡quina, ANTES de main_webapp.py o main_cli.py:
     python setup_env.py          # instalacion normal
     python setup_env.py --force  # reinstalar aunque ya este hecho
 
@@ -18,7 +18,7 @@ Flujo:
   8. Escribe models/hw_profile.json
   9. Imprime resumen final
 
-Logging: identico al pipeline — %(asctime)s [%(levelname)s] %(message)s
+Logging: identico al pipeline â€” %(asctime)s [%(levelname)s] %(message)s
          FileHandler (logs/setup_YYYYMMDD_HHMMSS.log) + StreamHandler
 """
 
@@ -52,7 +52,7 @@ LOG_PATH = LOG_DIR / f"setup_{RUN_TS}.log"
 
 
 # ---------------------------------------------------------------------------
-# Logging — mismo formato que el pipeline
+# Logging â€” mismo formato que el pipeline
 # ---------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
@@ -76,7 +76,7 @@ def _section(name: str):
 
 
 def _run_pip(args: list[str]) -> bool:
-    """Ejecuta pip capturando salida línea a línea. Retorna True si exitoso."""
+    """Ejecuta pip capturando salida lÃ­nea a lÃ­nea. Retorna True si exitoso."""
     cmd = [sys.executable, "-m", "pip"] + args
     log.info("Ejecutando: %s", " ".join(cmd))
     try:
@@ -93,7 +93,7 @@ def _run_pip(args: list[str]) -> bool:
                 log.info("  %s", line)
         proc.wait()
         if proc.returncode != 0:
-            log.error("pip salió con código %d", proc.returncode)
+            log.error("pip saliÃ³ con cÃ³digo %d", proc.returncode)
             return False
         return True
     except Exception as exc:
@@ -116,7 +116,7 @@ def check_python_version():
     ver = sys.version_info
     log.info("Python %d.%d.%d detectado", ver.major, ver.minor, ver.micro)
     if (ver.major, ver.minor) < (3, 10):
-        _abort(f"Se requiere Python >= 3.10. Versión actual: {ver.major}.{ver.minor}.{ver.micro}")
+        _abort(f"Se requiere Python >= 3.10. VersiÃ³n actual: {ver.major}.{ver.minor}.{ver.micro}")
     log.info("Version de Python OK")
 
 
@@ -129,7 +129,7 @@ def check_virtual_env():
 
     if not in_venv and not in_conda:
         _abort(
-            "No se detectó entorno virtual activo (venv o conda). "
+            "No se detectÃ³ entorno virtual activo (venv o conda). "
             "Crea uno con: python -m venv .venv && source .venv/bin/activate  "
             "(Windows: .venv\\Scripts\\activate)"
         )
@@ -138,17 +138,17 @@ def check_virtual_env():
 
 
 # ---------------------------------------------------------------------------
-# Detección de hardware
+# DetecciÃ³n de hardware
 # ---------------------------------------------------------------------------
 
 def detect_hardware() -> dict:
     _section("DETECTANDO HARDWARE")
-    # Import dinámico: el módulo puede no estar disponible si psutil no está aún
+    # Import dinÃ¡mico: el mÃ³dulo puede no estar disponible si psutil no estÃ¡ aÃºn
     try:
-        from scripts.hw_detection import detect_all
+        from labelforge_core.hw_detection import detect_all
         hw = detect_all()
     except ImportError:
-        # psutil todavía no está instalado — usar detección mínima
+        # psutil todavÃ­a no estÃ¡ instalado â€” usar detecciÃ³n mÃ­nima
         import platform
         hw = {
             "os": platform.system(),
@@ -160,20 +160,20 @@ def detect_hardware() -> dict:
             "gpu": {"detected": False},
             "best_backend": "cpu",
         }
-        log.warning("psutil no disponible — deteccion de HW parcial. Se reinstalará tras instalar requirements.")
+        log.warning("psutil no disponible â€” deteccion de HW parcial. Se reinstalarÃ¡ tras instalar requirements.")
 
     log.info("Sistema operativo : %s", hw["os"])
     log.info("Python            : %s", hw["python_version"])
 
     cpu = hw["cpu"]
-    log.info("CPU               : %s — %s (%d núcleos físicos)",
+    log.info("CPU               : %s â€” %s (%d nÃºcleos fÃ­sicos)",
              cpu.get("vendor", "?"), cpu.get("model", "?"), cpu.get("cores_physical", 0))
     log.info("CPU AVX2          : %s | AVX512: %s", cpu.get("avx2"), cpu.get("avx512"))
     log.info("RAM               : %.1f GB", hw["ram_gb"])
 
     npu = hw["npu"]
     if npu.get("detected"):
-        log.info("NPU               : %s %s — DETECTADA",
+        log.info("NPU               : %s %s â€” DETECTADA",
                  npu.get("vendor", "?"), npu.get("type", "?"))
     else:
         log.info("NPU               : no detectada")
@@ -181,14 +181,14 @@ def detect_hardware() -> dict:
     gpu = hw["gpu"]
     if gpu.get("detected"):
         vram_str = f"{gpu['vram_gb']} GB" if gpu.get("vram_gb") else "compartida/desconocida"
-        log.info("GPU               : %s — %s | VRAM: %s | Backend: %s",
+        log.info("GPU               : %s â€” %s | VRAM: %s | Backend: %s",
                  gpu.get("vendor", "?"), gpu.get("name", "?"), vram_str, gpu.get("backend", "?"))
         if gpu.get("shared_memory"):
-            log.info("                  (memoria de GPU compartida con sistema — factor conservador 0.75)")
+            log.info("                  (memoria de GPU compartida con sistema â€” factor conservador 0.75)")
     else:
-        log.info("GPU               : no detectada — se usará CPU")
+        log.info("GPU               : no detectada â€” se usarÃ¡ CPU")
 
-    log.info("Backend óptimo    : %s", hw["best_backend"])
+    log.info("Backend Ã³ptimo    : %s", hw["best_backend"])
     return hw
 
 
@@ -201,15 +201,15 @@ def install_base_requirements() -> bool:
     import tempfile
     req_path = BASE_DIR / "requirements.txt"
     if not req_path.exists():
-        _abort(f"No se encontró requirements.txt en {BASE_DIR}")
+        _abort(f"No se encontrÃ³ requirements.txt en {BASE_DIR}")
 
-    # Filtrar llama-cpp-python: lo instala setup_env.py con flags GPU específicos
+    # Filtrar llama-cpp-python: lo instala setup_env.py con flags GPU especÃ­ficos
     lines = req_path.read_text(encoding="utf-8").splitlines()
     filtered = [
         l for l in lines
         if not (l.strip().startswith("llama-cpp-python") and not l.strip().startswith("#"))
     ]
-    log.info("Instalando requirements.txt (excluyendo llama-cpp-python — se instala por separado)")
+    log.info("Instalando requirements.txt (excluyendo llama-cpp-python â€” se instala por separado)")
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as tmp:
         tmp.write("\n".join(filtered))
         tmp_path = tmp.name
@@ -219,14 +219,14 @@ def install_base_requirements() -> bool:
         Path(tmp_path).unlink(missing_ok=True)
 
     if not ok:
-        log.error("Falló la instalación de requirements.txt — se continuará con hardware ya detectado")
+        log.error("FallÃ³ la instalaciÃ³n de requirements.txt â€” se continuarÃ¡ con hardware ya detectado")
         return False
     log.info("Requirements base instalados OK")
     return True
 
 
 # ---------------------------------------------------------------------------
-# Backend NPU — OpenVINO
+# Backend NPU â€” OpenVINO
 # ---------------------------------------------------------------------------
 
 def install_npu_backend():
@@ -239,12 +239,12 @@ def install_npu_backend():
     log.info("Paquetes NPU: %s", ", ".join(packages))
     ok = _run_pip(["install"] + packages)
     if not ok:
-        log.warning("Falló la instalación del backend NPU (OpenVINO). Se continuará sin NPU.")
+        log.warning("FallÃ³ la instalaciÃ³n del backend NPU (OpenVINO). Se continuarÃ¡ sin NPU.")
         return False
 
     try:
         import openvino
-        log.info("OpenVINO importado OK — versión: %s", openvino.__version__)
+        log.info("OpenVINO importado OK â€” versiÃ³n: %s", openvino.__version__)
     except ImportError as exc:
         log.warning("OpenVINO instalado pero no importable: %s", exc)
         return False
@@ -254,7 +254,7 @@ def install_npu_backend():
 
 
 # ---------------------------------------------------------------------------
-# Backend GPU/CPU — llama-cpp-python
+# Backend GPU/CPU â€” llama-cpp-python
 # ---------------------------------------------------------------------------
 
 _ABETLEN_BASE = "https://abetlen.github.io/llama-cpp-python/whl"
@@ -278,16 +278,16 @@ def _cuda_source_env() -> dict:
     return env
 
 _LLAMA_INSTALL_MAP = {
-    # backend  → list of (env_vars_dict, pip_args_extra) intentos en orden
+    # backend  â†’ list of (env_vars_dict, pip_args_extra) intentos en orden
     "cuda":   [
-        # Intentos con wheels precompiladas — del más nuevo al más antiguo
+        # Intentos con wheels precompiladas â€” del mÃ¡s nuevo al mÃ¡s antiguo
         # cu130/cu128 necesarios para Blackwell (RTX 5xxx, sm_120+, CUDA 12.8+)
         ({}, ["--prefer-binary", "--extra-index-url", f"{_ABETLEN_BASE}/cu130"]),
         ({}, ["--prefer-binary", "--extra-index-url", f"{_ABETLEN_BASE}/cu128"]),
         ({}, ["--prefer-binary", "--extra-index-url", f"{_ABETLEN_BASE}/cu126"]),
         ({}, ["--prefer-binary", "--extra-index-url", f"{_ABETLEN_BASE}/cu124"]),
         ({}, ["--prefer-binary", "--extra-index-url", f"{_ABETLEN_BASE}/cu121"]),
-        # Último recurso: compilar desde fuente con MSVC
+        # Ãšltimo recurso: compilar desde fuente con MSVC
         ({"CMAKE_ARGS": "-DGGML_CUDA=on"}, ["--force-reinstall", "--no-cache-dir"]),
         # Fallback funcional si CUDA no carga en runtime
         ({}, ["--prefer-binary", "--extra-index-url", f"{_ABETLEN_BASE}/cpu"]),
@@ -298,7 +298,7 @@ _LLAMA_INSTALL_MAP = {
     "cpu":    [
         # 1er intento: wheel precompilada CPU (no requiere MSVC en Windows)
         ({}, ["--prefer-binary", "--extra-index-url", f"{_ABETLEN_BASE}/cpu"]),
-        # Último recurso: instalar genérico (intentará compilar si no hay wheel)
+        # Ãšltimo recurso: instalar genÃ©rico (intentarÃ¡ compilar si no hay wheel)
         ({}, []),
     ],
 }
@@ -320,7 +320,7 @@ def _uninstall_llama_cpp():
 
 
 def _detect_cuda_version() -> str:
-    """Retorna versión CUDA como '12.6' o '' si no se puede detectar."""
+    """Retorna versiÃ³n CUDA como '12.6' o '' si no se puede detectar."""
     try:
         out = subprocess.check_output(["nvidia-smi"], text=True, stderr=subprocess.DEVNULL, timeout=10)
         m = re.search(r"CUDA Version:\s*(\d+\.\d+)", out)
@@ -342,7 +342,7 @@ def _run_pip_attempt(env_vars: dict, extra_args: list) -> bool:
         run_env = {**env, "PIP_DISABLE_PIP_VERSION_CHECK": "1"}
         if os.name == "nt" and env_vars.get("CMAKE_ARGS") == "-DGGML_CUDA=on" and _WIN_VSDEVCMD.exists():
             # subprocess.list2cmdline escapa correctamente ">=" evitando que cmd.exe
-            # lo interprete como redirección de I/O
+            # lo interprete como redirecciÃ³n de I/O
             cmd_text = subprocess.list2cmdline(cmd)
             shell_cmd = f'call "{_WIN_VSDEVCMD}" -arch=x64 && {cmd_text}'
             proc = subprocess.Popen(
@@ -371,9 +371,9 @@ def _run_pip_attempt(env_vars: dict, extra_args: list) -> bool:
 def _probe_llama_cpp() -> tuple[bool, bool, str]:
     import tempfile
     # Escribir el probe como script temporal para evitar problemas de escaping y GC.
-    # IMPORTANTE: os.add_dll_directory() devuelve un handle — si se descarta sin asignar,
+    # IMPORTANTE: os.add_dll_directory() devuelve un handle â€” si se descarta sin asignar,
     # el GC lo destruye inmediatamente y elimina el directorio del search path.
-    # En CUDA 13.x las DLLs están en bin\x64, no en bin.
+    # En CUDA 13.x las DLLs estÃ¡n en bin\x64, no en bin.
     script = textwrap.dedent("""\
         import os, ctypes
         from pathlib import Path
@@ -432,22 +432,22 @@ def install_llama_cpp(backend: str) -> bool:
     if backend == "cuda":
         cuda_ver = _detect_cuda_version()
         if _has_windows_cuda_build_tools():
-            log.info("MSVC + CUDA Toolkit detectados — se prioriza compilación local CUDA desde fuente")
+            log.info("MSVC + CUDA Toolkit detectados â€” se prioriza compilaciÃ³n local CUDA desde fuente")
             source_attempt = (_cuda_source_env(), ["--force-reinstall", "--no-cache-dir"])
             attempts = [source_attempt] + [a for a in attempts if a != source_attempt]
         if cuda_ver:
-            log.info("CUDA detectada: versión %s", cuda_ver)
+            log.info("CUDA detectada: versiÃ³n %s", cuda_ver)
             major, minor = cuda_ver.split(".", 1)
             cu_tag = f"cu{major}{minor.split('.')[0]}"
             preferred = ({}, ["--prefer-binary", "--extra-index-url", f"{_ABETLEN_BASE}/{cu_tag}"])
-            # Insertar el intento con versión exacta como primera opción
+            # Insertar el intento con versiÃ³n exacta como primera opciÃ³n
             if not _has_windows_cuda_build_tools():
                 attempts = [preferred] + [a for a in attempts if a != preferred]
         else:
-            log.warning("No se pudo detectar versión de CUDA — se intentarán múltiples índices")
+            log.warning("No se pudo detectar versiÃ³n de CUDA â€” se intentarÃ¡n mÃºltiples Ã­ndices")
 
-    # Desinstalar versión previa para evitar incompatibilidades
-    log.info("Desinstalando versión previa de llama-cpp-python (si existe)...")
+    # Desinstalar versiÃ³n previa para evitar incompatibilidades
+    log.info("Desinstalando versiÃ³n previa de llama-cpp-python (si existe)...")
     _uninstall_llama_cpp()
 
     for i, (env_vars, extra_args) in enumerate(attempts, 1):
@@ -457,8 +457,8 @@ def install_llama_cpp(backend: str) -> bool:
             if import_ok:
                 if backend != "cpu" and not gpu_ok:
                     log.warning(
-                        "llama-cpp-python importó, pero sin offload GPU en intento %d. "
-                        "Se probará otra opción si queda disponible.",
+                        "llama-cpp-python importÃ³, pero sin offload GPU en intento %d. "
+                        "Se probarÃ¡ otra opciÃ³n si queda disponible.",
                         i,
                     )
                     if i < len(attempts):
@@ -469,7 +469,7 @@ def install_llama_cpp(backend: str) -> bool:
             log.warning("llama-cpp-python instalado pero no importable: %s", probe_output)
             if i < len(attempts):
                 _uninstall_llama_cpp()
-        log.warning("Intento %d falló — probando siguiente opción...", i)
+        log.warning("Intento %d fallÃ³ â€” probando siguiente opciÃ³n...", i)
 
     log.error("Todos los intentos de instalar llama-cpp-python fallaron")
     return False
@@ -485,18 +485,18 @@ def verify_imports(has_npu: bool, gpu_backend: str) -> dict:
 
     # Pre-cargar DLLs de CUDA antes de importar llama_cpp (necesario en Windows/CUDA 13.x)
     try:
-        from scripts.cuda_init import _ensure_cuda_ready
+        from labelforge_core.cuda_init import _ensure_cuda_ready
         _ensure_cuda_ready()
     except ImportError:
         pass
     try:
         import llama_cpp
         gpu_ok = llama_cpp.llama_supports_gpu_offload()
-        log.info("llama_cpp importado OK — GPU offload soportado: %s", gpu_ok)
+        log.info("llama_cpp importado OK â€” GPU offload soportado: %s", gpu_ok)
         if gpu_backend != "cpu" and not gpu_ok:
             log.warning(
                 "llama_cpp es importable, pero no reporta soporte GPU para backend=%s. "
-                "Se usará CPU como fallback.",
+                "Se usarÃ¡ CPU como fallback.",
                 gpu_backend,
             )
         results["llama_cpp"] = True
@@ -511,11 +511,11 @@ def verify_imports(has_npu: bool, gpu_backend: str) -> dict:
         results["llama_cpp"] = False
         results["llama_cpp_gpu"] = False
 
-    # openvino (solo si hubo intento de instalación NPU)
+    # openvino (solo si hubo intento de instalaciÃ³n NPU)
     if has_npu:
         try:
             import openvino
-            log.info("openvino importado OK — versión: %s", openvino.__version__)
+            log.info("openvino importado OK â€” versiÃ³n: %s", openvino.__version__)
             results["openvino"] = True
             results["openvino_version"] = openvino.__version__
         except (ImportError, RuntimeError, OSError) as exc:
@@ -525,7 +525,7 @@ def verify_imports(has_npu: bool, gpu_backend: str) -> dict:
     # huggingface_hub
     try:
         import huggingface_hub
-        log.info("huggingface_hub importado OK — versión: %s", huggingface_hub.__version__)
+        log.info("huggingface_hub importado OK â€” versiÃ³n: %s", huggingface_hub.__version__)
         results["huggingface_hub"] = True
     except (ImportError, RuntimeError, OSError) as exc:
         log.error("huggingface_hub NO importable: %s", exc)
@@ -551,14 +551,14 @@ def write_hw_profile(hw: dict, verify_results: dict, npu_ok: bool, llama_ok: boo
 
     gpu["ok"] = llama_ok and verify_results.get("llama_cpp_gpu", False)
 
-    # Si el NPU falló en runtime, el mejor backend baja al GPU/CPU
+    # Si el NPU fallÃ³ en runtime, el mejor backend baja al GPU/CPU
     best_backend = hw["best_backend"]
     if best_backend == "npu" and not npu_ok:
         best_backend = gpu.get("backend") or "cpu"
-        log.warning("NPU detectada pero backend OpenVINO no OK — recayendo en: %s", best_backend)
+        log.warning("NPU detectada pero backend OpenVINO no OK â€” recayendo en: %s", best_backend)
     if best_backend not in ("cpu", "npu") and not gpu.get("ok"):
         log.warning(
-            "GPU detectada con backend=%s, pero llama_cpp no confirmó offload GPU — recayendo en CPU",
+            "GPU detectada con backend=%s, pero llama_cpp no confirmÃ³ offload GPU â€” recayendo en CPU",
             best_backend,
         )
         best_backend = "cpu"
@@ -594,16 +594,16 @@ def print_summary(profile: dict):
     status = "EXITOSO" if ok else "CON ERRORES"
     log.info("Setup %s", status)
     log.info("Sistema       : %s | Python %s", profile["os"], profile["python_version"])
-    log.info("CPU           : %s — %s", profile["cpu"].get("vendor"), profile["cpu"].get("model"))
+    log.info("CPU           : %s â€” %s", profile["cpu"].get("vendor"), profile["cpu"].get("model"))
     log.info("RAM           : %.1f GB", profile["ram_gb"])
 
     npu = profile["npu"]
     if npu.get("detected"):
-        log.info("NPU           : %s %s — ok=%s", npu.get("vendor"), npu.get("type"), npu.get("ok"))
+        log.info("NPU           : %s %s â€” ok=%s", npu.get("vendor"), npu.get("type"), npu.get("ok"))
 
     gpu = profile["gpu"]
     if gpu.get("detected"):
-        log.info("GPU           : %s — ok=%s | backend=%s",
+        log.info("GPU           : %s â€” ok=%s | backend=%s",
                  gpu.get("name"), gpu.get("ok"), gpu.get("backend"))
 
     log.info("Backend activo: %s", profile["best_backend"])
@@ -624,7 +624,7 @@ def print_summary(profile: dict):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="LabelForge — setup de hardware y backends locales"
+        description="LabelForge â€” setup de hardware y backends locales"
     )
     parser.add_argument(
         "--force", action="store_true",
@@ -635,7 +635,7 @@ def main():
     _section("LABELFORGE SETUP")
     log.info("Inicio de setup: %s", datetime.now().isoformat(timespec="seconds"))
     log.info("Directorio base: %s", BASE_DIR)
-    log.info("Log de sesión  : %s", LOG_PATH.relative_to(BASE_DIR))
+    log.info("Log de sesiÃ³n  : %s", LOG_PATH.relative_to(BASE_DIR))
 
     # Si ya existe hw_profile y setup_ok, salir salvo --force
     if HW_PROFILE.exists() and not args.force:
@@ -652,15 +652,15 @@ def main():
     check_python_version()
     check_virtual_env()
 
-    # 2. Detectar hardware (con psutil si ya está disponible)
+    # 2. Detectar hardware (con psutil si ya estÃ¡ disponible)
     hw = detect_hardware()
 
-    # 3. Requirements base (nunca aborta — continúa para escribir hw_profile.json)
+    # 3. Requirements base (nunca aborta â€” continÃºa para escribir hw_profile.json)
     req_ok = install_base_requirements()
     if not req_ok:
-        log.warning("Requirements base instalados con errores — se continuará el setup")
+        log.warning("Requirements base instalados con errores â€” se continuarÃ¡ el setup")
 
-    # Re-importar hw_detection ahora que psutil está disponible
+    # Re-importar hw_detection ahora que psutil estÃ¡ disponible
     if hw["ram_gb"] == 0.0:
         log.info("Re-detectando hardware con psutil disponible...")
         hw = detect_hardware()
@@ -670,14 +670,14 @@ def main():
     if hw["npu"].get("detected"):
         npu_ok = install_npu_backend()
     else:
-        log.info("NPU no detectada — se omite instalación de OpenVINO")
+        log.info("NPU no detectada â€” se omite instalaciÃ³n de OpenVINO")
 
     # 5. llama-cpp-python con el backend GPU correcto
     # Si best_backend es "npu", llama-cpp-python igual se instala para el fallback GPU/CPU
     gpu_backend = hw["gpu"].get("backend") or "cpu"
     llama_ok = install_llama_cpp(gpu_backend)
     if not llama_ok:
-        log.error("Falló la instalación de llama-cpp-python")
+        log.error("FallÃ³ la instalaciÃ³n de llama-cpp-python")
 
     # 6. Verificar imports
     verify_results = verify_imports(has_npu=hw["npu"].get("detected", False),
@@ -688,7 +688,7 @@ def main():
     # 7. Crear todos los directorios requeridos del proyecto
     _section("VERIFICANDO DIRECTORIOS DEL PROYECTO")
     try:
-        from scripts.utils import ensure_project_dirs
+        from labelforge_core.utils import ensure_project_dirs
         created = ensure_project_dirs(BASE_DIR)
         if created:
             for d in created:
@@ -711,3 +711,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

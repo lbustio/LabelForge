@@ -1,13 +1,16 @@
-import base64
+﻿import base64
 import json
 import os
 import time
 from pathlib import Path
 
+from labelforge_core.secrets_io import provider_api_key_env, secrets_env_path, set_secret_value
+
 
 ARBITERS_EXPORT_MAGIC = "LFARB1"
 ARBITERS_EXPORT_AAD = b"LabelForge arbiters export v1"
 ARBITERS_EXPORT_KDF_ITERATIONS = 390_000
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 def require_export_password(password: str) -> str:
@@ -30,13 +33,17 @@ def normalize_arbiter(data: dict, existing: dict = None) -> dict:
 
     if "provider" in data:
         p = data["provider"]
+        api_key_override = (p.get("api_key_override", "") or "").strip()
+        api_key_env = p.get("api_key_env", "") or provider_api_key_env(p.get("type", "gemini"))
+        if api_key_override and api_key_env:
+            set_secret_value(secrets_env_path(BASE_DIR), api_key_env, api_key_override)
         base["provider"] = {
             "type": p.get("type", "gemini"),
             "model": p.get("model", ""),
             "model_path": p.get("model_path", ""),
             "n_ctx": int(p.get("n_ctx", 4096) or 4096),
-            "api_key_env": p.get("api_key_env", ""),
-            "api_key_override": p.get("api_key_override", ""),
+            "api_key_env": api_key_env,
+            "api_key_override": "",
             "base_url": p.get("base_url", ""),
             "vertex_project": p.get("vertex_project", ""),
             "vertex_location": p.get("vertex_location", "us-central1"),
@@ -201,3 +208,4 @@ def merge_arbiters(current: list, imported: list, mode: str = "merge") -> tuple[
         "kept": kept,
         "total": len(merged),
     }
+

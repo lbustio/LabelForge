@@ -1,4 +1,4 @@
-"""
+﻿"""
 Provider/model rate-limit profiles used by the WebApp.
 
 Important distinction:
@@ -55,11 +55,11 @@ GEMINI_API_RATE_LIMITS = {
 
 
 OPENAI_API_RATE_LIMITS = {
-    # Published limits — OpenAI Tier 1, verified from platform.openai.com/settings/limits.
+    # Published limits â€” OpenAI Tier 1, verified from platform.openai.com/settings/limits.
     # Shared-limit groups: versioned variants (e.g. gpt-4o-2024-08-06) share the same bucket
     # as the base name, so matching by prefix is correct.
 
-    # GPT-5.x — newest flagship family (3 RPM per model group)
+    # GPT-5.x â€” newest flagship family (3 RPM per model group)
     "gpt-5.5-pro":  {"rpm": 3,   "tpm": 10_000,    "rpd": 50},
     "gpt-5.5":      {"rpm": 3,   "tpm": 10_000,    "rpd": 50},
     "gpt-5.4-pro":  {"rpm": 3,   "tpm": 10_000,    "rpd": 50},
@@ -241,7 +241,7 @@ def get_rate_limit_profile(provider: str, model_id: str, tier: str = "free") -> 
             "limit_kind": "local",
             "source_label": "Modelo local GGUF",
             "source_url": "",
-            "note": "Modelo local — sin límites de API.",
+            "note": "Modelo local â€” sin lÃ­mites de API.",
         }
 
     if provider == "gemini":
@@ -310,7 +310,7 @@ def compute_min_delay(provider: str, model_id: str, tier: str = "free", n_arbite
             "min_delay_s": 0,
             "safe_delay_s": 0,
             "alert_level": "info",
-            "alert_msg": "Modelo local GGUF — sin límites de API, sin delay necesario.",
+            "alert_msg": "Modelo local GGUF â€” sin lÃ­mites de API, sin delay necesario.",
         }
 
     rpm = profile.get("rpm") or 10
@@ -350,3 +350,4 @@ def compute_min_delay(provider: str, model_id: str, tier: str = "free", n_arbite
         "alert_level": alert_level,
         "alert_msg": alert_msg,
     }
+

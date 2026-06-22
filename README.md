@@ -52,7 +52,7 @@ LabelForge/
 ├── config/
 │   ├── arbiters_config.json     # Arbitros, principios, prompts, dataset, processing, safety
 │   ├── local_models_config.json # Config del catalogo dinamico GGUF
-├── scripts/
+├── labelforge_core/
 │   ├── label_persuasion.py      # Pipeline: LLM calls, rate limiter, checkpoints, consenso, CSV
 │   ├── agreement_metrics.py     # Fleiss, Cohen, Krippendorff, acuerdo observado
 │   ├── local_models.py          # GGUF: catalogo, descarga, cache, archive/restore/move
@@ -121,7 +121,7 @@ falta el perfil de hardware.
 Copia la plantilla:
 
 ```bash
-copy secrets.env.example secrets\secrets.env
+copy secrets\secrets.env.example secrets\secrets.env
 ```
 
 Variables habituales:
@@ -137,8 +137,11 @@ GOOGLE_APPLICATION_CREDENTIALS=secrets\service-account.json
 
 LABELFORGE_HOST=127.0.0.1
 LABELFORGE_PORT=7860
-LABELFORGE_PASSWORD=
 LABELFORGE_SECRET_KEY=
+
+# Login local de la webapp. Los usuarios viven en secrets/auth.db.
+LABELFORGE_AUTH_MODE=local
+LABELFORGE_COOKIE_SECURE=1
 ```
 
 Para Vertex AI se usan Application Default Credentials o service account JSON, no API key.
@@ -348,8 +351,8 @@ Modelos/proveedores:
 | Directorio | Versionable | Uso |
 |---|---:|---|
 | `config/` | Si | Configuracion editable base |
-| `scripts/` | Si | Codigo Python importable |
-| `webapp/` | Si | Backend y plantillas |
+| `labelforge_core/` | Si | Nucleo Python importable: pipeline, proveedores y utilidades |
+| `webapp/` | Si | Interfaz web, API HTTP/SSE y plantillas |
 | `tests/` | Si | Pruebas |
 | `secrets/` | No | Credenciales locales |
 | `models/` | No | GGUF, hardware profile, caches |
@@ -363,7 +366,7 @@ Reglas:
 
 - No guardar API keys ni secretos en `config/*.json`.
 - Las claves reales deben vivir en `secrets/secrets.env`.
-- `scripts/` es solo para codigo Python importable; no guardar JSON editables ahi.
+- `labelforge_core/` es el nucleo Python importable; no guardar JSON editables ahi.
 - Para overrides personales, usar nombres como `*.local.json` o `*.private.json`.
 - Los overrides locales/privados estan ignorados por Git.
 
@@ -371,25 +374,32 @@ Reglas:
 
 La webapp tiene:
 
-- acceso localhost-only si `LABELFORGE_PASSWORD` no esta configurado;
-- HTTP Basic Auth si `LABELFORGE_PASSWORD` esta configurado;
+- login obligatorio al abrir la webapp;
+- login local SQLite obligatorio por defecto;
+- primer arranque crea el primer usuario en `secrets/auth.db`;
+- CSRF para metodos `POST`/`PUT`/`PATCH`/`DELETE`;
 - `MAX_CONTENT_LENGTH = 50 MB`;
 - cabeceras CSP, `X-Frame-Options` y `X-Content-Type-Options`;
 - validacion de filenames GGUF;
-- validacion basica contra SSRF en `openai_compat`.
+- validacion basica contra SSRF en `openai_compat`;
+- `/api/provider-key` solo escribe secretos desde localhost;
+- `api_key_override` no persiste en `config/arbiters_config.json`.
 
-Pendientes conocidos antes de despliegue publico:
+Para despliegue publico:
 
 - usar HTTPS obligatorio con reverse proxy;
+- activar `LABELFORGE_COOKIE_SECURE=1` cuando ya sirvas por HTTPS;
 - no usar `--debug`;
-- revisar CSRF;
-- restringir escritura de secretos;
-- impedir persistencia accidental de `api_key_override`.
+- usar `LABELFORGE_SECRET_KEY` persistente y aleatoria.
+
+La autenticacion vive solo en la webapp. El CLI y los modulos en `labelforge_core/`
+siguen pensados para ejecucion local y no dependen de OAuth2 ni de sesiones web.
+OAuth2 queda como mejora futura; por ahora el flujo soportado es usuario/password local.
 
 ## Tests
 
 ```bash
-python -m py_compile webapp/app.py scripts/local_models.py
+python -m py_compile webapp/app.py labelforge_core/local_models.py
 python -m unittest tests.test_pipeline
 ```
 

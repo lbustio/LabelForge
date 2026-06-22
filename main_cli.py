@@ -1,4 +1,4 @@
-"""
+﻿"""
 main_cli.py
 -----------
 Entrypoint principal para el proceso de etiquetado de principios de persuasion.
@@ -14,7 +14,7 @@ Ejemplos:
     python main_cli.py
 
     # Usar una config personalizada
-    python main_cli.py --config scripts/my_config.json --limit 50
+    python main_cli.py --config config/my_config.json --limit 50
 """
 
 import json
@@ -29,14 +29,14 @@ if str(ROOT) not in sys.path:
 
 def _check_hw_profile_if_needed():
     """
-    Verifica hw_profile.json solo si hay árbitros llama_cpp configurados.
+    Verifica hw_profile.json solo si hay Ã¡rbitros llama_cpp configurados.
     Si hay proveedores locales y el setup no se ha completado, aborta con
     un mensaje accionable.
     """
     hw_profile  = ROOT / "models" / "hw_profile.json"
 
     try:
-        from scripts.paths import ARBITERS_CONFIG_PATH, resolve_config_file_path
+        from labelforge_core.paths import ARBITERS_CONFIG_PATH, resolve_config_file_path
         config_path = resolve_config_file_path(ARBITERS_CONFIG_PATH)
         with open(config_path, encoding="utf-8") as f:
             cfg = json.load(f)
@@ -52,7 +52,7 @@ def _check_hw_profile_if_needed():
 
     if not hw_profile.exists():
         print(
-            "Error: hay árbitros con proveedor 'llama_cpp' pero falta models/hw_profile.json.\n"
+            "Error: hay Ã¡rbitros con proveedor 'llama_cpp' pero falta models/hw_profile.json.\n"
             "Ejecuta primero: python setup_env.py\n"
             "Luego vuelve a ejecutar este comando."
         )
@@ -72,11 +72,11 @@ def _check_hw_profile_if_needed():
 
 
 from dotenv import load_dotenv
-from scripts.secrets_io import resolve_gcp_credentials, secrets_env_path
+from labelforge_core.secrets_io import resolve_gcp_credentials, secrets_env_path
 load_dotenv(secrets_env_path(ROOT))
 resolve_gcp_credentials(ROOT)
 
-from scripts.utils import ensure_project_dirs
+from labelforge_core.utils import ensure_project_dirs
 _created = ensure_project_dirs(ROOT)
 if _created:
     for _d in _created:
@@ -86,7 +86,8 @@ else:
 
 _check_hw_profile_if_needed()
 
-from scripts.label_persuasion import main
+from labelforge_core.label_persuasion import main
 
 if __name__ == "__main__":
     main()
+

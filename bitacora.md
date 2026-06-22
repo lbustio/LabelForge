@@ -1855,6 +1855,55 @@ acciones, no implementar reglas de seguridad ni cifrado.
 
 ---
 
+## 2026-06-21 - Renombrado del nucleo Python a `labelforge_core/`
+
+**Objetivo:** reemplazar el nombre generico `scripts/` por un nombre que describa
+mejor su responsabilidad real: nucleo de ejecucion, proveedores, pipeline,
+metricas, rutas y utilidades compartidas.
+
+**Decision:**
+
+- `scripts/` se renombro a `labelforge_core/`.
+- `webapp/` queda como interfaz web, API HTTP/SSE y plantillas.
+- `main_cli.py` sigue siendo el entrypoint local del pipeline.
+- La autenticacion web permanece encapsulada en `webapp/app.py` y plantillas; el
+  CLI y `labelforge_core/` quedan agnosticos a OAuth/login/sesion web.
+- `labelforge_core.paths` mantiene fallback legacy hacia rutas antiguas
+  `scripts/*.json` solo para compatibilidad de configuraciones previas.
+
+**Archivos principales afectados:**
+
+- `labelforge_core/`
+- `main_cli.py`
+- `main_webapp.py`
+- `setup_env.py`
+- `webapp/app.py`
+- `tests/test_pipeline.py`
+- `README.md`
+- `context.md`
+- `todos.md`
+
+---
+
+## 2026-06-21 - Plantilla de secretos movida a `secrets/`
+
+**Objetivo:** ubicar la plantilla de variables de entorno junto al archivo real
+`secrets/secrets.env`, manteniendo versionable solo el ejemplo y no las
+credenciales locales.
+
+**Cambios:**
+
+- `secrets.env.example` se movio a `secrets/secrets.env.example`.
+- `.gitignore` ahora ignora el contenido de `secrets/` pero permite versionar
+  explicitamente `secrets/secrets.env.example`.
+- `README.md` ahora indica copiar `secrets\secrets.env.example` hacia
+  `secrets\secrets.env`.
+
+**Nota:** las entradas historicas anteriores que indicaban mantener la plantilla
+en la raiz quedan como registro de una decision previa ya reemplazada.
+
+---
+
 ### 2026-06-15 - Rate limits por proveedor/modelo para todos los LLMs
 
 **Objetivo:** que el tab de árbitros y el backend calculen delays no solo para
@@ -2909,3 +2958,32 @@ rapido, usar `README.md`, `context.md` y `todos.md`.
 - `todos.md`
 - `context.md`
 - `bitacora.md`
+
+---
+
+### 2026-06-21 - Login local SQLite para la webapp
+
+**Autor/agente:** Codex.
+
+**Objetivo:** simplificar la autenticacion de la webapp para poder exponerla con
+un flujo usable sin depender todavia de registro OAuth externo.
+
+**Cambios realizados:**
+
+- La webapp usa `LABELFORGE_AUTH_MODE=local` por defecto.
+- `/login` crea el primer usuario local en el primer arranque.
+- Los usuarios se guardan en `secrets/auth.db`, protegido por `.gitignore`.
+- Las rutas API/HTML exigen sesion local y mantienen proteccion CSRF.
+- OAuth2 queda como codigo dormido/futuro y solo se activa si se configura
+  explicitamente `LABELFORGE_AUTH_MODE=oauth2`.
+- El CLI y el nucleo `labelforge_core/` quedan agnosticos a sesiones web.
+
+**Archivos tocados:**
+
+- `webapp/app.py`
+- `webapp/templates/login.html`
+- `main_webapp.py`
+- `secrets/secrets.env.example`
+- `README.md`
+- `context.md`
+- `todos.md`

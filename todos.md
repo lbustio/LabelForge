@@ -1,4 +1,4 @@
-# LabelForge - TODO real
+﻿# LabelForge - TODO real
 
 Este archivo contiene el backlog vivo del proyecto. No es una lista historica de lo que
 ya se implemento; para eso esta `bitacora.md`.
@@ -19,7 +19,7 @@ Ultima revision: 2026-06-19.
   - resumen de metricas de acuerdo inter-arbitro;
   - notas metodologicas necesarias para el paper.
 
-- [ ] Revisar las vulnerabilidades pendientes documentadas en `context.md` y `bitacora.md`:
+- [x] Revisar las vulnerabilidades pendientes documentadas en `context.md` y `bitacora.md`:
   - `api_key_override` no debe persistir secretos en `config/arbiters_config.json`;
   - `/api/provider-key` deberia limitar escrituras de secretos a localhost o pedir confirmacion secundaria;
   - endpoints `POST/PUT/DELETE` siguen sin CSRF si se expone la app con Basic Auth.
@@ -73,7 +73,8 @@ Ultima revision: 2026-06-19.
 ## Hecho recientemente
 
 - [x] Configuracion editable movida de `scripts/` a `config/`.
-- [x] `scripts/paths.py` como fuente de rutas canonicas y fallback legacy.
+- [x] `labelforge_core/paths.py` como fuente de rutas canonicas y fallback legacy.
+- [x] Nucleo Python renombrado de `scripts/` a `labelforge_core/`.
 - [x] Gestion de modelos GGUF activos, archivados y externos.
 - [x] Descargas GGUF simultaneas con progreso por tarjeta.
 - [x] Cancelacion de descargas GGUF y limpieza de `.part`.
@@ -81,3 +82,8 @@ Ultima revision: 2026-06-19.
 - [x] Filtrar recomendados que ya estan descargados, archivados o movidos fuera del cache.
 - [x] Boton para mover modelos desde `models/` a una carpeta absoluta elegida localmente.
 - [x] Hardening inicial para despliegue con Basic Auth, CSP, limite de upload, validacion de filename GGUF y bloqueo SSRF basico.
+- [x] Cierre de pendientes de seguridad: CSRF para metodos mutantes con Basic Auth, `/api/provider-key` solo localhost, y `api_key_override` transitorio hacia `secrets/secrets.env`.
+- [x] OAuth2/OIDC explorado y pospuesto por complejidad operativa.
+- [x] Ventana de login local SQLite para la webapp; CLI y nucleo quedan agnosticos a sesion web.
+- [x] Plantilla de entorno movida a `secrets/secrets.env.example` y permitida en `.gitignore`.
+

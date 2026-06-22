@@ -1,8 +1,8 @@
-"""
+﻿"""
 utils.py
 --------
 Utilidades comunes para el proyecto LabelForge.
-Evita la duplicación de helpers de conversión numérica y formateo.
+Evita la duplicaciÃ³n de helpers de conversiÃ³n numÃ©rica y formateo.
 """
 
 from pathlib import Path
@@ -12,7 +12,7 @@ from typing import Optional, Any
 def ensure_project_dirs(root: Path) -> list[Path]:
     """
     Verifica y crea todas las carpetas necesarias para el funcionamiento del proyecto.
-    Retorna la lista de directorios creados (los que no existían).
+    Retorna la lista de directorios creados (los que no existÃ­an).
     """
     required = [
         root / "logs",
@@ -21,7 +21,7 @@ def ensure_project_dirs(root: Path) -> list[Path]:
         root / "models",
         root / "secrets",
         root / "config",
-        root / "scripts",
+        root / "labelforge_core",
         root / "data",
         root / "archive",
     ]
@@ -84,3 +84,4 @@ def number(value: Any, default: Any = 0) -> Any:
         return type(default)(value)
     except (TypeError, ValueError):
         return default
+

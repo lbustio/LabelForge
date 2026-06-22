@@ -8,7 +8,8 @@ secrets.env
 !.env.example
 !.env.template
 
-secrets/
+secrets/*
+!secrets/secrets.env.example
 .secrets/
 *.secret
 *.secrets

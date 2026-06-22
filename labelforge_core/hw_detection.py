@@ -1,4 +1,4 @@
-"""
+﻿"""
 hw_detection.py
 ---------------
 Deteccion multiplataforma de hardware.
@@ -196,7 +196,7 @@ def detect_npu() -> dict:
         return _detect_npu_windows()
     if os_name == "Linux":
         return _detect_npu_linux()
-    # macOS: sin NPU externo, Apple Neural Engine no expuesto como acelerador genérico
+    # macOS: sin NPU externo, Apple Neural Engine no expuesto como acelerador genÃ©rico
     return {"detected": False, "vendor": None, "type": None}
 
 
@@ -451,7 +451,7 @@ def detect_gpu() -> dict:
 # ---------------------------------------------------------------------------
 
 def decide_best_backend(npu: dict, gpu: dict) -> str:
-    """Prioridad: NPU → GPU → CPU."""
+    """Prioridad: NPU â†’ GPU â†’ CPU."""
     if npu.get("detected"):
         return "npu"
     if gpu.get("detected"):
@@ -490,3 +490,4 @@ if __name__ == "__main__":
     import json
     result = detect_all()
     print(json.dumps(result, indent=2, ensure_ascii=False))
+

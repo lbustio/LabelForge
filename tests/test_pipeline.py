@@ -1,21 +1,24 @@
-"""
+﻿"""
 test_pipeline.py
 Pruebas unitarias para validar las funciones utilitarias,
-las métricas de acuerdo inter-árbitros y las validaciones de configuración.
+las mÃ©tricas de acuerdo inter-Ã¡rbitros y las validaciones de configuraciÃ³n.
 """
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-# Asegurar que el root del proyecto esté en el path
+# Asegurar que el root del proyecto estÃ© en el path
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.utils import safe_int, safe_float, safe_binary_int, number
-from scripts.agreement_metrics import compute_agreement_metrics, compute_consensus_metrics
-from scripts.label_persuasion import validate_safety_policy
+from labelforge_core.utils import safe_int, safe_float, safe_binary_int, number
+from labelforge_core.agreement_metrics import compute_agreement_metrics, compute_consensus_metrics
+from labelforge_core.label_persuasion import validate_safety_policy
+from labelforge_core.arbiters_io import normalize_arbiter
 
 
 class TestUtils(unittest.TestCase):
@@ -133,5 +136,28 @@ class TestSafetyPolicy(unittest.TestCase):
             validate_safety_policy(cfg)
 
 
+class TestArbiterConfigSafety(unittest.TestCase):
+    def test_api_key_override_is_migrated_and_not_persisted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch("labelforge_core.arbiters_io.BASE_DIR", Path(tmp)):
+                arbiter = normalize_arbiter({
+                    "id": "arb1",
+                    "name": "Arbitro",
+                    "persona": "Persona",
+                    "system_prompt": "Prompt",
+                    "provider": {
+                        "type": "openai",
+                        "model": "gpt-4o",
+                        "api_key_override": "sk-test-secret",
+                    },
+                })
+
+            self.assertEqual(arbiter["provider"]["api_key_env"], "OPENAI_API_KEY")
+            self.assertEqual(arbiter["provider"]["api_key_override"], "")
+            secrets_env = Path(tmp) / "secrets" / "secrets.env"
+            self.assertIn("OPENAI_API_KEY=sk-test-secret", secrets_env.read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()
+

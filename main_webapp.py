@@ -1,4 +1,4 @@
-"""
+﻿"""
 main_webapp.py
 --------------
 Entrypoint principal para la webapp de configuracion y lanzamiento del etiquetado.
@@ -38,7 +38,7 @@ if str(ROOT) not in sys.path:
 
 # Cargar variables de entorno antes de parsear argumentos
 from dotenv import load_dotenv
-from scripts.secrets_io import resolve_gcp_credentials, secrets_env_path
+from labelforge_core.secrets_io import resolve_gcp_credentials, secrets_env_path
 load_dotenv(secrets_env_path(ROOT))
 resolve_gcp_credentials(ROOT)
 
@@ -46,7 +46,7 @@ resolve_gcp_credentials(ROOT)
 _DEFAULT_HOST = os.environ.get("LABELFORGE_HOST", "127.0.0.1")
 _DEFAULT_PORT = int(os.environ.get("LABELFORGE_PORT", "7860"))
 
-from scripts.utils import ensure_project_dirs
+from labelforge_core.utils import ensure_project_dirs
 _created = ensure_project_dirs(ROOT)
 if _created:
     for _d in _created:
@@ -54,7 +54,7 @@ if _created:
 else:
     print("  [setup] Directorios del proyecto verificados OK")
 
-from webapp.app import app
+from webapp.app import app, auth_status
 
 
 def main():
@@ -75,7 +75,20 @@ def main():
     )
     args = parser.parse_args()
 
-    print(f"  LabelForge  →  http://{args.host}:{args.port}")
+    print(f"  LabelForge  â†’  http://{args.host}:{args.port}")
+    status = auth_status()
+    if status["mode"] == "disabled":
+        print("  Auth        →  desactivado explicitamente con LABELFORGE_AUTH_DISABLED=1")
+    elif status["mode"] == "local-login":
+        if status["enabled"]:
+            print(f"  Auth        →  login local SQLite activo en http://{args.host}:{args.port}/login")
+        else:
+            print(f"  Auth        →  login local SQLite sin usuarios; crea el primero en http://{args.host}:{args.port}/login")
+    elif status["mode"] == "oauth2" and status["enabled"]:
+        providers = ", ".join(status["providers"]) or "OAuth2"
+        print(f"  Auth        →  OAuth2 activo ({providers}) en http://{args.host}:{args.port}/login")
+    else:
+        print("  Auth        →  OAuth2 solicitado pero sin proveedores configurados")
     print("  Presiona Ctrl+C para detener.")
 
     app.run(
@@ -89,3 +102,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

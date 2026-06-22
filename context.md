@@ -1,4 +1,4 @@
-# LabelForge - contexto tecnico de transferencia
+﻿# LabelForge - contexto tecnico de transferencia
 
 Ultima actualizacion: 2026-06-19.
 
@@ -29,7 +29,7 @@ Repo remoto conocido: `https://github.com/lbustio/LabelForge`.
 Cambios recientes no necesariamente pusheados:
 
 - configuracion movida a `config/`;
-- `scripts/paths.py` agregado;
+- `labelforge_core/paths.py` agregado;
 - gestion GGUF expandida con cancelar descarga, archivo, restauracion y mover fuera del cache;
 - docs actualizadas.
 
@@ -51,7 +51,7 @@ config/
   arbiters_config.json
   local_models_config.json
   README.md
-scripts/
+labelforge_core/
   agreement_metrics.py
   arbiters_io.py
   hw_detection.py
@@ -86,9 +86,9 @@ La configuracion canonica esta en:
 - `config/arbiters_config.json`;
 - `config/local_models_config.json`.
 
-No volver a guardar JSON editables en `scripts/`.
+No volver a guardar JSON editables en `labelforge_core/`.
 
-`scripts/paths.py` centraliza rutas canonicas:
+`labelforge_core/paths.py` centraliza rutas canonicas:
 
 - `BASE_DIR`;
 - `CONFIG_DIR`;
@@ -163,9 +163,9 @@ python main_cli.py
 3. resuelve credenciales GCP si aplica;
 4. crea directorios con `ensure_project_dirs()`;
 5. si hay arbitros `llama_cpp`, valida `models/hw_profile.json`;
-6. delega a `scripts.label_persuasion.main()`.
+6. delega a `labelforge_core.label_persuasion.main()`.
 
-`scripts/label_persuasion.py` hace el trabajo principal:
+`labelforge_core/label_persuasion.py` hace el trabajo principal:
 
 - carga config y dataset;
 - valida safety;
@@ -212,7 +212,7 @@ latencias, metricas por entrada y metricas agregadas.
 
 ## 8. Metricas
 
-`scripts/agreement_metrics.py` calcula:
+`labelforge_core/agreement_metrics.py` calcula:
 
 - observed agreement;
 - Fleiss Kappa;
@@ -266,19 +266,27 @@ Bloques importantes:
 
 Implementado:
 
-- sin `LABELFORGE_PASSWORD`, solo localhost;
-- con `LABELFORGE_PASSWORD`, Basic Auth global;
-- `LABELFORGE_SECRET_KEY` opcional para sesiones;
+- login local SQLite obligatorio por defecto;
+- en primer arranque, `/login` crea el primer usuario en `secrets/auth.db`;
+- `LABELFORGE_AUTH_MODE=local` es el modo recomendado actual;
+- OAuth2 queda como mejora futura, no como flujo principal actual;
+- `LABELFORGE_SECRET_KEY` recomendado para sesiones persistentes;
+- cookies `HttpOnly`, `SameSite=Lax`, y `Secure` configurable con `LABELFORGE_COOKIE_SECURE=1`;
+- escape solo para desarrollo aislado: `LABELFORGE_AUTH_DISABLED=1`;
 - limite upload 50 MB;
 - CSP basica, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`;
 - validacion de filename GGUF contra traversal;
 - bloqueo SSRF basico en `openai_compat` para link-local/metadata.
+- CSRF para `POST`/`PUT`/`PATCH`/`DELETE`;
+- `/api/provider-key` solo escribe secretos desde localhost;
+- `api_key_override` se trata como transitorio y no persiste en `config/arbiters_config.json`.
+
+La autenticacion esta encapsulada en `webapp/app.py` y plantillas. `main_cli.py` y
+los modulos en `labelforge_core/` siguen agnosticos a OAuth/login y pensados para ejecucion
+local o para ser llamados por la webapp en servidor.
 
 Pendiente:
 
-- CSRF para endpoints que modifican estado;
-- restringir o reforzar `/api/provider-key`;
-- evitar que `api_key_override` pueda persistir secretos;
 - HTTPS obligatorio si se expone fuera de localhost;
 - no usar `--debug` en produccion.
 
@@ -298,7 +306,7 @@ Genera:
 
 Modulo:
 
-- `scripts/local_models.py`.
+- `labelforge_core/local_models.py`.
 
 Funciones relevantes:
 
@@ -377,7 +385,7 @@ Deuda tecnica:
 Regla vigente:
 
 - `config/`: JSON editables y versionables;
-- `scripts/`: solo codigo Python;
+- `labelforge_core/`: solo codigo Python;
 - `secrets/`: credenciales privadas;
 - `models/`: modelos, hardware profile y caches locales;
 - `data/`: datasets locales/privados;
@@ -392,14 +400,14 @@ No guardar API keys en `config/arbiters_config.json`.
 Comandos usados:
 
 ```bash
-python -m py_compile webapp/app.py scripts/local_models.py
+python -m py_compile webapp/app.py labelforge_core/local_models.py
 python -m unittest tests.test_pipeline
 ```
 
 En Windows con Conda local:
 
 ```bash
-C:\Users\lbust\miniconda3\Scripts\conda.exe run -n labelforge python -m py_compile webapp\app.py scripts\local_models.py
+C:\Users\lbust\miniconda3\Scripts\conda.exe run -n labelforge python -m py_compile webapp\app.py labelforge_core\\local_models.py
 C:\Users\lbust\miniconda3\Scripts\conda.exe run -n labelforge python -m unittest tests.test_pipeline
 ```
 
@@ -422,7 +430,6 @@ Los puntos mas importantes ahora:
 
 - prueba end-to-end con dataset pequeno;
 - ejecutar pipeline completo para resultados del paper;
-- cerrar pendientes de seguridad;
 - limpiar JS legacy de `arbiters.html`;
 - validar descarga/cancelacion GGUF con archivos reales.
 
@@ -432,3 +439,4 @@ Los puntos mas importantes ahora:
 - `context.md`: este contexto tecnico.
 - `todos.md`: backlog real.
 - `bitacora.md`: historico de decisiones.
+

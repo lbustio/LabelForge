@@ -1,4 +1,4 @@
-"""
+﻿"""
 app.py - Flask webapp para configurar y lanzar el proceso de etiquetado
 de principios de persuasion de Ana Ferreira.
 """
@@ -7,23 +7,31 @@ import json
 import os
 import queue
 import re
+import sqlite3
 import subprocess
 import sys
 import threading
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import quote
 
 from dotenv import load_dotenv
-from flask import Flask, Response, g, jsonify, render_template, request, send_from_directory, stream_with_context
+from flask import Flask, Response, g, jsonify, redirect, render_template, request, send_from_directory, session, stream_with_context, url_for
+from werkzeug.security import check_password_hash, generate_password_hash
+
+try:
+    from authlib.integrations.flask_client import OAuth
+except Exception:  # pragma: no cover - optional until OAuth mode is enabled
+    OAuth = None
 
 # ---------------------------------------------------------------------------
-# Inicialización de CUDA (debe ir antes de cualquier import que use llama_cpp)
+# InicializaciÃ³n de CUDA (debe ir antes de cualquier import que use llama_cpp)
 # ---------------------------------------------------------------------------
-from scripts.cuda_init import _ensure_cuda_ready as _cuda_ready
+from labelforge_core.cuda_init import _ensure_cuda_ready as _cuda_ready
 _cuda_ready()
 
-# Forzar importación de llama_cpp ahora (mientras CUDA está listo) para que
+# Forzar importaciÃ³n de llama_cpp ahora (mientras CUDA estÃ¡ listo) para que
 # quede cacheado en sys.modules y los imports posteriores no fallen.
 try:
     import llama_cpp as _llama_cpp_  # noqa: F401
@@ -31,10 +39,10 @@ except Exception:
     pass
 
 # ---------------------------------------------------------------------------
-# Módulo compartido de métricas de acuerdo y utilidades
+# MÃ³dulo compartido de mÃ©tricas de acuerdo y utilidades
 # ---------------------------------------------------------------------------
-from scripts.agreement_metrics import compute_agreement_metrics
-from scripts.arbiters_io import (
+from labelforge_core.agreement_metrics import compute_agreement_metrics
+from labelforge_core.arbiters_io import (
     build_arbiters_export_payload,
     decrypt_arbiters_export,
     encrypt_arbiters_export,
@@ -43,18 +51,17 @@ from scripts.arbiters_io import (
     require_export_password,
     validate_imported_arbiters,
 )
-from scripts.secrets_io import provider_api_key_env, resolve_gcp_credentials, secrets_env_path, set_secret_value
-from scripts.rate_limits import compute_min_delay
-from scripts.provider_preflight import validate_provider_preflight
-from scripts.utils import safe_int as _safe_int, safe_float as _safe_float
-from scripts.paths import (
+from labelforge_core.secrets_io import provider_api_key_env, resolve_gcp_credentials, secrets_env_path, set_secret_value
+from labelforge_core.rate_limits import compute_min_delay
+from labelforge_core.provider_preflight import validate_provider_preflight
+from labelforge_core.utils import safe_int as _safe_int, safe_float as _safe_float
+from labelforge_core.paths import (
     ARBITERS_CONFIG_PATH,
     CHECKPOINTS_DIR,
     CONFIG_DIR,
     HW_PROFILE_PATH,
     MODELS_DIR,
     OUTPUT_DIR,
-    SCRIPTS_DIR,
     resolve_config_file_path,
 )
 
@@ -71,10 +78,10 @@ load_dotenv(SECRETS_ENV_PATH)
 resolve_gcp_credentials(BASE_DIR)
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB máximo por upload
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB mÃ¡ximo por upload
 
 # ---------------------------------------------------------------------------
-# Logging — silencia Werkzeug, reemplaza con log de requests legible
+# Logging â€” silencia Werkzeug, reemplaza con log de requests legible
 # ---------------------------------------------------------------------------
 import logging as _logging
 
@@ -108,7 +115,7 @@ def _log_http(response):
     status  = response.status_code
     if status == 304:
         return response
-    msg = f"{request.method:<5} {path}  →  {status}  ({elapsed}ms)"
+    msg = f"{request.method:<5} {path}  â†’  {status}  ({elapsed}ms)"
     if status >= 500:
         _req_log.error(msg)
     elif status >= 400:
@@ -130,31 +137,538 @@ def _log_http(response):
 
 
 # ---------------------------------------------------------------------------
-# Autenticación — HTTP Basic Auth
+# AutenticaciÃ³n â€” login local SQLite, con OAuth2 solo si se activa explicitamente
 # ---------------------------------------------------------------------------
 import base64 as _b64
 import secrets as _sec
 
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "y", "on"}
+
+
+def _env_csv(name: str) -> set[str]:
+    return {item.strip().lower() for item in os.environ.get(name, "").split(",") if item.strip()}
+
+
 # Secret key para sesiones Flask (necesaria para cookies seguras)
 app.secret_key = os.environ.get("LABELFORGE_SECRET_KEY") or _sec.token_hex(32)
+app.config["CSRF_TOKEN"] = os.environ.get("LABELFORGE_CSRF_TOKEN") or _sec.token_urlsafe(32)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE=os.environ.get("LABELFORGE_COOKIE_SAMESITE", "Lax"),
+    SESSION_COOKIE_SECURE=_env_bool("LABELFORGE_COOKIE_SECURE", False),
+)
 
-_AUTH_EXEMPT = frozenset({"/favicon.ico"})
-_AUTH_EXEMPT_PREFIX = ("/static/",)
+_OAUTH_ALLOWED_EMAILS = _env_csv("LABELFORGE_OAUTH_ALLOWED_EMAILS")
+_OAUTH_ALLOWED_DOMAINS = _env_csv("LABELFORGE_OAUTH_ALLOWED_DOMAINS")
+_OAUTH_ALLOW_ANY = _env_bool("LABELFORGE_OAUTH_ALLOW_ANY", False)
+_OAUTH_PROVIDER_LABELS = {
+    "google": "Google",
+    "facebook": "Facebook",
+    "github": "GitHub",
+    "microsoft": "Microsoft",
+    "apple": "Apple",
+}
+_OAUTH_PROVIDER_ORDER = ("google", "microsoft", "github", "facebook", "apple")
+_OAUTH_PROVIDERS_REQUESTED = [
+    item.strip().lower()
+    for item in os.environ.get("LABELFORGE_OAUTH_PROVIDERS", "").split(",")
+    if item.strip()
+]
+_OAUTH_LEGACY_CLIENT_ID = os.environ.get("LABELFORGE_OAUTH_CLIENT_ID", "").strip()
+_OAUTH_LEGACY_CLIENT_SECRET = os.environ.get("LABELFORGE_OAUTH_CLIENT_SECRET", "").strip()
+_OAUTH_LEGACY_ISSUER = os.environ.get("LABELFORGE_OAUTH_ISSUER", "").strip().rstrip("/")
+_OAUTH_LEGACY_REDIRECT_URI = os.environ.get("LABELFORGE_OAUTH_REDIRECT_URI", "").strip()
+
+_REQUESTED_AUTH_MODE = os.environ.get("LABELFORGE_AUTH_MODE", "").strip().lower()
+_OAUTH_CONFIGURED = False
+_AUTH_MODE = _REQUESTED_AUTH_MODE or "local"
+_AUTH_DISABLED = _env_bool("LABELFORGE_AUTH_DISABLED", False)
+if _AUTH_MODE == "basic":
+    _AUTH_MODE = "local"
+if _AUTH_MODE not in {"local", "oauth2"}:
+    _log.warning("LABELFORGE_AUTH_MODE invalido: %s. Usando local.", _AUTH_MODE)
+    _AUTH_MODE = "local"
+
+_AUTH_EXEMPT = frozenset({"/favicon.ico", "/login", "/logout", "/oauth/callback"})
+_AUTH_EXEMPT_PREFIX = ("/static/", "/login/", "/oauth/callback/")
+_CSRF_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+_oauth = OAuth(app) if OAuth is not None else None
+_OAUTH_ENABLED_PROVIDERS: dict[str, dict] = {}
+AUTH_DB_PATH = Path(os.environ.get("LABELFORGE_AUTH_DB", SECRETS_ENV_PATH.parent / "auth.db"))
+
+
+def _auth_db() -> sqlite3.Connection:
+    AUTH_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(AUTH_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.commit()
+    return conn
+
+
+def _local_user_count() -> int:
+    with _auth_db() as conn:
+        row = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()
+        return int(row["n"])
+
+
+def _create_local_user(username: str, password: str) -> tuple[bool, str]:
+    username = (username or "").strip()
+    if not username:
+        return False, "Usuario requerido."
+    if len(password or "") < 8:
+        return False, "La contrasena debe tener al menos 8 caracteres."
+    try:
+        with _auth_db() as conn:
+            conn.execute(
+                "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+                (username, generate_password_hash(password)),
+            )
+            conn.commit()
+        return True, ""
+    except sqlite3.IntegrityError:
+        return False, "Ese usuario ya existe."
+
+
+def _local_credentials_ok(username: str, password: str) -> bool:
+    username = (username or "").strip()
+    if not username or not password:
+        return False
+    with _auth_db() as conn:
+        row = conn.execute(
+            "SELECT username, password_hash FROM users WHERE username = ?",
+            (username,),
+        ).fetchone()
+    return bool(row and check_password_hash(row["password_hash"], password))
+
+
+def _oauth_requested_provider_ids() -> list[str]:
+    requested = _OAUTH_PROVIDERS_REQUESTED or list(_OAUTH_PROVIDER_ORDER)
+    return [provider for provider in requested if provider in _OAUTH_PROVIDER_LABELS]
+
+
+def _oauth_login_providers() -> list[dict]:
+    return [
+        {
+            "id": provider,
+            "label": _OAUTH_PROVIDER_LABELS[provider],
+            "configured": provider in _OAUTH_ENABLED_PROVIDERS,
+        }
+        for provider in _oauth_requested_provider_ids()
+    ]
 
 
 def _is_localhost() -> bool:
     return request.remote_addr in ("127.0.0.1", "::1")
 
 
-def _basic_auth_ok(password: str) -> bool:
+def _configured_basic_username() -> str:
+    return os.environ.get("LABELFORGE_USERNAME", "").strip()
+
+
+def _basic_credentials_ok(username: str, password: str) -> bool:
+    return _local_credentials_ok(username, password)
+
+
+def _basic_auth_ok() -> bool:
     hdr = request.headers.get("Authorization", "")
     if not hdr.startswith("Basic "):
         return False
     try:
-        _, _, provided = _b64.b64decode(hdr[6:]).decode("utf-8", errors="replace").partition(":")
-        return _sec.compare_digest(provided, password)
+        username, _, password = _b64.b64decode(hdr[6:]).decode("utf-8", errors="replace").partition(":")
+        return _basic_credentials_ok(username, password)
     except Exception:
         return False
+
+
+def _safe_next_url(next_url: str | None) -> str:
+    next_url = next_url or url_for("index")
+    if not str(next_url).startswith("/") or str(next_url).startswith("//"):
+        return url_for("index")
+    return next_url
+
+
+def _provider_login_url(provider: str, next_url: str) -> str:
+    return f"/login/{quote(provider)}?next={quote(next_url or '/', safe='/')}"
+
+
+def _login_required_response(message: str):
+    login_url = url_for("login", next=request.full_path if request.query_string else request.path)
+    if request.path.startswith("/api/"):
+        return jsonify({"error": message, "login_url": url_for("login")}), 401
+    return redirect(login_url)
+
+
+def _oauth_env(provider: str, key: str, default: str = "") -> str:
+    return os.environ.get(f"LABELFORGE_OAUTH_{provider.upper()}_{key}", default).strip()
+
+
+def _ensure_oauth_provider_registered(provider: str) -> bool:
+    global _AUTH_MODE, _OAUTH_CONFIGURED
+    provider = provider.lower()
+    if _oauth is None or provider in _OAUTH_ENABLED_PROVIDERS:
+        return provider in _OAUTH_ENABLED_PROVIDERS
+    cfg = _oauth_provider_config(provider)
+    if not cfg:
+        return False
+    _oauth.register(**cfg)
+    _OAUTH_ENABLED_PROVIDERS[provider] = {
+        "id": provider,
+        "label": _OAUTH_PROVIDER_LABELS[provider],
+        "callback_path": f"/oauth/callback/{provider}",
+    }
+    _OAUTH_CONFIGURED = True
+    _AUTH_MODE = "oauth2"
+    return True
+
+
+def _oauth_provider_config(provider: str) -> dict | None:
+    provider = provider.lower()
+    client_id = _oauth_env(provider, "CLIENT_ID")
+    client_secret = _oauth_env(provider, "CLIENT_SECRET")
+
+    if provider == "google" and not client_id and _OAUTH_LEGACY_CLIENT_ID:
+        client_id = _OAUTH_LEGACY_CLIENT_ID
+        client_secret = _OAUTH_LEGACY_CLIENT_SECRET
+    if not client_id or not client_secret:
+        return None
+
+    if provider == "google":
+        return {
+            "name": provider,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "server_metadata_url": "https://accounts.google.com/.well-known/openid-configuration",
+            "client_kwargs": {"scope": _oauth_env(provider, "SCOPE", "openid email profile")},
+        }
+    if provider == "microsoft":
+        tenant = _oauth_env(provider, "TENANT", "common")
+        return {
+            "name": provider,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "server_metadata_url": f"https://login.microsoftonline.com/{tenant}/v2.0/.well-known/openid-configuration",
+            "client_kwargs": {"scope": _oauth_env(provider, "SCOPE", "openid email profile")},
+        }
+    if provider == "apple":
+        return {
+            "name": provider,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "server_metadata_url": "https://appleid.apple.com/.well-known/openid-configuration",
+            "client_kwargs": {
+                "scope": _oauth_env(provider, "SCOPE", "name email"),
+                "token_endpoint_auth_method": _oauth_env(provider, "TOKEN_AUTH_METHOD", "client_secret_post"),
+            },
+        }
+    if provider == "github":
+        return {
+            "name": provider,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "access_token_url": "https://github.com/login/oauth/access_token",
+            "authorize_url": "https://github.com/login/oauth/authorize",
+            "api_base_url": "https://api.github.com/",
+            "client_kwargs": {"scope": _oauth_env(provider, "SCOPE", "read:user user:email")},
+        }
+    if provider == "facebook":
+        version = _oauth_env(provider, "API_VERSION", "v20.0").lstrip("/")
+        return {
+            "name": provider,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "access_token_url": f"https://graph.facebook.com/{version}/oauth/access_token",
+            "authorize_url": f"https://www.facebook.com/{version}/dialog/oauth",
+            "api_base_url": f"https://graph.facebook.com/{version}/",
+            "client_kwargs": {"scope": _oauth_env(provider, "SCOPE", "email public_profile")},
+        }
+    return None
+
+
+def _register_oauth_clients() -> None:
+    global _AUTH_MODE, _OAUTH_CONFIGURED
+    if _oauth is None or _AUTH_MODE != "oauth2":
+        return
+
+    for provider in _oauth_requested_provider_ids():
+        if provider not in _OAUTH_PROVIDER_LABELS:
+            _log.warning("Proveedor OAuth no soportado: %s", provider)
+            continue
+        cfg = _oauth_provider_config(provider)
+        if not cfg:
+            continue
+        _ensure_oauth_provider_registered(provider)
+
+    if _OAUTH_LEGACY_CLIENT_ID and _OAUTH_LEGACY_CLIENT_SECRET and _OAUTH_LEGACY_ISSUER:
+        _oauth.register(
+            name="oidc",
+            client_id=_OAUTH_LEGACY_CLIENT_ID,
+            client_secret=_OAUTH_LEGACY_CLIENT_SECRET,
+            server_metadata_url=f"{_OAUTH_LEGACY_ISSUER}/.well-known/openid-configuration",
+            client_kwargs={"scope": os.environ.get("LABELFORGE_OAUTH_SCOPE", "openid email profile")},
+        )
+        _OAUTH_ENABLED_PROVIDERS["oidc"] = {
+            "id": "oidc",
+            "label": os.environ.get("LABELFORGE_OAUTH_LABEL", "OAuth2"),
+            "callback_path": "/oauth/callback/oidc",
+        }
+
+    _OAUTH_CONFIGURED = bool(_OAUTH_ENABLED_PROVIDERS)
+
+
+_register_oauth_clients()
+
+
+def _oauth_client(provider: str | None = None):
+    if _oauth is None:
+        return None
+    provider = (provider or session.get("oauth_provider") or _default_oauth_provider() or "").lower()
+    if provider not in _OAUTH_ENABLED_PROVIDERS:
+        return None
+    return _oauth.create_client(provider)
+
+
+def _default_oauth_provider() -> str | None:
+    if not _OAUTH_ENABLED_PROVIDERS:
+        return None
+    for provider in _OAUTH_PROVIDER_ORDER:
+        if provider in _OAUTH_ENABLED_PROVIDERS:
+            return provider
+    return next(iter(_OAUTH_ENABLED_PROVIDERS))
+
+
+def _oauth_config_error() -> Response:
+    if OAuth is None:
+        msg = "OAuth2 requiere instalar la dependencia authlib."
+    elif not _OAUTH_CONFIGURED:
+        msg = (
+            "OAuth2 no esta configurado. Define credenciales para al menos un proveedor: "
+            "LABELFORGE_OAUTH_GOOGLE_CLIENT_ID/SECRET, GITHUB, FACEBOOK, MICROSOFT o APPLE."
+        )
+    else:
+        msg = "OAuth2 no esta disponible."
+    return Response(msg, status=500, content_type="text/plain; charset=utf-8")
+
+
+def auth_status() -> dict:
+    if _AUTH_DISABLED:
+        return {"mode": "disabled", "enabled": False, "providers": []}
+    if _AUTH_MODE == "oauth2":
+        return {
+            "mode": "oauth2",
+            "enabled": _OAUTH_CONFIGURED,
+            "providers": [p["label"] for p in _OAUTH_ENABLED_PROVIDERS.values()],
+        }
+    return {
+        "mode": "local-login",
+        "enabled": _local_user_count() > 0,
+        "providers": [],
+    }
+
+
+def _oauth_user_allowed(email: str) -> bool:
+    email = (email or "").strip().lower()
+    if not email:
+        return False
+    if _OAUTH_ALLOW_ANY:
+        return True
+    if email in _OAUTH_ALLOWED_EMAILS:
+        return True
+    domain = email.rsplit("@", 1)[-1] if "@" in email else ""
+    return bool(domain and domain in _OAUTH_ALLOWED_DOMAINS)
+
+
+def _oauth_login_required():
+    if session.get("user"):
+        return None
+    return _login_required_response("Autenticacion OAuth2 requerida.")
+
+
+def _oauth_userinfo(provider: str, client, token: dict) -> dict:
+    if provider in {"google", "microsoft", "apple", "oidc"}:
+        userinfo = token.get("userinfo")
+        if not userinfo:
+            try:
+                userinfo = client.userinfo(token=token)
+            except Exception:
+                userinfo = {}
+        return dict(userinfo or {})
+
+    if provider == "github":
+        profile = client.get("user", token=token).json()
+        email = (profile.get("email") or "").strip().lower()
+        if not email:
+            emails = client.get("user/emails", token=token).json()
+            primary = next((item for item in emails if item.get("primary") and item.get("verified")), None)
+            if primary:
+                email = (primary.get("email") or "").strip().lower()
+        return {
+            "sub": str(profile.get("id", "")),
+            "email": email,
+            "email_verified": bool(email),
+            "name": profile.get("name") or profile.get("login") or email,
+        }
+
+    if provider == "facebook":
+        profile = client.get("me?fields=id,name,email", token=token).json()
+        email = (profile.get("email") or "").strip().lower()
+        return {
+            "sub": str(profile.get("id", "")),
+            "email": email,
+            "email_verified": bool(email),
+            "name": profile.get("name") or email,
+        }
+
+    return {}
+
+
+@app.route("/login", methods=["GET", "POST"])
+@app.route("/login/<provider>")
+def login(provider: str | None = None):
+    if _AUTH_MODE != "oauth2":
+        next_url = _safe_next_url(request.values.get("next"))
+        first_setup = _local_user_count() == 0
+        error = ""
+        if request.method == "POST":
+            username = request.form.get("username", "").strip()
+            password = request.form.get("password", "")
+            if first_setup:
+                confirm = request.form.get("password_confirm", "")
+                if password != confirm:
+                    error = "Las contrasenas no coinciden."
+                else:
+                    ok, error = _create_local_user(username, password)
+                    if ok:
+                        session.clear()
+                        session["user"] = {
+                            "email": username,
+                            "name": username,
+                            "sub": username,
+                            "provider": "local",
+                            "provider_label": "Local",
+                        }
+                        return redirect(next_url)
+            elif _basic_credentials_ok(username, password):
+                session.clear()
+                session["user"] = {
+                    "email": username or "local",
+                    "name": username or "Local user",
+                    "sub": username or "local",
+                    "provider": "local",
+                    "provider_label": "Local",
+                }
+                return redirect(next_url)
+            elif not error:
+                error = "Usuario o contrasena incorrectos."
+        return render_template(
+            "login.html",
+            providers=[],
+            next_url=next_url,
+            login_error=error,
+            first_setup=first_setup,
+        )
+
+    if provider is None:
+        next_url = _safe_next_url(request.args.get("next"))
+        return render_template(
+            "login.html",
+            providers=_oauth_login_providers(),
+            next_url=next_url,
+        )
+
+    provider = provider.lower()
+    next_url = _safe_next_url(request.args.get("next"))
+    client = _oauth_client(provider)
+    if client is None:
+        label = _OAUTH_PROVIDER_LABELS.get(provider, provider)
+        return render_template(
+            "login.html",
+            providers=_oauth_login_providers(),
+            next_url=next_url,
+            oauth_setup_error=(
+                f"No puedo abrir la ventana de {label} porque LabelForge no tiene configurada su app OAuth. "
+                f"Esto no es tu usuario/password: es el Client ID/Secret de la aplicacion LabelForge registrado en {label}."
+            ),
+        ), 400
+    redirect_uri = _oauth_env(provider, "REDIRECT_URI") or (
+        _OAUTH_LEGACY_REDIRECT_URI if provider == "oidc" else ""
+    ) or url_for("oauth_callback", provider=provider, _external=True)
+    session["login_next"] = next_url
+    session["oauth_provider"] = provider
+    return client.authorize_redirect(redirect_uri)
+
+
+@app.route("/oauth/callback")
+@app.route("/oauth/callback/<provider>", methods=["GET", "POST"])
+def oauth_callback(provider: str | None = None):
+    if _AUTH_MODE != "oauth2":
+        return redirect(url_for("index"))
+    provider = (provider or session.get("oauth_provider") or _default_oauth_provider() or "").lower()
+    client = _oauth_client(provider)
+    if client is None:
+        return _oauth_config_error()
+
+    token = client.authorize_access_token()
+    userinfo = _oauth_userinfo(provider, client, token)
+
+    email = (userinfo.get("email") or "").strip().lower()
+    if userinfo.get("email_verified") is False:
+        session.clear()
+        return Response(
+            "La cuenta OAuth2 no tiene email verificado.",
+            status=403,
+            content_type="text/plain; charset=utf-8",
+        )
+    if not _oauth_user_allowed(email):
+        session.clear()
+        return Response(
+            "Cuenta OAuth2 no autorizada para LabelForge. Configura "
+            "LABELFORGE_OAUTH_ALLOWED_EMAILS o LABELFORGE_OAUTH_ALLOWED_DOMAINS.",
+            status=403,
+            content_type="text/plain; charset=utf-8",
+        )
+
+    next_url = _safe_next_url(session.pop("login_next", None))
+    session.clear()
+    session["user"] = {
+        "email": email,
+        "name": userinfo.get("name") or email,
+        "sub": userinfo.get("sub", ""),
+        "provider": provider,
+        "provider_label": _OAUTH_ENABLED_PROVIDERS.get(provider, {}).get("label", provider),
+    }
+    return redirect(next_url)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+@app.context_processor
+def _inject_csrf_token():
+    return {
+        "auth_mode": _AUTH_MODE,
+        "csrf_token": app.config["CSRF_TOKEN"],
+        "current_user": session.get("user"),
+        "setup_values": {},
+    }
 
 
 @app.before_request
@@ -162,38 +676,45 @@ def _require_auth():
     path = request.path
     if path in _AUTH_EXEMPT or any(path.startswith(p) for p in _AUTH_EXEMPT_PREFIX):
         return
-
-    _password = os.environ.get("LABELFORGE_PASSWORD", "").strip()
-
-    if not _password:
-        # Sin contraseña configurada: solo permite acceso desde localhost
-        if not _is_localhost():
-            return Response(
-                "Acceso denegado. Configura LABELFORGE_PASSWORD en secrets/secrets.env "
-                "para habilitar acceso remoto.",
-                status=403,
-                content_type="text/plain; charset=utf-8",
-            )
+    if _AUTH_DISABLED:
         return
 
-    if not _basic_auth_ok(_password):
-        return Response(
-            "Autenticación requerida",
-            status=401,
-            content_type="text/plain; charset=utf-8",
-            headers={"WWW-Authenticate": 'Basic realm="LabelForge"'},
-        )
+    if _AUTH_MODE == "oauth2":
+        if _oauth_client() is None:
+            return _login_required_response("OAuth2 no configurado.")
+        return _oauth_login_required()
+
+    if session.get("user") or _basic_auth_ok():
+        return
+
+    return _login_required_response("Autenticacion requerida.")
 
 
 # ---------------------------------------------------------------------------
-# Hardware profile (no aborta la webapp si falta — solo lo logea)
+# Hardware profile (no aborta la webapp si falta â€” solo lo logea)
 # ---------------------------------------------------------------------------
+
+@app.before_request
+def _require_csrf_token():
+    if request.method not in _CSRF_METHODS:
+        return
+    if request.path in _AUTH_EXEMPT or any(request.path.startswith(p) for p in _AUTH_EXEMPT_PREFIX):
+        return
+    auth_requires_csrf = _AUTH_MODE in {"local", "oauth2"}
+    if not auth_requires_csrf:
+        return
+
+    provided = request.headers.get("X-CSRF-Token", "")
+    expected = app.config["CSRF_TOKEN"]
+    if not provided or not _sec.compare_digest(provided, expected):
+        return jsonify({"error": "Token CSRF faltante o invalido."}), 403
+
 
 def _load_hw_profile() -> dict:
     if not HW_PROFILE_PATH.exists():
         _log.warning(
             "models/hw_profile.json no encontrado. "
-            "Los modelos locales GGUF no estarán disponibles. "
+            "Los modelos locales GGUF no estarÃ¡n disponibles. "
             "Ejecuta 'python setup_env.py' para habilitarlos."
         )
         return {}
@@ -574,6 +1095,8 @@ def api_provider_key():
     env_var = data.get("api_key_env", "").strip() or provider_api_key_env(provider)
     base_url = data.get("base_url", "").strip()
 
+    if not _is_localhost():
+        return jsonify({"error": "Guardar claves de API solo esta permitido desde localhost."}), 403
     if provider in {"ollama", "vertex_gemini"}:
         return jsonify({"error": "Este proveedor no usa clave de API directa en secrets/secrets.env."}), 400
     if not env_var:
@@ -706,7 +1229,7 @@ def _validate_base_url(base_url: str) -> None:
         if addr.is_link_local:
             raise ValueError("base_url no puede apuntar a direcciones link-local (169.254.x.x).")
     except ValueError:
-        pass  # hostname, not an IP literal — allowed
+        pass  # hostname, not an IP literal â€” allowed
 
 
 def _list_openai_compat_models(api_key: str, base_url: str) -> list:
@@ -733,7 +1256,7 @@ def _list_local_gguf_models() -> list:
         result.append({
             "id": gguf.name,
             "display_name": gguf.stem,
-            "task_description": f"Modelo local GGUF — {size_gb} GB",
+            "task_description": f"Modelo local GGUF â€” {size_gb} GB",
             "path": str(gguf.relative_to(BASE_DIR)),
             "size_gb": size_gb,
         })
@@ -878,20 +1401,20 @@ def api_rate_limits_summary():
 
 @app.route("/api/local/hardware", methods=["GET"])
 def api_local_hardware():
-    """Retorna hw_profile.json (leído fresco en cada llamada)."""
+    """Retorna hw_profile.json (leÃ­do fresco en cada llamada)."""
     return jsonify(_load_hw_profile())
 
 
 @app.route("/api/local/recommended", methods=["GET"])
 def api_local_recommended():
     """
-    Retorna lista de modelos recomendados según el hardware.
+    Retorna lista de modelos recomendados segÃºn el hardware.
     Query param: ?refresh=1 para forzar nueva consulta a los LLMs.
     Siempre lee hw_profile.json fresco para reflejar cambios post-setup.
     """
     force = request.args.get("refresh") == "1"
     try:
-        from scripts.local_models import list_known_model_filenames, recommended_models
+        from labelforge_core.local_models import list_known_model_filenames, recommended_models
         hw = _load_hw_profile()
         result = recommended_models(hw if hw else None, force_refresh=force)
         downloaded = list_known_model_filenames()
@@ -905,7 +1428,7 @@ def api_local_recommended():
 def api_local_cached():
     """Lista los GGUFs descargados en models/."""
     try:
-        from scripts.local_models import list_cached_models
+        from labelforge_core.local_models import list_cached_models
         return jsonify(list_cached_models())
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
@@ -940,7 +1463,7 @@ def api_local_download():
     if not repo_id or not filename:
         return jsonify({"error": "repo_id y filename son obligatorios"}), 400
     if not _valid_gguf_filename(filename):
-        return jsonify({"error": "Nombre de archivo inválido"}), 400
+        return jsonify({"error": "Nombre de archivo invÃ¡lido"}), 400
 
     job_id = f"{int(time.time())}_{uuid.uuid4().hex[:8]}_{filename}"
     job = {
@@ -966,7 +1489,7 @@ def api_local_download():
     def _run():
         job["status"] = "downloading"
         try:
-            from scripts.local_models import DownloadCancelled, download_model
+            from labelforge_core.local_models import DownloadCancelled, download_model
 
             def _progress(downloaded: int, total: int):
                 if job.get("cancel_requested"):
@@ -1004,7 +1527,7 @@ def api_local_download_status(job_id: str):
         return jsonify({"error": "job no encontrado"}), 404
 
     def generate():
-        # Ping inicial: establece la conexión SSE antes de que llegue el primer dato
+        # Ping inicial: establece la conexiÃ³n SSE antes de que llegue el primer dato
         yield ": ping\n\n"
         while True:
             with _download_jobs_lock:
@@ -1045,7 +1568,7 @@ def api_local_cancel_download(job_id: str):
 def api_local_delete_model(filename: str):
     """Elimina un archivo GGUF del cache."""
     if not _valid_gguf_filename(filename):
-        return jsonify({"error": "Nombre de archivo inválido"}), 400
+        return jsonify({"error": "Nombre de archivo invÃ¡lido"}), 400
     target = MODELS_DIR / filename
     if not target.exists():
         return jsonify({"error": "Archivo no encontrado"}), 404
@@ -1060,7 +1583,7 @@ def api_local_move_model(filename: str):
     if not _is_localhost():
         return jsonify({"error": "Mover modelos a rutas arbitrarias solo se permite desde localhost"}), 403
     if not _valid_gguf_filename(filename):
-        return jsonify({"error": "Nombre de archivo invÃ¡lido"}), 400
+        return jsonify({"error": "Nombre de archivo invÃƒÂ¡lido"}), 400
 
     body = request.get_json(silent=True) or {}
     destination_dir = (body.get("destination_dir") or "").strip()
@@ -1068,7 +1591,7 @@ def api_local_move_model(filename: str):
         return jsonify({"error": "destination_dir es obligatorio"}), 400
 
     try:
-        from scripts.local_models import move_model_to_directory
+        from labelforge_core.local_models import move_model_to_directory
         destination = move_model_to_directory(filename, destination_dir)
         _log.info("Modelo local movido fuera del cache: %s -> %s", filename, destination)
         return jsonify({"ok": True, "moved": filename, "destination": str(destination)})
@@ -1086,7 +1609,7 @@ def api_local_move_model(filename: str):
 def api_local_archive():
     """Lista los GGUFs archivados en models/archive/."""
     try:
-        from scripts.local_models import list_archived_models
+        from labelforge_core.local_models import list_archived_models
         return jsonify(list_archived_models())
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
@@ -1096,9 +1619,9 @@ def api_local_archive():
 def api_local_archive_model(filename: str):
     """Mueve un GGUF descargado a models/archive/ para guardarlo fuera del cache activo."""
     if not _valid_gguf_filename(filename):
-        return jsonify({"error": "Nombre de archivo invÃ¡lido"}), 400
+        return jsonify({"error": "Nombre de archivo invÃƒÂ¡lido"}), 400
     try:
-        from scripts.local_models import archive_model
+        from labelforge_core.local_models import archive_model
         archive_model(filename)
         _log.info("Modelo local archivado: %s", filename)
         return jsonify({"ok": True, "archived": filename})
@@ -1114,9 +1637,9 @@ def api_local_archive_model(filename: str):
 def api_local_restore_model(filename: str):
     """Restaura un GGUF desde models/archive/ hacia models/."""
     if not _valid_gguf_filename(filename):
-        return jsonify({"error": "Nombre de archivo invÃ¡lido"}), 400
+        return jsonify({"error": "Nombre de archivo invÃƒÂ¡lido"}), 400
     try:
-        from scripts.local_models import restore_model
+        from labelforge_core.local_models import restore_model
         restore_model(filename)
         _log.info("Modelo local restaurado: %s", filename)
         return jsonify({"ok": True, "restored": filename})
@@ -1132,9 +1655,9 @@ def api_local_restore_model(filename: str):
 def api_local_delete_archived_model(filename: str):
     """Elimina permanentemente un GGUF archivado."""
     if not _valid_gguf_filename(filename):
-        return jsonify({"error": "Nombre de archivo invÃ¡lido"}), 400
+        return jsonify({"error": "Nombre de archivo invÃƒÂ¡lido"}), 400
     try:
-        from scripts.local_models import delete_archived_model
+        from labelforge_core.local_models import delete_archived_model
         delete_archived_model(filename)
         _log.info("Modelo local archivado eliminado: %s", filename)
         return jsonify({"ok": True, "deleted": filename})
@@ -2394,5 +2917,6 @@ if __name__ == "__main__":
     import os as _os
     _host = _os.environ.get("LABELFORGE_HOST", "127.0.0.1")
     _port = int(_os.environ.get("LABELFORGE_PORT", "7860"))
-    print(f"  LabelForge  →  http://{_host}:{_port}")
+    print(f"  LabelForge  â†’  http://{_host}:{_port}")
     app.run(debug=True, host=_host, port=_port, threaded=True)
+

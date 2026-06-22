@@ -1,8 +1,8 @@
-"""
+﻿"""
 Rutas canonicas del proyecto LabelForge.
 
 Politica:
-- `scripts/` contiene codigo Python importable.
+- `labelforge_core/` contiene codigo Python importable.
 - `config/` contiene configuracion editable y versionable.
 - `secrets/` contiene credenciales locales privadas.
 - `models/`, `logs/`, `output/`, `checkpoints/` y `archive/` contienen estado,
@@ -15,7 +15,9 @@ from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-SCRIPTS_DIR = BASE_DIR / "scripts"
+CORE_DIR = BASE_DIR / "labelforge_core"
+LEGACY_SCRIPTS_DIR = BASE_DIR / "scripts"
+SCRIPTS_DIR = CORE_DIR
 CONFIG_DIR = BASE_DIR / "config"
 MODELS_DIR = BASE_DIR / "models"
 HW_PROFILE_PATH = MODELS_DIR / "hw_profile.json"
@@ -29,8 +31,8 @@ DATA_DIR = BASE_DIR / "data"
 ARBITERS_CONFIG_PATH = CONFIG_DIR / "arbiters_config.json"
 LOCAL_MODELS_CONFIG_PATH = CONFIG_DIR / "local_models_config.json"
 
-LEGACY_ARBITERS_CONFIG_PATH = SCRIPTS_DIR / "arbiters_config.json"
-LEGACY_LOCAL_MODELS_CONFIG_PATH = SCRIPTS_DIR / "local_models_config.json"
+LEGACY_ARBITERS_CONFIG_PATH = LEGACY_SCRIPTS_DIR / "arbiters_config.json"
+LEGACY_LOCAL_MODELS_CONFIG_PATH = LEGACY_SCRIPTS_DIR / "local_models_config.json"
 
 
 def resolve_config_file_path(path: str | Path | None, *, legacy_path: Path | None = None) -> Path:
@@ -64,3 +66,4 @@ def resolve_local_models_config_path() -> Path:
     if LOCAL_MODELS_CONFIG_PATH.exists():
         return LOCAL_MODELS_CONFIG_PATH
     return LEGACY_LOCAL_MODELS_CONFIG_PATH
+
