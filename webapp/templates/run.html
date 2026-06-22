@@ -241,15 +241,27 @@
     </div>
     <div class="card-dark accent-panel accent-rose mb-3">
       <div class="d-flex justify-content-between align-items-center mb-2">
-        <div class="card-header-label mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Errores</div>
-        <span class="badge bg-danger-subtle text-danger border border-danger" id="errors-count">0</span>
+        <div class="card-header-label mb-0">
+          <i class="bi bi-exclamation-triangle me-1"></i>Errores
+          <i class="bi bi-info-circle ms-1" style="color:#64748b;font-size:.72rem;cursor:help" title="Errores detectados durante la ejecucion: fallos de conexion, rate limits, errores de API, etc."></i>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          <span class="badge bg-danger-subtle text-danger border border-danger" id="errors-count">0</span>
+          <button class="btn btn-sm btn-outline-secondary py-0 px-2" id="btn-view-errors" onclick="openErrorsModal()" title="Ver lista completa de errores" style="font-size:.7rem;display:none">Ver todo</button>
+        </div>
       </div>
       <div id="errors-list" class="small text-secondary" style="max-height:200px;overflow-y:auto">Sin errores detectados.</div>
     </div>
     <div class="card-dark accent-panel accent-amber">
       <div class="d-flex justify-content-between align-items-center mb-2">
-        <div class="card-header-label mb-0"><i class="bi bi-queue me-1"></i>Entradas en cola</div>
-        <span class="badge bg-warning-subtle text-warning border border-warning" id="queued-count">0</span>
+        <div class="card-header-label mb-0">
+          <i class="bi bi-queue me-1"></i>Reintentos pendientes
+          <i class="bi bi-info-circle ms-1" style="color:#64748b;font-size:.72rem;cursor:help" title="Entradas que fallaron durante el procesamiento y seran reintentadas automaticamente al finalizar el loop principal."></i>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          <span class="badge bg-warning-subtle text-warning border border-warning" id="queued-count">0</span>
+          <button class="btn btn-sm btn-outline-secondary py-0 px-2" id="btn-view-queued" onclick="openQueuedModal()" title="Ver lista completa de entradas encoladas" style="font-size:.7rem;display:none">Ver todo</button>
+        </div>
       </div>
       <div id="queued-list" class="small text-secondary" style="max-height:200px;overflow-y:auto">Sin entradas encoladas.</div>
     </div>
@@ -723,7 +735,7 @@ async function startRun() {
     issues.forEach(issue => {
       const line = `[preflight] ${issue}`;
       appendLog(line, 'error');
-      runErrors.push(line);
+      runErrors.push({kind: 'Preflight', detail: line, time: new Date().toLocaleTimeString()});
     });
     renderRunLists();
     updateStats();
@@ -1101,12 +1113,12 @@ function parseStats(line) {
     updateStats();
   } else if (line.includes('Fallo definitivo')) {
     statsFailed++;
-    runErrors.push({kind: 'Fallo definitivo', detail: line});
+    runErrors.push({kind: 'Fallo definitivo', detail: line, time: new Date().toLocaleTimeString()});
     renderRunLists();
     updateStats();
   } else if (isErrorLine || isWarnError) {
     statsErrors++;
-    runErrors.push({kind: line.includes('429') || line.includes('RESOURCE_EXHAUSTED') ? 'Rate limit / cuota' : 'Error', detail: line});
+    runErrors.push({kind: line.includes('429') || line.includes('RESOURCE_EXHAUSTED') ? 'Rate limit / cuota' : 'Error', detail: line, time: new Date().toLocaleTimeString()});
     renderRunLists();
     updateStats();
   }
@@ -1538,14 +1550,22 @@ function renderRunLists() {
   document.getElementById('errors-count').textContent = runErrors.length;
   document.getElementById('queued-count').textContent = queuedClaims.length;
 
+  const btnErrors = document.getElementById('btn-view-errors');
+  btnErrors.style.display = runErrors.length ? '' : 'none';
+  const btnQueued = document.getElementById('btn-view-queued');
+  btnQueued.style.display = queuedClaims.length ? '' : 'none';
+
   const errorsEl = document.getElementById('errors-list');
   if (!runErrors.length) {
     errorsEl.innerHTML = 'Sin errores detectados.';
   } else {
     errorsEl.innerHTML = `${runErrors.slice(-30).reverse().map(e => `
       <div class="p-2 mb-2 rounded" style="background:#130b10;border:1px solid #3f1f2a">
-        <div class="text-danger fw-semibold">${escapeHtml(e.kind)}</div>
-        <div class="text-secondary" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.76rem">${escapeHtml(e.detail)}</div>
+        <div class="d-flex justify-content-between">
+          <span class="text-danger fw-semibold">${escapeHtml(e.kind)}</span>
+          <span class="text-secondary" style="font-size:.68rem">${e.time || ''}</span>
+        </div>
+        <div class="text-secondary" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.76rem;word-break:break-word">${escapeHtml(e.detail)}</div>
       </div>
     `).join('')}`;
   }
@@ -1561,6 +1581,62 @@ function renderRunLists() {
       </div>
     `).join('')}`;
   }
+
+  // Actualizar modales si estan abiertos
+  const errorsModal = document.getElementById('errors-modal-body');
+  if (errorsModal && errorsModal.parentElement.parentElement.parentElement.classList.contains('show')) {
+    populateErrorsModal();
+  }
+  const queuedModal = document.getElementById('queued-modal-body');
+  if (queuedModal && queuedModal.parentElement.parentElement.parentElement.classList.contains('show')) {
+    populateQueuedModal();
+  }
+}
+
+function populateErrorsModal() {
+  const body = document.getElementById('errors-modal-body');
+  document.getElementById('errors-modal-count').textContent = runErrors.length;
+  if (!runErrors.length) {
+    body.innerHTML = '<p class="text-secondary small">Sin errores detectados.</p>';
+  } else {
+    body.innerHTML = runErrors.map((e, i) => `
+      <div class="p-2 mb-2 rounded" style="background:#130b10;border:1px solid #3f1f2a">
+        <div class="d-flex justify-content-between">
+          <span class="text-danger fw-semibold">#${i+1} · ${escapeHtml(e.kind)}</span>
+          <span class="text-secondary" style="font-size:.68rem">${e.time || ''}</span>
+        </div>
+        <div class="text-secondary" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.76rem;word-break:break-word">${escapeHtml(e.detail)}</div>
+      </div>
+    `).join('');
+  }
+}
+
+function populateQueuedModal() {
+  const body = document.getElementById('queued-modal-body');
+  document.getElementById('queued-modal-count').textContent = queuedClaims.length;
+  if (!queuedClaims.length) {
+    body.innerHTML = '<p class="text-secondary small">No hay entradas en la cola de reintentos.</p>';
+  } else {
+    body.innerHTML = queuedClaims.map((q, i) => `
+      <div class="p-2 mb-2 rounded" style="background:#151107;border:1px solid #49350e">
+        <div class="d-flex justify-content-between">
+          <span class="text-warning fw-semibold">#${i+1} · Entrada ${escapeHtml(q.claim)} · ${escapeHtml(q.arbiter)}</span>
+        </div>
+        <div class="text-secondary" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.76rem;word-break:break-word">${escapeHtml(q.reason)}</div>
+      </div>
+    `).join('');
+  }
+}
+
+function openErrorsModal() {
+  populateErrorsModal();
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('errorsModal')).show();
+}
+
+function openQueuedModal() {
+  populateQueuedModal();
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('queuedModal')).show();
+}
 }
 
 function setRunning(running) {
@@ -1672,4 +1748,42 @@ fetch('/api/run/status').then(r => r.json()).then(s => {
   if (s.running) { setRunning(true); startSSE(); }
 });
 </script>
+
+<!-- Modal: lista completa de errores -->
+<div class="modal fade" id="errorsModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content" style="background:#1a1d27;border:1px solid rgba(244,63,94,.4);color:#e2e8f0">
+      <div class="modal-header border-0 pb-0">
+        <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2" style="color:#f43f5e"></i>Errores <span id="errors-modal-count" class="badge bg-danger-subtle text-danger border border-danger ms-2">0</span></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body pt-3" id="errors-modal-body">
+        <p class="text-secondary small">Sin errores detectados.</p>
+      </div>
+      <div class="modal-footer border-0">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: lista completa de reintentos pendientes -->
+<div class="modal fade" id="queuedModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content" style="background:#1a1d27;border:1px solid rgba(250,204,21,.4);color:#e2e8f0">
+      <div class="modal-header border-0 pb-0">
+        <h5 class="modal-title"><i class="bi bi-queue me-2" style="color:#eab308"></i>Reintentos pendientes <span id="queued-modal-count" class="badge bg-warning-subtle text-warning border border-warning ms-2">0</span></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body pt-3">
+        <p class="text-secondary small">Entradas que fallaron durante el procesamiento y serán reintentadas automáticamente. Si un reintento falla de nuevo, se marca como fallo definitivo.</p>
+        <div id="queued-modal-body"></div>
+      </div>
+      <div class="modal-footer border-0">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
