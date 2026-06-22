@@ -27,6 +27,13 @@ psutil>=5.9.0
 
 # --- Web framework ---
 flask>=3.1.0
+authlib>=1.7.0
+
+# --- Cryptographic export/import (.lfarb) ---
+cryptography>=41.0.0
+
+# --- HTTP downloads ---
+requests>=2.31.0
 
 # --- Dataset reading ---
 openpyxl>=3.1.0
