@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 from pathlib import Path
 from typing import Optional
@@ -19,13 +19,8 @@ def secrets_dir(base_dir: Path) -> Path:
 
 
 def secrets_env_path(base_dir: Path) -> Path:
-    """Canonical local dotenv path. Falls back to legacy root file if present."""
-    base_dir = Path(base_dir)
-    canonical = secrets_dir(base_dir) / "secrets.env"
-    legacy = base_dir / "secrets.env"
-    if canonical.exists() or not legacy.exists():
-        return canonical
-    return legacy
+    """Canonical local dotenv path."""
+    return secrets_dir(Path(base_dir)) / "secrets.env"
 
 
 def provider_api_key_env(provider: str) -> str:
@@ -83,16 +78,16 @@ def set_secret_value(path: Path, key: str, value: str) -> None:
 
 def resolve_gcp_credentials(base_dir: Path) -> Optional[str]:
     """
-    Garantiza que GOOGLE_APPLICATION_CREDENTIALS apunte a un archivo válido,
+    Garantiza que GOOGLE_APPLICATION_CREDENTIALS apunte a un archivo valido,
     sin depender de rutas absolutas en secrets.env.
 
-    Orden de resolución:
-      1. Si ya está seteada y el archivo existe  ->  se normaliza a absoluta.
-      2. Si está seteada con ruta relativa  ->  se resuelve contra base_dir.
-      3. Si no está seteada o la ruta no existe  ->  auto-detecta el primer
+    Orden de resolucion:
+      1. Si ya esta seteada y el archivo existe  ->  se normaliza a absoluta.
+      2. Si esta seteada con ruta relativa  ->  se resuelve contra base_dir.
+      3. Si no esta seteada o la ruta no existe  ->  auto-detecta el primer
          JSON de tipo service_account en secrets/.
 
-    Retorna la ruta absoluta resuelta, o None si no se encontró nada.
+    Retorna la ruta absoluta resuelta, o None si no se encontro nada.
     """
     base_dir = Path(base_dir).resolve()
     secrets_d = base_dir / "secrets"
@@ -106,9 +101,9 @@ def resolve_gcp_credentials(base_dir: Path) -> Optional[str]:
             resolved = str(p.resolve())
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = resolved
             return resolved
-        # Ruta configurada pero no existe  ->  caer a auto-detección
+        # Ruta configurada pero no existe  ->  caer a auto-deteccion
 
-    # Auto-detección: primer JSON de service_account en secrets/
+    # Auto-deteccion: primer JSON de service_account en secrets/
     if secrets_d.is_dir():
         for candidate in sorted(secrets_d.glob("*.json")):
             try:

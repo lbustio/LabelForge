@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Principios — LabelForge{% endblock %}
+{% block title %}Principios - LabelForge{% endblock %}
 {% block content %}
 <style>
   .prompt-color-legend {
@@ -32,7 +32,7 @@
   .prompt-legend-output { background: #082f24; border: 1px solid #86efac; }
 </style>
 
-<div class="page-title">Principios y plantilla de instrucción</div>
+<div class="page-title">Principios y plantilla de instruccion</div>
 
 <!-- Principios -->
 <div class="card-dark accent-panel accent-violet mb-4">
@@ -48,11 +48,11 @@
   </button>
 </div>
 
-<!-- Plantilla de instrucción -->
+<!-- Plantilla de instruccion -->
 <div class="card-dark accent-panel accent-blue">
-  <div class="card-header-label">Plantilla de instrucción de usuario</div>
+  <div class="card-header-label">Plantilla de instruccion de usuario</div>
   <p class="text-secondary small mb-3">
-    Esta es la instrucción que recibe cada arbitro. Debe contener el marcador
+    Esta es la instruccion que recibe cada arbitro. Debe contener el marcador
     <code>{item}</code>
     donde se insertara el texto de entrada a analizar. Usa <code>{% raw %}{{ }}{% endraw %}</code>
     para llaves literales en el JSON de salida. Usa
@@ -73,9 +73,9 @@
   </button>
 </div>
 
-<!-- Vista previa de la instrucción -->
+<!-- Vista previa de la instruccion -->
 <div class="card-dark accent-panel accent-emerald">
-  <div class="card-header-label">Ejemplo de instrucción final</div>
+  <div class="card-header-label">Ejemplo de instruccion final</div>
   <div class="row g-3 mb-3">
     <div class="col-lg-4">
       <label class="form-label small text-secondary">Arbitro</label>
@@ -87,7 +87,7 @@
         value="Says the Annies List political group supports third-trimester abortions on demand.">
     </div>
   </div>
-  <div class="prompt-color-legend" aria-label="Leyenda de colores de la instrucción">
+  <div class="prompt-color-legend" aria-label="Leyenda de colores de la instruccion">
     <span class="prompt-legend-item">
       <span class="prompt-legend-swatch prompt-legend-system"></span>
       Sistema: instrucciones del arbitro
@@ -215,7 +215,7 @@ function renderArbiterOptions() {
     return;
   }
   select.innerHTML = arbiters.map(a => `
-    <option value="${escapeHtml(a.id)}">${escapeHtml(a.id)} — ${escapeHtml(a.name || a.id)}</option>
+    <option value="${escapeHtml(a.id)}">${escapeHtml(a.id)} - ${escapeHtml(a.name || a.id)}</option>
   `).join('');
 }
 
@@ -253,7 +253,6 @@ function buildPrinciplesCatalog() {
 function renderTemplate(template, claim, principlesCatalog, outputInstruction) {
   let rendered = template
     .replaceAll('{item}', claim)
-    .replaceAll('{claim}', claim)  // backward compat
     .replaceAll('{principles_catalog}', principlesCatalog)
     .replaceAll('{output_instruction}', outputInstruction)
     .replaceAll('{output_schema}', outputInstruction);

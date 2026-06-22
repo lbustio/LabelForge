@@ -1,4 +1,4 @@
-﻿"""
+"""
 Provider runtime preflight checks.
 
 These checks are intentionally local/lightweight: they catch missing credentials
@@ -105,7 +105,7 @@ def _check_llama_cpp(arb_id: str, provider: dict) -> list[str]:
         import llama_cpp  # noqa: F401
     except ImportError:
         issues.append(
-            f"{arb_id}: llama-cpp-python no está instalado. "
+            f"{arb_id}: llama-cpp-python no esta instalado. "
             "Ejecuta 'python setup_env.py' para instalarlo con soporte GPU correcto."
         )
 
@@ -114,7 +114,7 @@ def _check_llama_cpp(arb_id: str, provider: dict) -> list[str]:
     if not model_path:
         issues.append(
             f"{arb_id}: llama_cpp requiere provider.model_path con la ruta al archivo .gguf. "
-            "Descarga un modelo desde la webapp (Árbitros  ->  Descargar modelos)."
+            "Descarga un modelo desde la webapp (Arbitros  ->  Descargar modelos)."
         )
     else:
         base_dir = Path(__file__).resolve().parent.parent
@@ -122,7 +122,7 @@ def _check_llama_cpp(arb_id: str, provider: dict) -> list[str]:
         if not full_path.exists():
             issues.append(
                 f"{arb_id}: modelo GGUF no encontrado: {model_path}. "
-                "Descárgalo desde la webapp (Árbitros  ->  Descargar modelos)."
+                "Descargalo desde la webapp (Arbitros  ->  Descargar modelos)."
             )
         elif full_path.suffix.lower() != ".gguf":
             issues.append(

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Inicio — LabelForge{% endblock %}
+{% block title %}Inicio - LabelForge{% endblock %}
 {% block content %}
 <div class="home-hero">
   <img src="{{ url_for('static', filename='logo-cropped.png') }}" alt="LabelForge">
@@ -17,7 +17,7 @@
         <span class="metric-icon"><i class="bi bi-people"></i></span>
         <span class="metric-kicker">Equipo</span>
       </div>
-      <div class="metric-value" id="stat-arbiters">—</div>
+      <div class="metric-value" id="stat-arbiters">-</div>
       <div class="metric-label">Arbitros configurados</div>
     </div>
   </div>
@@ -27,7 +27,7 @@
         <span class="metric-icon"><i class="bi bi-tags"></i></span>
         <span class="metric-kicker">Taxonomia</span>
       </div>
-      <div class="metric-value" id="stat-principles">—</div>
+      <div class="metric-value" id="stat-principles">-</div>
       <div class="metric-label">Principios activos</div>
     </div>
   </div>
@@ -37,7 +37,7 @@
         <span class="metric-icon"><i class="bi bi-file-earmark-spreadsheet"></i></span>
         <span class="metric-kicker">Resultados</span>
       </div>
-      <div class="metric-value" id="stat-outputs">—</div>
+      <div class="metric-value" id="stat-outputs">-</div>
       <div class="metric-label">Resultados generados</div>
     </div>
   </div>
@@ -47,7 +47,7 @@
         <span class="metric-icon"><i class="bi bi-bookmark-check"></i></span>
         <span class="metric-kicker">Resiliencia</span>
       </div>
-      <div class="metric-value" id="stat-checkpoint-val">—</div>
+      <div class="metric-value" id="stat-checkpoint-val">-</div>
       <div class="metric-label">Entradas con punto de control</div>
     </div>
   </div>
@@ -153,13 +153,13 @@ function showArbiterModal(arb) {
   const body = document.getElementById('arbModalBody');
   body.innerHTML = `
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">ID</span><br><span style="color:#e2e8f0">${escapeHtml(arb.id)}</span></div>
-    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Persona</span><br><span style="color:#e2e8f0">${escapeHtml(arb.persona || '—')}</span></div>
-    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Proveedor</span><br><span style="color:#e2e8f0">${escapeHtml(p.type || '—')}</span></div>
-    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Modelo</span><br><span style="color:#e2e8f0">${escapeHtml(p.model || '—')}</span></div>
+    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Persona</span><br><span style="color:#e2e8f0">${escapeHtml(arb.persona || '-')}</span></div>
+    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Proveedor</span><br><span style="color:#e2e8f0">${escapeHtml(p.type || '-')}</span></div>
+    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Modelo</span><br><span style="color:#e2e8f0">${escapeHtml(p.model || '-')}</span></div>
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Temperatura</span><br>${temperatureBadge(gc.temperature ?? 0.1)}</div>
     <div class="mb-0">
-      <span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Instrucción de sistema</span>
-      <pre style="background:#0f1117;border:1px solid #2d3148;border-radius:.5rem;padding:.6rem;margin-top:.3rem;font-size:.78rem;color:#c4b5fd;max-height:180px;overflow-y:auto;white-space:pre-wrap">${escapeHtml(arb.system_prompt || '—')}</pre>
+      <span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Instruccion de sistema</span>
+      <pre style="background:#0f1117;border:1px solid #2d3148;border-radius:.5rem;padding:.6rem;margin-top:.3rem;font-size:.78rem;color:#c4b5fd;max-height:180px;overflow-y:auto;white-space:pre-wrap">${escapeHtml(arb.system_prompt || '-')}</pre>
     </div>
   `;
 
@@ -190,24 +190,24 @@ function showOutputModal(out) {
   document.getElementById('outModalTitle').textContent = out.name;
 
   const body = document.getElementById('outModalBody');
-  const rowsOk = out.successful_rows != null ? out.successful_rows : '—';
-  const rowsFailed = out.failed_rows != null ? out.failed_rows : '—';
-  const totalRows = out.row_count != null ? out.row_count : '—';
-  const tokens = out.total_tokens_global != null ? out.total_tokens_global.toLocaleString() : '—';
+  const rowsOk = out.successful_rows != null ? out.successful_rows : '-';
+  const rowsFailed = out.failed_rows != null ? out.failed_rows : '-';
+  const totalRows = out.row_count != null ? out.row_count : '-';
+  const tokens = out.total_tokens_global != null ? out.total_tokens_global.toLocaleString() : '-';
   body.innerHTML = `
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Archivo</span><br><span style="color:#e2e8f0">${escapeHtml(out.name)}</span></div>
-    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Tamaño</span><br><span style="color:#e2e8f0">${out.size_kb} KB</span></div>
-    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Ultima modificación</span><br><span style="color:#e2e8f0">${escapeHtml(out.modified || '—')}</span></div>
-    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Ejecución</span><br><span style="color:#e2e8f0">${escapeHtml(out.run_timestamp || '—')}</span></div>
+    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Tamano</span><br><span style="color:#e2e8f0">${out.size_kb} KB</span></div>
+    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Ultima modificacion</span><br><span style="color:#e2e8f0">${escapeHtml(out.modified || '-')}</span></div>
+    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Ejecucion</span><br><span style="color:#e2e8f0">${escapeHtml(out.run_timestamp || '-')}</span></div>
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Entradas totales / OK / Fallidas</span><br><span style="color:#e2e8f0">${totalRows} / ${rowsOk} / ${rowsFailed}</span></div>
     <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Tokens totales</span><br><span style="color:#e2e8f0">${tokens}</span></div>
-    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Principios</span><br><span style="color:#e2e8f0">${(out.principles || []).length ? out.principles.join(', ') : '—'}</span></div>
-    <div class="mb-0"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Arbitros</span><br><span style="color:#e2e8f0">${(out.arbiters || []).length ? out.arbiters.join(', ') : '—'}</span></div>
+    <div class="mb-2"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Principios</span><br><span style="color:#e2e8f0">${(out.principles || []).length ? out.principles.join(', ') : '-'}</span></div>
+    <div class="mb-0"><span class="text-secondary" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em">Arbitros</span><br><span style="color:#e2e8f0">${(out.arbiters || []).length ? out.arbiters.join(', ') : '-'}</span></div>
   `;
 
   document.getElementById('outModalOpenBtn').href = `/outputs/${encodeURIComponent(out.name)}`;
   document.getElementById('outModalDeleteBtn').onclick = async () => {
-    if (!confirm(`¿Eliminar resultado "${out.name}"?`)) return;
+    if (!confirm(`Eliminar resultado "${out.name}"?`)) return;
     try {
       const r = await fetch(`/api/outputs/${encodeURIComponent(out.name)}`, { method: 'DELETE' });
       if (!r.ok) { const e = await r.json(); throw new Error(e.error); }
@@ -272,7 +272,7 @@ function loadDashboard() {
     const outEl = document.getElementById('outputs-list');
     const outputTones = ['accent-cyan', 'accent-violet', 'accent-emerald', 'accent-amber', 'accent-rose'];
     if (!outputs.length) {
-      outEl.innerHTML = '<span class="text-secondary small">Sin resultados todavía.</span>';
+      outEl.innerHTML = '<span class="text-secondary small">Sin resultados todavia.</span>';
     } else {
       outEl.innerHTML = outputs.slice(0,5).map((o, idx) => {
         const tone = outputTones[(idx + 2) % outputTones.length];

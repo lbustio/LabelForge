@@ -1,4 +1,4 @@
-﻿"""
+"""
 label_persuasion.py
 -------------------
 Etiqueta un dataset CSV o Excel con los principios de persuasion de Ana Ferreira
@@ -36,13 +36,13 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-# Silenciar warnings de deprecación del SDK de Vertex AI
+# Silenciar warnings de deprecacion del SDK de Vertex AI
 warnings.filterwarnings("ignore", category=UserWarning, module="vertexai")
 
 from dotenv import load_dotenv
 
 # ---------------------------------------------------------------------------
-# Módulo compartido de métricas de acuerdo
+# Modulo compartido de metricas de acuerdo
 # ---------------------------------------------------------------------------
 from labelforge_core.agreement_metrics import (
     CONSENSUS_METRIC_KEYS,
@@ -726,7 +726,7 @@ def _call_local(arbiter: dict, prompt_user: str) -> tuple:
         try:
             return _call_openvino(arbiter, prompt_user)
         except Exception as exc:
-            log.warning("[local] NPU falló (%s)  -  recayendo en llama-cpp-python", exc)
+            log.warning("[local] NPU fallo (%s)  -  recayendo en llama-cpp-python", exc)
 
     return _call_llama_cpp(arbiter, prompt_user)
 
@@ -774,7 +774,6 @@ def build_user_prompt(task_cfg: dict, claim: str, max_chars: int) -> str:
     principles_catalog = build_principles_catalog(task_cfg)
     prompt = template.format(
         item=claim[:max_chars],
-        claim=claim[:max_chars],  # backward compat with old templates using {claim}
         principles_catalog=principles_catalog,
         output_instruction=output_instruction,
         output_schema=output_instruction,

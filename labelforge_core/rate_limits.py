@@ -1,4 +1,4 @@
-﻿"""
+"""
 Provider/model rate-limit profiles used by the WebApp.
 
 Important distinction:
@@ -241,7 +241,7 @@ def get_rate_limit_profile(provider: str, model_id: str, tier: str = "free") -> 
             "limit_kind": "local",
             "source_label": "Modelo local GGUF",
             "source_url": "",
-            "note": "Modelo local  -  sin límites de API.",
+            "note": "Modelo local  -  sin limites de API.",
         }
 
     if provider == "gemini":
@@ -310,7 +310,7 @@ def compute_min_delay(provider: str, model_id: str, tier: str = "free", n_arbite
             "min_delay_s": 0,
             "safe_delay_s": 0,
             "alert_level": "info",
-            "alert_msg": "Modelo local GGUF  -  sin límites de API, sin delay necesario.",
+            "alert_msg": "Modelo local GGUF  -  sin limites de API, sin delay necesario.",
         }
 
     rpm = profile.get("rpm") or 10

@@ -1,4 +1,4 @@
-﻿# LabelForge - contexto tecnico de transferencia
+# LabelForge - contexto tecnico de transferencia
 
 Ultima actualizacion: 2026-06-19.
 
@@ -102,8 +102,8 @@ No volver a guardar JSON editables en `labelforge_core/`.
 - `resolve_config_file_path()`;
 - `resolve_local_models_config_path()`.
 
-Hay fallback legacy para rutas antiguas, pero la direccion correcta para trabajo nuevo
-es siempre `config/`.
+No hay redireccion automatica a ubicaciones antiguas: la direccion correcta es
+siempre `config/`.
 
 ## 5. Config actual de arbitros
 
@@ -268,11 +268,8 @@ Implementado:
 
 - login local SQLite obligatorio por defecto;
 - en primer arranque, `/login` crea el primer usuario en `secrets/auth.db`;
-- `LABELFORGE_AUTH_MODE=local` es el modo recomendado actual;
-- OAuth2 queda como mejora futura, no como flujo principal actual;
 - `LABELFORGE_SECRET_KEY` recomendado para sesiones persistentes;
 - cookies `HttpOnly`, `SameSite=Lax`, y `Secure` configurable con `LABELFORGE_COOKIE_SECURE=1`;
-- escape solo para desarrollo aislado: `LABELFORGE_AUTH_DISABLED=1`;
 - limite upload 50 MB;
 - CSP basica, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`;
 - validacion de filename GGUF contra traversal;
@@ -282,8 +279,8 @@ Implementado:
 - `api_key_override` se trata como transitorio y no persiste en `config/arbiters_config.json`.
 
 La autenticacion esta encapsulada en `webapp/app.py` y plantillas. `main_cli.py` y
-los modulos en `labelforge_core/` siguen agnosticos a OAuth/login y pensados para ejecucion
-local o para ser llamados por la webapp en servidor.
+los modulos en `labelforge_core/` siguen agnosticos al login web y pensados para
+ejecucion local o para ser llamados por la webapp en servidor.
 
 Pendiente:
 
@@ -374,11 +371,11 @@ Funciones actuales:
 - export/import `.lfarb`;
 - gestion de GGUF local.
 
-Deuda tecnica:
+Estado tecnico:
 
-- aun hay bloques JS legacy y bloques v2 en el archivo;
-- el bloque v2 pisa funciones antiguas;
-- conviene limpiar en una sesion dedicada con pruebas de navegador.
+- el flujo GGUF conserva una sola implementacion activa;
+- las tarjetas de modelos locales gestionan descarga, cancelacion, archivado,
+  restauracion y movimiento.
 
 ## 13. Politica de almacenamiento
 
@@ -430,7 +427,6 @@ Los puntos mas importantes ahora:
 
 - prueba end-to-end con dataset pequeno;
 - ejecutar pipeline completo para resultados del paper;
-- limpiar JS legacy de `arbiters.html`;
 - validar descarga/cancelacion GGUF con archivos reales.
 
 ## 16. Documentos

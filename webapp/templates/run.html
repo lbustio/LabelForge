@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Ejecutar — LabelForge{% endblock %}
+{% block title %}Ejecutar - LabelForge{% endblock %}
 {% block content %}
 <style>
   .log-arbiter-line {
@@ -59,19 +59,19 @@
 </div>
 
 <!-- ============================================================ -->
-<!-- FILA 1: Configuración de la ejecución                         -->
+<!-- FILA 1: Configuracion de la ejecucion                         -->
 <!-- ============================================================ -->
 <div class="card-dark accent-panel accent-violet mb-4">
-  <div class="card-header-label"><i class="bi bi-gear me-1"></i>Configuración de la ejecución</div>
+  <div class="card-header-label"><i class="bi bi-gear me-1"></i>Configuracion de la ejecucion</div>
   <div class="row g-3">
     <div class="col-md-5">
       <div class="mb-3">
         <label class="form-label small text-secondary">
-          <i class="bi bi-sliders me-1"></i>Límite de entradas
+          <i class="bi bi-sliders me-1"></i>Limite de entradas
         </label>
-        <input type="number" id="limit-input" class="form-control" min="1" value="10" placeholder="Vacío = procesar todo" oninput="updateLimitExplanation()">
+        <input type="number" id="limit-input" class="form-control" min="1" value="10" placeholder="Vacio = procesar todo" oninput="updateLimitExplanation()">
         <div class="form-text text-secondary">
-          Es un límite total desde el inicio del dataset, no una cantidad adicional.
+          Es un limite total desde el inicio del dataset, no una cantidad adicional.
         </div>
         <div class="form-text text-info" id="limit-explanation">
           Si hay checkpoint, las entradas ya guardadas se saltan.
@@ -86,20 +86,20 @@
         <span class="text-secondary small">Cargando...</span>
       </div>
       <div id="config-resumen" class="mt-2 small text-secondary">
-        <span id="config-arbiters">—</span> arbitros · 
-        <span id="config-principles">—</span> principios · 
-        Conjunto de datos: <span id="config-dataset">—</span>
+        <span id="config-arbiters">-</span> arbitros -
+        <span id="config-principles">-</span> principios -
+        Conjunto de datos: <span id="config-dataset">-</span>
       </div>
     </div>
   </div>
 </div>
 
 <!-- ============================================================ -->
-  <!-- FILA 2: Control de ejecución                                  -->
+  <!-- FILA 2: Control de ejecucion                                  -->
 <!-- ============================================================ -->
 <div class="card-dark accent-panel accent-emerald mb-4">
   <div class="d-flex justify-content-between align-items-center mb-3">
-    <div class="card-header-label mb-0"><i class="bi bi-activity me-1"></i>Control de ejecución</div>
+    <div class="card-header-label mb-0"><i class="bi bi-activity me-1"></i>Control de ejecucion</div>
     <div class="d-flex align-items-center gap-2">
       <span class="status-dot idle" id="status-dot"></span>
       <span class="small" id="status-text" style="color:#94a3b8">Inactivo</span>
@@ -115,19 +115,19 @@
       <div class="row g-2">
         <div class="col-4">
           <div class="metric-mini accent-emerald text-center">
-            <div class="metric-value" id="stat-processed">—</div>
+            <div class="metric-value" id="stat-processed">-</div>
             <div class="metric-label">Entradas OK</div>
           </div>
         </div>
         <div class="col-4">
           <div class="metric-mini accent-amber text-center">
-            <div class="metric-value" id="stat-failed">—</div>
+            <div class="metric-value" id="stat-failed">-</div>
             <div class="metric-label">Fallidos</div>
           </div>
         </div>
         <div class="col-4">
           <div class="metric-mini accent-rose text-center">
-            <div class="metric-value" id="stat-errors">—</div>
+            <div class="metric-value" id="stat-errors">-</div>
             <div class="metric-label">Errores</div>
           </div>
         </div>
@@ -136,8 +136,8 @@
       <div id="progress-bars" class="mt-3" style="display:none">
         <div class="mb-2">
           <div class="d-flex justify-content-between align-items-baseline mb-1">
-            <span class="small text-secondary">Límite de ejecución</span>
-            <span class="small fw-semibold" id="pb-limit-text" style="color:#22d3ee">—</span>
+            <span class="small text-secondary">Limite de ejecucion</span>
+            <span class="small fw-semibold" id="pb-limit-text" style="color:#22d3ee">-</span>
           </div>
           <div style="height:7px;background:#1e2234;border-radius:999px;overflow:hidden">
             <div id="pb-limit-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#0ea5e9,#22d3ee);border-radius:999px;transition:width .4s ease"></div>
@@ -146,7 +146,7 @@
         <div>
           <div class="d-flex justify-content-between align-items-baseline mb-1">
             <span class="small text-secondary">Dataset completo</span>
-            <span class="small fw-semibold" id="pb-total-text" style="color:#8b5cf6">—</span>
+            <span class="small fw-semibold" id="pb-total-text" style="color:#8b5cf6">-</span>
           </div>
           <div style="height:7px;background:#1e2234;border-radius:999px;overflow:hidden">
             <div id="pb-total-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#7c3aed,#8b5cf6);border-radius:999px;transition:width .4s ease"></div>
@@ -158,7 +158,7 @@
 </div>
 
 <!-- ============================================================ -->
-<!-- FILA 3: Registro de actividad + métricas en vivo              -->
+<!-- FILA 3: Registro de actividad + metricas en vivo              -->
 <!-- ============================================================ -->
 <div class="row g-3 mb-4">
   <div class="col-xl-7">
@@ -172,7 +172,7 @@
       <div class="log-box" id="log-box"></div>
       <div class="mt-3 flex-shrink-0">
         <button id="btn-stop" class="btn btn-danger w-100" onclick="stopRun()" disabled>
-          <i class="bi bi-stop-fill me-1"></i>Detener ejecución
+          <i class="bi bi-stop-fill me-1"></i>Detener ejecucion
         </button>
       </div>
     </div>
@@ -180,58 +180,58 @@
   <div class="col-xl-5">
     <div class="card-dark accent-panel accent-blue mb-3" id="live-stats-panel">
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <div class="card-header-label mb-0"><i class="bi bi-graph-up me-1"></i>Métricas en vivo</div>
-        <span class="badge bg-primary-subtle text-primary border border-primary" id="live-source">Sin ejecución activa</span>
+        <div class="card-header-label mb-0"><i class="bi bi-graph-up me-1"></i>Metricas en vivo</div>
+        <span class="badge bg-primary-subtle text-primary border border-primary" id="live-source">Sin ejecucion activa</span>
       </div>
       <div class="row g-2 mb-3">
         <div class="col-sm-4 col-6">
           <div class="metric-mini accent-violet text-center">
-            <div class="metric-value" id="live-total-tokens">—</div>
+            <div class="metric-value" id="live-total-tokens">-</div>
             <div class="metric-label">Tokens ahora</div>
           </div>
         </div>
         <div class="col-sm-4 col-6">
           <div class="metric-mini accent-blue text-center">
-            <div class="metric-value" id="live-progress">—</div>
+            <div class="metric-value" id="live-progress">-</div>
             <div class="metric-label" id="live-progress-pct">Progreso</div>
           </div>
         </div>
         <div class="col-sm-4 col-6">
           <div class="metric-mini accent-emerald text-center">
-            <div class="metric-value" id="live-successful-rows">—</div>
+            <div class="metric-value" id="live-successful-rows">-</div>
             <div class="metric-label">Entradas OK</div>
           </div>
         </div>
         <div class="col-sm-4 col-6">
           <div class="metric-mini accent-rose text-center">
-            <div class="metric-value" id="live-failed-rows">—</div>
+            <div class="metric-value" id="live-failed-rows">-</div>
             <div class="metric-label">Fallidos</div>
           </div>
         </div>
         <div class="col-sm-4 col-6">
           <div class="metric-mini accent-amber text-center">
-            <div class="metric-value" id="live-tpr">—</div>
+            <div class="metric-value" id="live-tpr">-</div>
             <div class="metric-label">Tokens / entrada</div>
           </div>
         </div>
         <div class="col-sm-4 col-6">
           <div class="metric-mini accent-cyan text-center">
-            <div class="metric-value" id="live-total-latency">—</div>
+            <div class="metric-value" id="live-total-latency">-</div>
             <div class="metric-label">Tiempo ahora</div>
           </div>
         </div>
       </div>
-      <!-- Gráficas en tiempo real -->
+      <!-- Graficas en tiempo real -->
       <div class="row g-2 mb-3" id="live-charts-row">
         <div class="col-md-5">
           <div style="background:#0a0c14;border:1px solid #2d3148;border-radius:.5rem;padding:.6rem">
-            <div style="font-size:.68rem;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.4rem">Distribución OK / Fallidos / Pendientes</div>
+            <div style="font-size:.68rem;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.4rem">Distribucion OK / Fallidos / Pendientes</div>
             <canvas id="chart-donut" height="150"></canvas>
           </div>
         </div>
         <div class="col-md-7">
           <div style="background:#0a0c14;border:1px solid #2d3148;border-radius:.5rem;padding:.6rem">
-            <div style="font-size:.68rem;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.4rem">Latencia media por árbitro (últimas N muestras)</div>
+            <div style="font-size:.68rem;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.4rem">Latencia media por arbitro (ultimas N muestras)</div>
             <canvas id="chart-latency" height="150"></canvas>
           </div>
         </div>
@@ -269,7 +269,7 @@
 </div>
 
 <!-- ============================================================ -->
-<!-- FILA 3.5: Dashboard de gráficas en vivo                       -->
+<!-- FILA 3.5: Dashboard de graficas en vivo                       -->
 <!-- ============================================================ -->
 <div class="card-dark accent-panel accent-violet mb-4" id="live-dashboard-panel">
   <div class="card-header-label"><i class="bi bi-graph-up-arrow me-1"></i>Dashboard en vivo</div>
@@ -282,7 +282,7 @@
     </div>
     <div class="col-lg-4">
       <div class="chart-box">
-        <div class="chart-box-title">Tokens por árbitro</div>
+        <div class="chart-box-title">Tokens por arbitro</div>
         <canvas id="chart-tokens" height="120"></canvas>
       </div>
     </div>
@@ -290,7 +290,7 @@
   <div class="row g-3 mb-3">
     <div class="col-lg-4">
       <div class="chart-box">
-        <div class="chart-box-title">Tasa de éxito por árbitro</div>
+        <div class="chart-box-title">Tasa de exito por arbitro</div>
         <div class="chart-pending-overlay" id="overlay-success">
           <div class="po-icon"><i class="bi bi-hourglass-split"></i></div>
           <div id="overlay-success-msg">Inicia un proceso para ver datos en vivo</div>
@@ -300,7 +300,7 @@
     </div>
     <div class="col-lg-8">
       <div class="chart-box">
-        <div class="chart-box-title">Latencia min / prom / máx por árbitro (s)</div>
+        <div class="chart-box-title">Latencia min / prom / max por arbitro (s)</div>
         <canvas id="chart-latrange" height="120"></canvas>
       </div>
     </div>
@@ -308,7 +308,7 @@
   <div class="row g-3">
     <div class="col-12">
       <div class="chart-box">
-        <div class="chart-box-title" id="chart-principles-title">Distribución de principios (entradas etiquetadas hasta ahora)</div>
+        <div class="chart-box-title" id="chart-principles-title">Distribucion de principios (entradas etiquetadas hasta ahora)</div>
         <div class="chart-pending-overlay" id="overlay-principles">
           <div class="po-icon"><i class="bi bi-hourglass-split"></i></div>
           <div id="overlay-principles-msg">Inicia un proceso para ver datos en vivo</div>
@@ -324,43 +324,43 @@
 <!-- ============================================================ -->
 <div class="card-dark accent-panel accent-emerald mb-4" id="stats-panel" style="display:none">
   <div class="d-flex justify-content-between align-items-center mb-3">
-    <div class="card-header-label mb-0"><i class="bi bi-bar-chart me-1"></i>Resumen del último resultado guardado</div>
+    <div class="card-header-label mb-0"><i class="bi bi-bar-chart me-1"></i>Resumen del ultimo resultado guardado</div>
     <span class="badge bg-success-subtle text-success border border-success" id="stats-source"></span>
   </div>
   <div class="row g-2 mb-3">
     <div class="col-md-2 col-6">
       <div class="metric-mini accent-violet text-center">
-        <div class="metric-value" id="stats-total-tokens">—</div>
+        <div class="metric-value" id="stats-total-tokens">-</div>
         <div class="metric-label">Tokens globales</div>
       </div>
     </div>
     <div class="col-md-2 col-6">
       <div class="metric-mini accent-blue text-center">
-        <div class="metric-value" id="stats-total-rows">—</div>
+        <div class="metric-value" id="stats-total-rows">-</div>
         <div class="metric-label">Entradas totales</div>
       </div>
     </div>
     <div class="col-md-2 col-6">
       <div class="metric-mini accent-emerald text-center">
-        <div class="metric-value" id="stats-successful-rows">—</div>
+        <div class="metric-value" id="stats-successful-rows">-</div>
         <div class="metric-label">Entradas OK</div>
       </div>
     </div>
     <div class="col-md-2 col-6">
       <div class="metric-mini accent-rose text-center">
-        <div class="metric-value" id="stats-failed-rows">—</div>
+        <div class="metric-value" id="stats-failed-rows">-</div>
         <div class="metric-label">Fallidos</div>
       </div>
     </div>
     <div class="col-md-2 col-6">
       <div class="metric-mini accent-amber text-center">
-        <div class="metric-value" id="stats-tpr">—</div>
+        <div class="metric-value" id="stats-tpr">-</div>
         <div class="metric-label">Tokens / entrada</div>
       </div>
     </div>
     <div class="col-md-2 col-6">
       <div class="metric-mini accent-cyan text-center">
-        <div class="metric-value" id="stats-total-latency">—</div>
+        <div class="metric-value" id="stats-total-latency">-</div>
         <div class="metric-label">Tiempo total</div>
       </div>
     </div>
@@ -378,7 +378,7 @@
     <span class="badge bg-info-subtle text-info border border-info" id="stats-results-count"></span>
   </div>
   <div class="text-secondary small mb-2">
-    Mostrando entradas procesadas, con las más recientes arriba.
+    Mostrando entradas procesadas, con las mas recientes arriba.
   </div>
   <div class="d-flex flex-wrap align-items-center gap-2 mb-3" id="results-controls"></div>
   <div id="stats-results-table"></div>
@@ -491,7 +491,7 @@ async function loadCheckpoint() {
     checkpointProcessedRows = 0;
     checkpointTotalRows = 0;
     updateLimitExplanation();
-    area.innerHTML = '<span class="text-secondary small"><i class="bi bi-bookmark-x me-1"></i>Sin punto de control: se procesará desde el inicio</span>';
+    area.innerHTML = '<span class="text-secondary small"><i class="bi bi-bookmark-x me-1"></i>Sin punto de control: se procesara desde el inicio</span>';
     return;
   }
 
@@ -514,11 +514,11 @@ async function loadCheckpoint() {
   const stateLabelClass = isPaused ? 'text-warning' : isCompleted ? 'text-success' : 'text-info';
   const resumeBtn = isPaused
     ? `<button class="btn btn-sm btn-primary mt-2" onclick="document.getElementById(\'btn-start\').click()">
-         <i class="bi bi-play-fill me-1"></i>Reanudar esta ejecución
+         <i class="bi bi-play-fill me-1"></i>Reanudar esta ejecucion
        </button>`
     : '';
   const icon = isPaused ? 'bi-pause-circle text-warning' : 'bi-bookmark-check text-info';
-  const label = isPaused ? 'Ejecución pausada' : 'Punto de control disponible';
+  const label = isPaused ? 'Ejecucion pausada' : 'Punto de control disponible';
 
   area.innerHTML = `
     <div class="p-3 rounded" style="background:#0a0c14;border:1px solid #2d3148">
@@ -531,8 +531,8 @@ async function loadCheckpoint() {
           </div>
           <div class="small" style="color:#94a3b8">
             <div class="mb-1"><span class="text-secondary">Procesadas:</span> <strong>${formatNumber(runState.processed_rows || 0)}</strong> / ${formatNumber(runState.total_rows || 0)} entradas</div>
-            <div class="mb-1"><span class="text-secondary">Exitosos:</span> ${formatNumber(runState.successful_rows || 0)} · <span class="text-secondary">Fallidos:</span> ${formatNumber(runState.failed_rows || 0)}</div>
-            ${runState.pause_kind ? `<div class="mb-1"><span class="text-secondary">Motivo pausa:</span> <span class="text-danger">${escapeHtml(runState.pause_kind)}</span> — ${escapeHtml(runState.pause_reason || '')}</div>` : ''}
+            <div class="mb-1"><span class="text-secondary">Exitosos:</span> ${formatNumber(runState.successful_rows || 0)}  -  <span class="text-secondary">Fallidos:</span> ${formatNumber(runState.failed_rows || 0)}</div>
+            ${runState.pause_kind ? `<div class="mb-1"><span class="text-secondary">Motivo pausa:</span> <span class="text-danger">${escapeHtml(runState.pause_kind)}</span> - ${escapeHtml(runState.pause_reason || '')}</div>` : ''}
             <div><span class="text-secondary">Ultima actualizacion:</span> ${escapeHtml(runState.updated_at || '')}</div>
             ${runState.output_file ? `<div class="mt-1"><span class="text-secondary">CSV final:</span> ${escapeHtml(runState.output_file)}</div>` : ''}
           </div>
@@ -546,13 +546,13 @@ async function loadCheckpoint() {
 }
 
 async function clearCheckpoint() {
-  if (!confirm('¿Limpiar el punto de control? Se perderá el progreso guardado.')) return;
+  if (!confirm('Limpiar el punto de control? Se perdera el progreso guardado.')) return;
   await fetch('/api/checkpoint/clear', {method: 'POST'});
   await loadCheckpoint();
   showToast('Punto de control limpiado');
 }
 
-// ---------- resumen de configuración ----------
+// ---------- resumen de configuracion ----------
 function datasetSummaryText(dataset = {}, runState = null) {
   const inputFile = (dataset.input_file || runState?.input_file || '').trim();
   const sheet = (dataset.sheet || runState?.sheet || '').trim();
@@ -593,7 +593,7 @@ async function loadConfigSummary() {
     const speedTitle = document.getElementById('chart-speed-title');
     if (speedTitle) speedTitle.textContent = `Velocidad de etiquetado (${itemLabel}s/min)`;
     const princTitle = document.getElementById('chart-principles-title');
-    if (princTitle) princTitle.textContent = `Distribución de principios (${itemLabel}s etiquetadas hasta ahora)`;
+    if (princTitle) princTitle.textContent = `Distribucion de principios (${itemLabel}s etiquetadas hasta ahora)`;
     if (chartSpeed?.data?.datasets?.[0]) {
       chartSpeed.data.datasets[0].label = `${itemLabel}s/min`;
       chartSpeed.update('none');
@@ -611,8 +611,8 @@ function hwBadge(arbId) {
     const backend = (hwProfile.best_backend || 'cpu').toLowerCase();
     const gpu = hwProfile.gpu || {};
     const npu = hwProfile.npu || {};
-    if (backend === 'cuda' && gpu.ok) {
-      return `<span class="badge bg-success-subtle text-success border-success border" style="font-size:.68rem" title="${escapeHtml(gpu.name||'GPU NVIDIA')}"><i class="bi bi-gpu-card me-1"></i>GPU</span>`;
+    if (['cuda', 'metal', 'rocm', 'vulkan'].includes(backend) && gpu.ok) {
+      return `<span class="badge bg-success-subtle text-success border-success border" style="font-size:.68rem" title="${escapeHtml(gpu.name||'GPU')}"><i class="bi bi-gpu-card me-1"></i>${escapeHtml(backend.toUpperCase())}</span>`;
     }
     if (backend === 'npu' && npu.ok) {
       return `<span class="badge bg-info-subtle text-info border-info border" style="font-size:.68rem" title="${escapeHtml((npu.vendor||'')+' '+(npu.type||''))}"><i class="bi bi-cpu me-1"></i>NPU</span>`;
@@ -638,7 +638,7 @@ async function loadOutputs() {
   const files = await fetch('/api/outputs').then(r => r.json());
   const el = document.getElementById('outputs-table');
   if (!files.length) {
-    el.innerHTML = '<span class="text-secondary small">Sin resultados todavía.</span>';
+    el.innerHTML = '<span class="text-secondary small">Sin resultados todavia.</span>';
     return;
   }
   el.innerHTML = `
@@ -646,10 +646,10 @@ async function loadOutputs() {
     <table class="table table-dark table-sm mb-0" style="border-color:#2d3148;font-size:.82rem">
       <thead><tr>
         <th class="text-secondary">Archivo</th>
-        <th class="text-secondary">Descripción</th>
-        <th class="text-secondary">Tamaño</th>
+        <th class="text-secondary">Descripcion</th>
+        <th class="text-secondary">Tamano</th>
         <th class="text-secondary">Modificado</th>
-        <th class="text-secondary" style="width:70px">Acción</th>
+        <th class="text-secondary" style="width:70px">Accion</th>
       </tr></thead>
       <tbody>${files.map(f => `
         <tr>
@@ -798,18 +798,18 @@ function updateProgressBars(processed, total, datasetTotal) {
 
   const pctLimit = total > 0 ? (processed / total) * 100 : 0;
   document.getElementById('pb-limit-text').textContent =
-    `${formatNumber(processed)} de ${total ? formatNumber(total) : '—'} · ${pctLimit.toFixed(1)}%`;
+    `${formatNumber(processed)} de ${total ? formatNumber(total) : '-'}  -  ${pctLimit.toFixed(1)}%`;
   document.getElementById('pb-limit-bar').style.width = `${Math.min(pctLimit, 100)}%`;
 
   const pctTotal = datasetTotal > 0 ? (processed / datasetTotal) * 100 : 0;
   document.getElementById('pb-total-text').textContent = datasetTotal > 0
-    ? `${formatNumber(processed)} de ${formatNumber(datasetTotal)} · ${pctTotal.toFixed(2)}%`
-    : `${formatNumber(processed)} de — · —`;
+    ? `${formatNumber(processed)} de ${formatNumber(datasetTotal)}  -  ${pctTotal.toFixed(2)}%`
+    : `${formatNumber(processed)} de -  -  -`;
   document.getElementById('pb-total-bar').style.width = datasetTotal > 0
     ? `${Math.min(pctTotal, 100)}%` : '0%';
 }
 
-// ---------- gráficas en tiempo real ----------
+// ---------- graficas en tiempo real ----------
 function initCharts() {
   if (typeof Chart === 'undefined') return;
   Chart.defaults.color = '#64748b';
@@ -871,7 +871,7 @@ function initCharts() {
     const ctx = mkCtx('chart-success');
     if (ctx) chartSuccess = new Chart(ctx, {
       type: 'bar', indexAxis: 'y',
-      data: { labels: [], datasets: [{ label: '% éxito', data: [], backgroundColor: '#34d39988', borderColor: '#34d399', borderWidth: 1 }] },
+      data: { labels: [], datasets: [{ label: '% exito', data: [], backgroundColor: '#34d39988', borderColor: '#34d399', borderWidth: 1 }] },
       options: { responsive: true, animation: { duration: 200 },
         scales: {
           x: { ...scX, min: 0, max: 100, ticks: { ...scX.ticks, callback: v => v+'%' } },
@@ -887,9 +887,9 @@ function initCharts() {
     if (ctx) chartLatRange = new Chart(ctx, {
       type: 'bar',
       data: { labels: [], datasets: [
-        { label: 'Mín',  data: [], backgroundColor: '#22d3ee44' },
+        { label: 'Min',  data: [], backgroundColor: '#22d3ee44' },
         { label: 'Prom', data: [], backgroundColor: '#8b5cf6bb' },
-        { label: 'Máx',  data: [], backgroundColor: '#fb718544' },
+        { label: 'Max',  data: [], backgroundColor: '#fb718544' },
       ]},
       options: { responsive: true, animation: { duration: 200 },
         scales: { x: scX, y: scY(v => v.toFixed(2)+'s') }, plugins: { legend: leg }
@@ -926,9 +926,9 @@ function checkpointPendingMsg(processedRows) {
   if (!processedRows) return 'Inicia un proceso para ver datos en vivo';
   const faltan = checkpointEvery - (processedRows % checkpointEvery || checkpointEvery);
   const extra = faltan > 0
-    ? `<br><span style="font-size:.73rem;color:#334155">faltan ${faltan} entr${faltan === 1 ? 'ada' : 'adas'} para el próximo checkpoint</span>`
+    ? `<br><span style="font-size:.73rem;color:#334155">faltan ${faltan} entr${faltan === 1 ? 'ada' : 'adas'} para el proximo checkpoint</span>`
     : '';
-  return `Se actualizará en el próximo checkpoint${extra}`;
+  return `Se actualizara en el proximo checkpoint${extra}`;
 }
 
 function updateCharts(data) {
@@ -944,7 +944,7 @@ function updateCharts(data) {
   // 1. Donut OK/Fallidos/Pendientes
   if (chartDonut) { chartDonut.data.datasets[0].data = [ok, failed, pending]; chartDonut.update('none'); }
 
-  // 2. Latencia histórica por árbitro
+  // 2. Latencia historica por arbitro
   const arbEntries = Object.entries(data.arbiters || {});
   arbEntries.forEach(([id, s]) => {
     if (!latencyHistory[id]) latencyHistory[id] = [];
@@ -982,7 +982,7 @@ function updateCharts(data) {
     chartSpeed.update('none');
   }
 
-  // 4. Tokens por árbitro (apilado) — tokens_in/tokens_out son alias de prompt/completion_tokens
+  // 4. Tokens por arbitro (apilado) - tokens_in/tokens_out son alias de prompt/completion_tokens
   if (chartTokens && arbEntries.length) {
     chartTokens.data.labels = arbEntries.map(([id]) => arbiterLogMeta[id]?.name || id);
     chartTokens.data.datasets[0].data = arbEntries.map(([, s]) => Number(s.tokens_in  || s.prompt_tokens  || 0));
@@ -990,7 +990,7 @@ function updateCharts(data) {
     chartTokens.update('none');
   }
 
-  // 5. Tasa de éxito por árbitro — ok=calls (llamadas exitosas) / processed_rows
+  // 5. Tasa de exito por arbitro - ok=calls (llamadas exitosas) / processed_rows
   const totalProcessed = Number(data.processed_rows || 0);
   if (chartSuccess && arbEntries.length && totalProcessed > 0) {
     chartSuccess.data.labels = arbEntries.map(([id]) => arbiterLogMeta[id]?.name || id);
@@ -1004,7 +1004,7 @@ function updateCharts(data) {
     showChartOverlay('success', checkpointPendingMsg(totalProcessed));
   }
 
-  // 6. Latencia rango min/prom/máx
+  // 6. Latencia rango min/prom/max
   if (chartLatRange && arbEntries.length) {
     chartLatRange.data.labels = arbEntries.map(([id]) => arbiterLogMeta[id]?.name || id);
     chartLatRange.data.datasets[0].data = arbEntries.map(([, s]) => Number(s.latency_min_s || 0));
@@ -1098,7 +1098,7 @@ function parseStats(line) {
     lastArbErrors[arbError[1]] = `${arbError[2]}: ${arbError[3]}`;
   }
 
-  const queued = line.match(/\[(?:claim|entrada)\s+(\d+)\]\s+Arbitro\s+(\S+)\s+fallo\s+—\s+(?:claim encolado|entrada encolada)(?:\s+—\s+(.+))?/);
+  const queued = line.match(/\[(?:claim|entrada)\s+(\d+)\]\s+Arbitro\s+(\S+)\s+fallo\s+-\s+(?:claim encolado|entrada encolada)(?:\s+-\s+(.+))?/);
   if (queued) {
     const reason = queued[3] || lastArbErrors[queued[2]] || 'No se encontro detalle previo del error.';
     queuedClaims.push({claim: queued[1], arbiter: queued[2], reason});
@@ -1108,7 +1108,7 @@ function parseStats(line) {
     return;
   }
 
-  if (line.includes('] OK —')) {
+  if (line.includes('] OK -')) {
     statsOK++;
     updateStats();
   } else if (line.includes('Fallo definitivo')) {
@@ -1133,7 +1133,7 @@ function updateStats() {
 function resetLiveStats() {
   document.getElementById('live-source').textContent = 'Iniciando ejecucion...';
   document.getElementById('live-total-tokens').textContent = '0';
-  document.getElementById('live-progress').textContent = '0/—';
+  document.getElementById('live-progress').textContent = '0/-';
   document.getElementById('live-progress-pct').textContent = 'Progreso';
   document.getElementById('live-successful-rows').textContent = '0';
   document.getElementById('live-failed-rows').textContent = '0';
@@ -1182,10 +1182,10 @@ function renderLiveStats(data) {
   const pctDataset = datasetTotal > 0 ? ((processed / datasetTotal) * 100).toFixed(2) : null;
 
   document.getElementById('live-total-tokens').textContent = formatNumber(totalTokens);
-  document.getElementById('live-progress').textContent = `${formatNumber(processed)} / ${total ? formatNumber(total) : '—'}`;
+  document.getElementById('live-progress').textContent = `${formatNumber(processed)} / ${total ? formatNumber(total) : '-'}`;
   document.getElementById('live-progress-pct').textContent =
-    (pctLimit !== null ? `${pctLimit}% límite` : 'Progreso') +
-    (pctDataset !== null ? ` · ${pctDataset}% total` : '');
+    (pctLimit !== null ? `${pctLimit}% limite` : 'Progreso') +
+    (pctDataset !== null ? `  -  ${pctDataset}% total` : '');
   document.getElementById('live-successful-rows').textContent = formatNumber(ok);
   document.getElementById('live-failed-rows').textContent = formatNumber(failed);
   document.getElementById('live-tpr').textContent = formatNumber(data.tokens_per_processed_row || 0);
@@ -1229,7 +1229,7 @@ function renderLiveStats(data) {
           <th class="text-secondary">Min / Max</th>
           <th class="text-secondary">Tiempo total</th>
         </tr></thead>
-        <tbody>${tbody || '<tr><td colspan="9" class="text-secondary">Sin métricas por arbitro todavía.</td></tr>'}</tbody>
+        <tbody>${tbody || '<tr><td colspan="9" class="text-secondary">Sin metricas por arbitro todavia.</td></tr>'}</tbody>
       </table>
     </div>`;
 
@@ -1238,7 +1238,7 @@ function renderLiveStats(data) {
     document.getElementById('live-last-claim').innerHTML = `
       <div class="p-3 rounded" style="background:#130b10;border:1px solid #3f1f2a">
         <div class="fw-semibold text-danger">Ejecucion pausada</div>
-        <div class="small mt-1">${escapeHtml(data.pause_kind)} — ${escapeHtml(data.pause_reason || 'sin detalle')}</div>
+        <div class="small mt-1">${escapeHtml(data.pause_kind)} - ${escapeHtml(data.pause_reason || 'sin detalle')}</div>
       </div>`;
     return;
   }
@@ -1289,31 +1289,31 @@ function consensusBorder(pct) {
 
 function formatNumber(value) {
   const n = Number(value || 0);
-  return Number.isFinite(n) ? n.toLocaleString() : '—';
+  return Number.isFinite(n) ? n.toLocaleString() : '-';
 }
 
 function formatSeconds(value) {
-  if (value === null || value === undefined || value === '') return '—';
+  if (value === null || value === undefined || value === '') return '-';
   const n = Number(value);
-  if (!Number.isFinite(n) || n < 0) return '—';
+  if (!Number.isFinite(n) || n < 0) return '-';
   return `${n >= 10 ? n.toFixed(1) : n.toFixed(3)}s`;
 }
 
 function formatMetric(value, decimals = 3) {
-  if (value === null || value === undefined || value === '') return '—';
+  if (value === null || value === undefined || value === '') return '-';
   const n = Number(value);
-  return Number.isFinite(n) ? n.toFixed(decimals) : '—';
+  return Number.isFinite(n) ? n.toFixed(decimals) : '-';
 }
 
 function formatPercent(value) {
-  if (value === null || value === undefined || value === '') return '—';
+  if (value === null || value === undefined || value === '') return '-';
   const n = Number(value);
-  return Number.isFinite(n) ? `${n.toFixed(1)}%` : '—';
+  return Number.isFinite(n) ? `${n.toFixed(1)}%` : '-';
 }
 
 function labelBadge(principle, value) {
   let cls = 'bg-secondary-subtle text-secondary border-secondary';
-  let text = '—';
+  let text = '-';
   if (value === 1) { cls = 'bg-success-subtle text-success border-success'; text = '1'; }
   else if (value === 0) { cls = 'bg-dark text-secondary border-secondary'; text = '0'; }
   else if (value === -1) { cls = 'bg-danger-subtle text-danger border-danger'; text = 'ERR'; }
@@ -1335,7 +1335,7 @@ function renderEntryConsensusMetrics(metrics, principles) {
   const support = principles
     .map(p => perPrinciple[p] ? `${escapeHtml(p)} ${perPrinciple[p].support}/${perPrinciple[p].raters}` : '')
     .filter(Boolean)
-    .join(' · ');
+    .join('  -  ');
   return `
     <div class="mt-2 small p-2 rounded" style="background:${bgColors[tone]};border:1px solid ${borderColors[tone]}">
       <span class="text-${tone}">Acuerdo observado: <strong>${agreement}</strong></span>
@@ -1392,7 +1392,7 @@ function renderAgreementMetrics(agreement) {
         </table>
       </div>
       <div class="small text-secondary">
-        Métricas metodológicas para el artículo: acuerdo observado agregado, kappa de Fleiss multiárbitro, kappa de Cohen promedio por pares y alfa nominal de Krippendorff. El diagnóstico por entrada es solo para auditoría.
+        Metricas metodologicas para el articulo: acuerdo observado agregado, kappa de Fleiss multiarbitro, kappa de Cohen promedio por pares y alfa nominal de Krippendorff. El diagnostico por entrada es solo para auditoria.
       </div>
     </div>`;
 }
@@ -1576,7 +1576,7 @@ function renderRunLists() {
   } else {
     queuedEl.innerHTML = `${queuedClaims.slice(-30).reverse().map(q => `
       <div class="p-2 mb-2 rounded" style="background:#151107;border:1px solid #49350e">
-        <div class="text-warning fw-semibold">Entrada ${escapeHtml(q.claim)} · ${escapeHtml(q.arbiter)}</div>
+        <div class="text-warning fw-semibold">Entrada ${escapeHtml(q.claim)}  -  ${escapeHtml(q.arbiter)}</div>
         <div class="text-secondary" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.76rem">${escapeHtml(q.reason)}</div>
       </div>
     `).join('')}`;
@@ -1602,7 +1602,7 @@ function populateErrorsModal() {
     body.innerHTML = runErrors.map((e, i) => `
       <div class="p-2 mb-2 rounded" style="background:#130b10;border:1px solid #3f1f2a">
         <div class="d-flex justify-content-between">
-          <span class="text-danger fw-semibold">#${i+1} · ${escapeHtml(e.kind)}</span>
+          <span class="text-danger fw-semibold">#${i+1}  -  ${escapeHtml(e.kind)}</span>
           <span class="text-secondary" style="font-size:.68rem">${e.time || ''}</span>
         </div>
         <div class="text-secondary" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.76rem;word-break:break-word">${escapeHtml(e.detail)}</div>
@@ -1620,7 +1620,7 @@ function populateQueuedModal() {
     body.innerHTML = queuedClaims.map((q, i) => `
       <div class="p-2 mb-2 rounded" style="background:#151107;border:1px solid #49350e">
         <div class="d-flex justify-content-between">
-          <span class="text-warning fw-semibold">#${i+1} · Entrada ${escapeHtml(q.claim)} · ${escapeHtml(q.arbiter)}</span>
+          <span class="text-warning fw-semibold">#${i+1}  -  Entrada ${escapeHtml(q.claim)}  -  ${escapeHtml(q.arbiter)}</span>
         </div>
         <div class="text-secondary" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.76rem;word-break:break-word">${escapeHtml(q.reason)}</div>
       </div>
@@ -1636,7 +1636,6 @@ function openErrorsModal() {
 function openQueuedModal() {
   populateQueuedModal();
   bootstrap.Modal.getOrCreateInstance(document.getElementById('queuedModal')).show();
-}
 }
 
 function setRunning(running) {
@@ -1776,7 +1775,7 @@ fetch('/api/run/status').then(r => r.json()).then(s => {
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body pt-3">
-        <p class="text-secondary small">Entradas que fallaron durante el procesamiento y serán reintentadas automáticamente. Si un reintento falla de nuevo, se marca como fallo definitivo.</p>
+        <p class="text-secondary small">Entradas que fallaron durante el procesamiento y seran reintentadas automaticamente. Si un reintento falla de nuevo, se marca como fallo definitivo.</p>
         <div id="queued-modal-body"></div>
       </div>
       <div class="modal-footer border-0">

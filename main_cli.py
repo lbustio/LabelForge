@@ -1,4 +1,4 @@
-﻿"""
+"""
 main_cli.py
 -----------
 Entrypoint principal para el proceso de etiquetado de principios de persuasion.
@@ -29,7 +29,7 @@ if str(ROOT) not in sys.path:
 
 def _check_hw_profile_if_needed():
     """
-    Verifica hw_profile.json solo si hay árbitros llama_cpp configurados.
+    Verifica hw_profile.json solo si hay arbitros llama_cpp configurados.
     Si hay proveedores locales y el setup no se ha completado, aborta con
     un mensaje accionable.
     """
@@ -52,7 +52,7 @@ def _check_hw_profile_if_needed():
 
     if not hw_profile.exists():
         print(
-            "Error: hay árbitros con proveedor 'llama_cpp' pero falta models/hw_profile.json.\n"
+            "Error: hay arbitros con proveedor 'llama_cpp' pero falta models/hw_profile.json.\n"
             "Ejecuta primero: python setup_env.py\n"
             "Luego vuelve a ejecutar este comando."
         )

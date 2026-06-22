@@ -1,4 +1,4 @@
-﻿"""
+"""
 Rutas canonicas del proyecto LabelForge.
 
 Politica:
@@ -16,7 +16,6 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CORE_DIR = BASE_DIR / "labelforge_core"
-LEGACY_SCRIPTS_DIR = BASE_DIR / "scripts"
 SCRIPTS_DIR = CORE_DIR
 CONFIG_DIR = BASE_DIR / "config"
 MODELS_DIR = BASE_DIR / "models"
@@ -31,39 +30,14 @@ DATA_DIR = BASE_DIR / "data"
 ARBITERS_CONFIG_PATH = CONFIG_DIR / "arbiters_config.json"
 LOCAL_MODELS_CONFIG_PATH = CONFIG_DIR / "local_models_config.json"
 
-LEGACY_ARBITERS_CONFIG_PATH = LEGACY_SCRIPTS_DIR / "arbiters_config.json"
-LEGACY_LOCAL_MODELS_CONFIG_PATH = LEGACY_SCRIPTS_DIR / "local_models_config.json"
-
-
-def resolve_config_file_path(path: str | Path | None, *, legacy_path: Path | None = None) -> Path:
-    """
-    Resuelve una ruta de configuracion manteniendo compatibilidad con ubicaciones
-    antiguas dentro de `scripts/`.
-
-    Si la ruta pedida no existe y coincide con una ruta legacy ya movida, retorna
-    la ruta canonica en `config/`.
-    """
+def resolve_config_file_path(path: str | Path | None) -> Path:
+    """Resuelve la ruta de configuracion sin redirigir ubicaciones antiguas."""
     if path is None:
-        return ARBITERS_CONFIG_PATH if ARBITERS_CONFIG_PATH.exists() else LEGACY_ARBITERS_CONFIG_PATH
-
-    requested = Path(path)
-    if requested.exists():
-        return requested
-
-    legacy_path = legacy_path or LEGACY_ARBITERS_CONFIG_PATH
-    try:
-        same_legacy = requested.resolve(strict=False) == legacy_path.resolve(strict=False)
-    except OSError:
-        same_legacy = False
-    if same_legacy and ARBITERS_CONFIG_PATH.exists():
         return ARBITERS_CONFIG_PATH
-
-    return requested
+    return Path(path)
 
 
 def resolve_local_models_config_path() -> Path:
-    """Ruta del config del catalogo GGUF, con fallback a la ubicacion legacy."""
-    if LOCAL_MODELS_CONFIG_PATH.exists():
-        return LOCAL_MODELS_CONFIG_PATH
-    return LEGACY_LOCAL_MODELS_CONFIG_PATH
+    """Ruta canonica del config del catalogo GGUF."""
+    return LOCAL_MODELS_CONFIG_PATH
 

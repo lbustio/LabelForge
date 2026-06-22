@@ -1,14 +1,14 @@
-﻿"""
+"""
 agreement_metrics.py
 --------------------
-Métricas de acuerdo/consenso entre árbitros (compartido entre CLI y WebApp).
+Metricas de acuerdo/consenso entre arbitros (compartido entre CLI y WebApp).
 
-Métricas calculadas:
-- observed_agreement: promedio de acuerdos por pares entre árbitros
-- fleiss_kappa: kappa multi-rater para items con todos los árbitros presentes
-- pairwise_cohen_kappa_avg: promedio de Cohen kappa para todos los pares de árbitros
+Metricas calculadas:
+- observed_agreement: promedio de acuerdos por pares entre arbitros
+- fleiss_kappa: kappa multi-rater para items con todos los arbitros presentes
+- pairwise_cohen_kappa_avg: promedio de Cohen kappa para todos los pares de arbitros
 - krippendorff_alpha_nominal: alpha nominal para etiquetas binarias, tolera datos faltantes
-- positive_rate: proporción de etiquetas positivas (1)
+- positive_rate: proporcion de etiquetas positivas (1)
 """
 
 from typing import Optional
@@ -198,7 +198,7 @@ def compute_agreement_metrics(rows: list, principles: list, arbiter_ids: list) -
     """
     rows: lista de dicts con columnas {principle}_{arbiter_id} = 0/1 (como int o str)
     principles: lista de nombres de principios
-    arbiter_ids: lista de IDs de árbitros
+    arbiter_ids: lista de IDs de arbitros
     """
     per_principle = {}
     global_items = []
@@ -229,8 +229,8 @@ def compute_agreement_metrics(rows: list, principles: list, arbiter_ids: list) -
 
 def compute_consensus_metrics(results: dict, principles: list, arbiters: list) -> dict:
     """
-    Cálculo de métricas usado desde labelforge_core/label_persuasion.py
-    Traduce el formato de entrada (dict de dicts y lista de árbitros) al esperado por compute_agreement_metrics.
+    Calculo de metricas usado desde labelforge_core/label_persuasion.py
+    Traduce el formato de entrada (dict de dicts y lista de arbitros) al esperado por compute_agreement_metrics.
     """
     rows = list(results.values())
     arbiter_ids = [arb["id"] for arb in arbiters]
@@ -238,7 +238,7 @@ def compute_consensus_metrics(results: dict, principles: list, arbiters: list) -
 
 
 def flatten_consensus_metrics(metrics: dict, principles: list) -> dict:
-    """Aplana métricas a dict plano para escribir como columnas CSV."""
+    """Aplana metricas a dict plano para escribir como columnas CSV."""
     flat = {}
     for key in CONSENSUS_METRIC_KEYS:
         flat[f"consensus_global_{key}"] = metrics.get("global", {}).get(key)

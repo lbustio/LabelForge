@@ -46,33 +46,33 @@ hace fact-checking, no se usa contexto externo y no se infiere intencion oculta.
 
 ```text
 LabelForge/
-├── setup_env.py                 # Detecta hardware e instala backend local GGUF
-├── main_cli.py                  # Entrypoint del pipeline CLI
-├── main_webapp.py               # Entrypoint de la webapp Flask
-├── config/
-│   ├── arbiters_config.json     # Arbitros, principios, prompts, dataset, processing, safety
-│   ├── local_models_config.json # Config del catalogo dinamico GGUF
-├── labelforge_core/
-│   ├── label_persuasion.py      # Pipeline: LLM calls, rate limiter, checkpoints, consenso, CSV
-│   ├── agreement_metrics.py     # Fleiss, Cohen, Krippendorff, acuerdo observado
-│   ├── local_models.py          # GGUF: catalogo, descarga, cache, archive/restore/move
-│   ├── hw_detection.py          # OS/CPU/RAM/GPU/NPU
-│   ├── provider_preflight.py    # Validacion previa de credenciales/modelos
-│   ├── rate_limits.py           # Perfiles y delays recomendados
-│   ├── arbiters_io.py           # Import/export cifrado `.lfarb`
-│   ├── secrets_io.py            # Gestion de `secrets/secrets.env`
-│   ├── paths.py                 # Rutas canonicas y fallbacks legacy
-│   └── utils.py                 # Utilidades compartidas
-├── webapp/
-│   ├── app.py                   # API REST/SSE y paginas
-│   └── templates/               # UI: dashboard, arbitros, principios, processing, run
-├── tests/test_pipeline.py       # Suite unitaria actual
-├── data/                        # Datasets locales/privados
-├── models/                      # GGUF, hw_profile, caches locales
-├── output/                      # CSVs etiquetados
-├── checkpoints/                 # Estado durable de ejecuciones
-├── logs/                        # Logs de setup y runs
-└── archive/                     # Outputs archivados
+|-- setup_env.py                 # Detecta hardware e instala backend local GGUF
+|-- main_cli.py                  # Entrypoint del pipeline CLI
+|-- main_webapp.py               # Entrypoint de la webapp Flask
+|-- config/
+|   |-- arbiters_config.json     # Arbitros, principios, prompts, dataset, processing, safety
+|   |-- local_models_config.json # Config del catalogo dinamico GGUF
+|-- labelforge_core/
+|   |-- label_persuasion.py      # Pipeline: LLM calls, rate limiter, checkpoints, consenso, CSV
+|   |-- agreement_metrics.py     # Fleiss, Cohen, Krippendorff, acuerdo observado
+|   |-- local_models.py          # GGUF: catalogo, descarga, cache, archive/restore/move
+|   |-- hw_detection.py          # OS/CPU/RAM/GPU/NPU
+|   |-- provider_preflight.py    # Validacion previa de credenciales/modelos
+|   |-- rate_limits.py           # Perfiles y delays recomendados
+|   |-- arbiters_io.py           # Import/export cifrado `.lfarb`
+|   |-- secrets_io.py            # Gestion de `secrets/secrets.env`
+|   |-- paths.py                 # Rutas canonicas del proyecto
+|   |-- utils.py                 # Utilidades compartidas
+|-- webapp/
+|   |-- app.py                   # API REST/SSE y paginas
+|   |-- templates/               # UI: dashboard, arbitros, principios, processing, run
+|-- tests/test_pipeline.py       # Suite unitaria actual
+|-- data/                        # Datasets locales/privados
+|-- models/                      # GGUF, hw_profile, caches locales
+|-- output/                      # CSVs etiquetados
+|-- checkpoints/                 # Estado durable de ejecuciones
+|-- logs/                        # Logs de setup y runs
+|-- archive/                     # Outputs archivados
 ```
 
 ## Instalacion rapida
@@ -108,7 +108,7 @@ python setup_env.py
 `setup_env.py`:
 
 - detecta OS/CPU/RAM/GPU/NPU;
-- instala `llama-cpp-python` con backend apropiado cuando puede;
+- instala `llama-cpp-python` con backend apropiado cuando puede: CUDA para NVIDIA, ROCm para AMD Linux, Metal para Apple Silicon, Vulkan para AMD/Intel compatibles y CPU como fallback;
 - instala OpenVINO si aplica para NPU Intel;
 - escribe `models/hw_profile.json`;
 - guarda log en `logs/setup_YYYYMMDD_HHMMSS.log`.
@@ -140,7 +140,6 @@ LABELFORGE_PORT=7860
 LABELFORGE_SECRET_KEY=
 
 # Login local de la webapp. Los usuarios viven en secrets/auth.db.
-LABELFORGE_AUTH_MODE=local
 LABELFORGE_COOKIE_SECURE=1
 ```
 
@@ -208,7 +207,7 @@ Proveedores soportados:
 - `anthropic`;
 - `openai`;
 - `openai_compat`;
-- `ollama` legacy/local compatible;
+- `ollama` local compatible con API OpenAI;
 - `llama_cpp` para GGUF local.
 
 La configuracion actual tiene tres arbitros cloud:
@@ -393,8 +392,7 @@ Para despliegue publico:
 - usar `LABELFORGE_SECRET_KEY` persistente y aleatoria.
 
 La autenticacion vive solo en la webapp. El CLI y los modulos en `labelforge_core/`
-siguen pensados para ejecucion local y no dependen de OAuth2 ni de sesiones web.
-OAuth2 queda como mejora futura; por ahora el flujo soportado es usuario/password local.
+siguen pensados para ejecucion local y no dependen de sesiones web.
 
 ## Tests
 

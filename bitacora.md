@@ -997,13 +997,13 @@ webapp.
 
 **Hallazgos de la revision (ordenados por severidad):**
 
-1. **Politica de seguridad bloqueaba la config actual** – `free_only_mode` no incluye `vertex_gemini` en `allowed_provider_types`. La config usa 3 arbitros Vertex. `validate_safety_policy()` lanza RuntimeError y la ejecucion ni empieza.
-2. **`_build_arbiter()` descarta `vertex_project` / `vertex_location`** – La webapp envia esos campos al guardar un arbitro, pero la funcion del backend no los preserva en el JSON. Editar un arbitro Vertex desde la UI lo deja sin proyecto/region.
-3. **Metricas de acuerdo duplicadas** – `scripts/label_persuasion.py` y `webapp/app.py` tienen copias casi identicas de `_cohen_kappa`, `_agreement_for_items`, y `compute_consensus_metrics`/`_compute_agreement_metrics`. Si divergen, los reportes CSV y webapp discrepan silenciosamente.
-4. **Documentacion/UI desactualizada** – `README.md`, mensajes de error y tooltips en `arbiters.html` referencian `.env`, pero el codigo carga `secrets.env`.
-5. **Ayuda obsoleta en `main_label.py`** – menciona `--api-key KEY` que no existe en el parser real.
-6. **`requirements.txt` / `environment.yml`** – listan dependencias transitivas a mano (`requests`, `tqdm`, `tenacity`, etc.) que no se importan directamente. No rompe pero dificulta mantenimiento.
-7. **Sin tests automatizados** – no hay suite de tests unitarios ni de integracion.
+1. **Politica de seguridad bloqueaba la config actual** - `free_only_mode` no incluye `vertex_gemini` en `allowed_provider_types`. La config usa 3 arbitros Vertex. `validate_safety_policy()` lanza RuntimeError y la ejecucion ni empieza.
+2. **`_build_arbiter()` descarta `vertex_project` / `vertex_location`** - La webapp envia esos campos al guardar un arbitro, pero la funcion del backend no los preserva en el JSON. Editar un arbitro Vertex desde la UI lo deja sin proyecto/region.
+3. **Metricas de acuerdo duplicadas** - `scripts/label_persuasion.py` y `webapp/app.py` tienen copias casi identicas de `_cohen_kappa`, `_agreement_for_items`, y `compute_consensus_metrics`/`_compute_agreement_metrics`. Si divergen, los reportes CSV y webapp discrepan silenciosamente.
+4. **Documentacion/UI desactualizada** - `README.md`, mensajes de error y tooltips en `arbiters.html` referencian `.env`, pero el codigo carga `secrets.env`.
+5. **Ayuda obsoleta en `main_label.py`** - menciona `--api-key KEY` que no existe en el parser real.
+6. **`requirements.txt` / `environment.yml`** - listan dependencias transitivas a mano (`requests`, `tqdm`, `tenacity`, etc.) que no se importan directamente. No rompe pero dificulta mantenimiento.
+7. **Sin tests automatizados** - no hay suite de tests unitarios ni de integracion.
 
 **Correcciones aplicadas:**
 
@@ -1011,7 +1011,7 @@ webapp.
 - `scripts/label_persuasion.py`: actualizado default de `allowed_provider_types` y removida la logica duplicada de metricas.
 - `webapp/app.py`: `_build_arbiter()` ahora preserva `vertex_project` y `vertex_location`. Removida la logica duplicada de metricas.
 - `scripts/agreement_metrics.py`: archivo nuevo con las metricas de acuerdo compartidas entre CLI y WebApp.
-- `README.md`, `webapp/templates/arbiters.html`, `webapp/app.py`: referencias a `.env` → `secrets.env`.
+- `README.md`, `webapp/templates/arbiters.html`, `webapp/app.py`: referencias a `.env` -> `secrets.env`.
 - `main_label.py`: removido `--api-key` del texto de uso.
 
 **Pendiente (no critico, para paso futuro):**
@@ -1039,25 +1039,25 @@ webapp.
 - `main_label.py`
 - `bitacora.md`
 
-### 2026-06-13 19:10 - Corrección de importación de métricas y eliminación de duplicados en WebApp
+### 2026-06-13 19:10 - Correccion de importacion de metricas y eliminacion de duplicados en WebApp
 
 **Autor/agente:** Antigravity (Medium).
 
-**Objetivo:** resolver un ImportError crítico detectado al importar `label_persuasion.py`, corregir errores de tipado de datos en el cálculo de métricas de acuerdo compartido, y eliminar definitivamente el código duplicado de acuerdo inter-árbitros en `webapp/app.py`.
+**Objetivo:** resolver un ImportError critico detectado al importar `label_persuasion.py`, corregir errores de tipado de datos en el calculo de metricas de acuerdo compartido, y eliminar definitivamente el codigo duplicado de acuerdo inter-arbitros en `webapp/app.py`.
 
 **Decision tomada:**
 
-1. **Corrección de importación**: En [`scripts/label_persuasion.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/label_persuasion.py), se intentaba importar `compute_consensus_metrics` de [`scripts/agreement_metrics.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/agreement_metrics.py), pero la función no existía. Se agregó el puente `compute_consensus_metrics` en [`scripts/agreement_metrics.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/agreement_metrics.py) para que reciba `(results: dict, principles: list, arbiters: list)` y lo traduzca al formato esperado por `compute_agreement_metrics`.
-2. **Corrección de NameError y Coerción de datos**:
-   - En [`scripts/agreement_metrics.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/agreement_metrics.py), se corrigió un `NameError` en `flatten_consensus_metrics` donde se usaba la variable inexistente `p` en lugar de `principle`.
-   - Se añadió la función `_safe_int()` para asegurar que las etiquetas se procesen como enteros (0 o 1) tanto si provienen de la memoria (enteros) como si se leen del CSV por `DictReader` (cadenas de texto `"0"` o `"1"`).
-3. **Limpieza en WebApp**: Se removieron de [`webapp/app.py`](file:///E:/Code/python/OpenCode/LabelForge/webapp/app.py) las funciones duplicadas de métricas (`_cohen_kappa`, `_agreement_for_items` y `_compute_agreement_metrics`) que aún se encontraban activas y se enlazó el endpoint `/api/run/stats` directamente con la función importada `compute_agreement_metrics`.
+1. **Correccion de importacion**: En [`scripts/label_persuasion.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/label_persuasion.py), se intentaba importar `compute_consensus_metrics` de [`scripts/agreement_metrics.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/agreement_metrics.py), pero la funcion no existia. Se agrego el puente `compute_consensus_metrics` en [`scripts/agreement_metrics.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/agreement_metrics.py) para que reciba `(results: dict, principles: list, arbiters: list)` y lo traduzca al formato esperado por `compute_agreement_metrics`.
+2. **Correccion de NameError y Coercion de datos**:
+   - En [`scripts/agreement_metrics.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/agreement_metrics.py), se corrigio un `NameError` en `flatten_consensus_metrics` donde se usaba la variable inexistente `p` en lugar de `principle`.
+   - Se anadio la funcion `_safe_int()` para asegurar que las etiquetas se procesen como enteros (0 o 1) tanto si provienen de la memoria (enteros) como si se leen del CSV por `DictReader` (cadenas de texto `"0"` o `"1"`).
+3. **Limpieza en WebApp**: Se removieron de [`webapp/app.py`](file:///E:/Code/python/OpenCode/LabelForge/webapp/app.py) las funciones duplicadas de metricas (`_cohen_kappa`, `_agreement_for_items` y `_compute_agreement_metrics`) que aun se encontraban activas y se enlazo el endpoint `/api/run/stats` directamente con la funcion importada `compute_agreement_metrics`.
 
 **Verificacion realizada:**
 
-- `conda run -n fakenewsds python -m py_compile main_label.py main_webapp.py scripts/label_persuasion.py webapp/app.py scripts/agreement_metrics.py` (Compilación limpia).
-- `conda run -n fakenewsds python -c "from webapp.app import app"` (Importación runtime del servidor Flask exitosa).
-- `conda run -n fakenewsds python -c "import scripts.label_persuasion"` (Importación runtime del pipeline CLI sin ImportError).
+- `conda run -n fakenewsds python -m py_compile main_label.py main_webapp.py scripts/label_persuasion.py webapp/app.py scripts/agreement_metrics.py` (Compilacion limpia).
+- `conda run -n fakenewsds python -c "from webapp.app import app"` (Importacion runtime del servidor Flask exitosa).
+- `conda run -n fakenewsds python -c "import scripts.label_persuasion"` (Importacion runtime del pipeline CLI sin ImportError).
 
 **Archivos tocados:**
 
@@ -1065,26 +1065,26 @@ webapp.
 - `webapp/app.py`
 - `bitacora.md`
 
-### 2026-06-13 19:50 - Creación de utils.py, deduplicación de utilidades, limpieza de requirements.txt y suite de pruebas unitarias
+### 2026-06-13 19:50 - Creacion de utils.py, deduplicacion de utilidades, limpieza de requirements.txt y suite de pruebas unitarias
 
 **Autor/agente:** Antigravity (Medium).
 
-**Objetivo:** unificar helpers redundantes de conversión numérica en un archivo común, simplificar el archivo de requerimientos, e implementar una suite de pruebas automatizadas para asegurar la confiabilidad del cálculo de acuerdo, utilitarios y validación de seguridad.
+**Objetivo:** unificar helpers redundantes de conversion numerica en un archivo comun, simplificar el archivo de requerimientos, e implementar una suite de pruebas automatizadas para asegurar la confiabilidad del calculo de acuerdo, utilitarios y validacion de seguridad.
 
 **Decision tomada:**
 
-1. **Centralización de Helpers**: Se creó el archivo [`scripts/utils.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/utils.py) que reúne y generaliza las funciones `safe_int`, `safe_float`, `safe_binary_int` y `number`.
-2. **Refactorización de Módulos**:
-   - [`scripts/agreement_metrics.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/agreement_metrics.py): se actualizó para importar `safe_binary_int` desde `scripts.utils`.
-   - [`scripts/label_persuasion.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/label_persuasion.py): se actualizó para importar `number` como `_number` desde `scripts.utils` y remover la definición local redundante.
-   - [`webapp/app.py`](file:///E:/Code/python/OpenCode/LabelForge/webapp/app.py): se actualizó para importar `safe_int` como `_safe_int` y `safe_float` como `_safe_float` desde `scripts.utils` y eliminar sus definiciones locales redundantes.
-3. **Limpieza de Requerimientos**: Se simplificó [`requirements.txt`](file:///E:/Code/python/OpenCode/LabelForge/requirements.txt) conservando únicamente las 6 dependencias directas y principales de primer nivel del sistema (google-genai, google-cloud-aiplatform, anthropic, openai, flask, python-dotenv).
-4. **Suite de Pruebas Unitarias**: Se creó [`tests/test_pipeline.py`](file:///E:/Code/python/OpenCode/LabelForge/tests/test_pipeline.py) utilizando `unittest` para cubrir las utilidades, el cálculo de Fleiss/Cohen/Krippendorff de acuerdo global y por principio, y la verificación de las políticas de seguridad de Vertex y Gemini.
+1. **Centralizacion de Helpers**: Se creo el archivo [`scripts/utils.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/utils.py) que reune y generaliza las funciones `safe_int`, `safe_float`, `safe_binary_int` y `number`.
+2. **Refactorizacion de Modulos**:
+   - [`scripts/agreement_metrics.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/agreement_metrics.py): se actualizo para importar `safe_binary_int` desde `scripts.utils`.
+   - [`scripts/label_persuasion.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/label_persuasion.py): se actualizo para importar `number` como `_number` desde `scripts.utils` y remover la definicion local redundante.
+   - [`webapp/app.py`](file:///E:/Code/python/OpenCode/LabelForge/webapp/app.py): se actualizo para importar `safe_int` como `_safe_int` y `safe_float` como `_safe_float` desde `scripts.utils` y eliminar sus definiciones locales redundantes.
+3. **Limpieza de Requerimientos**: Se simplifico [`requirements.txt`](file:///E:/Code/python/OpenCode/LabelForge/requirements.txt) conservando unicamente las 6 dependencias directas y principales de primer nivel del sistema (google-genai, google-cloud-aiplatform, anthropic, openai, flask, python-dotenv).
+4. **Suite de Pruebas Unitarias**: Se creo [`tests/test_pipeline.py`](file:///E:/Code/python/OpenCode/LabelForge/tests/test_pipeline.py) utilizando `unittest` para cubrir las utilidades, el calculo de Fleiss/Cohen/Krippendorff de acuerdo global y por principio, y la verificacion de las politicas de seguridad de Vertex y Gemini.
 
 **Verificacion realizada:**
 
 - `conda run -n fakenewsds python -m unittest tests/test_pipeline.py` (9/9 pruebas unitarias exitosas en 0.001s).
-- `conda run -n fakenewsds python -m py_compile main_label.py main_webapp.py scripts/label_persuasion.py webapp/app.py scripts/agreement_metrics.py scripts/utils.py tests/test_pipeline.py` (Compilación completa exitosa).
+- `conda run -n fakenewsds python -m py_compile main_label.py main_webapp.py scripts/label_persuasion.py webapp/app.py scripts/agreement_metrics.py scripts/utils.py tests/test_pipeline.py` (Compilacion completa exitosa).
 
 **Archivos tocados:**
 
@@ -1096,21 +1096,21 @@ webapp.
 - `tests/test_pipeline.py` (nuevo)
 - `bitacora.md`
 
-### 2026-06-13 19:55 - Renombrado de plantilla de variables de entorno y corrección de docstrings
+### 2026-06-13 19:55 - Renombrado de plantilla de variables de entorno y correccion de docstrings
 
 **Autor/agente:** Antigravity (Medium).
 
-**Objetivo:** renombrar la plantilla de variables de entorno para que coincida con el nombre real del archivo cargado (`secrets.env`), y corregir las referencias desactualizadas a `.env` en los comentarios y docstrings del código.
+**Objetivo:** renombrar la plantilla de variables de entorno para que coincida con el nombre real del archivo cargado (`secrets.env`), y corregir las referencias desactualizadas a `.env` en los comentarios y docstrings del codigo.
 
 **Decision tomada:**
 
-1. **Renombrado de Plantilla**: Se renombró el archivo `.env.example` a [`secrets.env.example`](file:///E:/Code/python/OpenCode/LabelForge/secrets.env.example) mediante Git para mantener alineación con el archivo real `secrets.env` que carga el proyecto. Se actualizó el comentario de ayuda interno.
-2. **Corrección de Docstring**: En [`webapp/app.py`](file:///E:/Code/python/OpenCode/LabelForge/webapp/app.py), se reemplazó la referencia desactualizada a `.env` por `secrets.env` en la descripción del parámetro `api_key` de la ruta `/api/models`.
+1. **Renombrado de Plantilla**: Se renombro el archivo `.env.example` a [`secrets.env.example`](file:///E:/Code/python/OpenCode/LabelForge/secrets.env.example) mediante Git para mantener alineacion con el archivo real `secrets.env` que carga el proyecto. Se actualizo el comentario de ayuda interno.
+2. **Correccion de Docstring**: En [`webapp/app.py`](file:///E:/Code/python/OpenCode/LabelForge/webapp/app.py), se reemplazo la referencia desactualizada a `.env` por `secrets.env` en la descripcion del parametro `api_key` de la ruta `/api/models`.
 
 **Verificacion realizada:**
 
 - `git status` muestra el renombrado de `.env.example` -> `secrets.env.example`.
-- Compilación del proyecto: exitosa.
+- Compilacion del proyecto: exitosa.
 
 **Archivos tocados:**
 
@@ -1118,20 +1118,20 @@ webapp.
 - `webapp/app.py`
 - `bitacora.md`
 
-### 2026-06-13 19:57 - Actualización de README.md para reflejar los archivos del sistema y la suite de pruebas
+### 2026-06-13 19:57 - Actualizacion de README.md para reflejar los archivos del sistema y la suite de pruebas
 
 **Autor/agente:** Antigravity (Medium).
 
-**Objetivo:** actualizar la documentación principal (`README.md`) para reflejar con precisión los archivos nuevos creados en el refactor (utils, agreement_metrics, tests), e instruir al usuario sobre el uso de la plantilla `secrets.env.example` y la ejecución de la suite de pruebas.
+**Objetivo:** actualizar la documentacion principal (`README.md`) para reflejar con precision los archivos nuevos creados en el refactor (utils, agreement_metrics, tests), e instruir al usuario sobre el uso de la plantilla `secrets.env.example` y la ejecucion de la suite de pruebas.
 
 **Decision tomada:**
 
-1. **Estructura de Carpetas**: Se agregaron descripciones detalladas para [`scripts/agreement_metrics.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/agreement_metrics.py), [`scripts/utils.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/utils.py) y el directorio [`tests/`](file:///E:/Code/python/OpenCode/LabelForge/tests/) en la sección de estructura del proyecto de [`README.md`](file:///E:/Code/python/OpenCode/LabelForge/README.md).
-2. **Guía de Configuración e Instalación**: Se actualizó el paso de configuración de variables de entorno para que haga mención explícita a la copia del archivo [`secrets.env.example`](file:///E:/Code/python/OpenCode/LabelForge/secrets.env.example) como origen. Se añadió el apartado `5. Ejecución de Pruebas Unitarias` con el comando correspondiente.
+1. **Estructura de Carpetas**: Se agregaron descripciones detalladas para [`scripts/agreement_metrics.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/agreement_metrics.py), [`scripts/utils.py`](file:///E:/Code/python/OpenCode/LabelForge/scripts/utils.py) y el directorio [`tests/`](file:///E:/Code/python/OpenCode/LabelForge/tests/) en la seccion de estructura del proyecto de [`README.md`](file:///E:/Code/python/OpenCode/LabelForge/README.md).
+2. **Guia de Configuracion e Instalacion**: Se actualizo el paso de configuracion de variables de entorno para que haga mencion explicita a la copia del archivo [`secrets.env.example`](file:///E:/Code/python/OpenCode/LabelForge/secrets.env.example) como origen. Se anadio el apartado `5. Ejecucion de Pruebas Unitarias` con el comando correspondiente.
 
 **Verificacion realizada:**
 
-- Compilación del proyecto y formato Markdown de README.md correctos.
+- Compilacion del proyecto y formato Markdown de README.md correctos.
 
 **Archivos tocados:**
 
@@ -1139,7 +1139,7 @@ webapp.
 - `bitacora.md`
 
 
-### 2026-06-13 20:02 - Configuración de repositorio de origen remoto y subida a GitHub
+### 2026-06-13 20:02 - Configuracion de repositorio de origen remoto y subida a GitHub
 
 **Autor/agente:** Antigravity (Medium).
 
@@ -1147,53 +1147,53 @@ webapp.
 
 **Decision tomada:**
 
-1. **Configuración de origen remoto**: Se vinculó el repositorio local con la URL remota del servidor [`https://github.com/lbustio/LabelForge.git`](https://github.com/lbustio/LabelForge.git).
-2. **Publicación**: Se subió la rama local `main` al servidor remoto (`git push -u origin main`).
+1. **Configuracion de origen remoto**: Se vinculo el repositorio local con la URL remota del servidor [`https://github.com/lbustio/LabelForge.git`](https://github.com/lbustio/LabelForge.git).
+2. **Publicacion**: Se subio la rama local `main` al servidor remoto (`git push -u origin main`).
 
 **Verificacion realizada:**
 
-- Subida completada con éxito y rama `main` configurada para rastrear `origin/main`.
+- Subida completada con exito y rama `main` configurada para rastrear `origin/main`.
 
 **Archivos tocados:**
 
 - `bitacora.md`
 
 
-### 2026-06-13 20:07 - Exclusión de datos privados de investigación del repositorio Git
+### 2026-06-13 20:07 - Exclusion de datos privados de investigacion del repositorio Git
 
 **Autor/agente:** Antigravity (Medium).
 
-**Objetivo:** evitar que los datos del dataset bilingüe de investigación en curso
+**Objetivo:** evitar que los datos del dataset bilingue de investigacion en curso
 y los archivos de checkpoint del pipeline queden publicados en GitHub antes de
-que la investigación esté concluida.
+que la investigacion este concluida.
 
 **Decision tomada:**
 
-1. **`.gitignore` actualizado**: se añadió `data/all_datasets_en_es/` como
-   entrada explícita ignorada (el directorio completo, no solo extensiones).
-   Se eliminó la excepción `!checkpoints/.gitkeep` para que el directorio
+1. **`.gitignore` actualizado**: se anadio `data/all_datasets_en_es/` como
+   entrada explicita ignorada (el directorio completo, no solo extensiones).
+   Se elimino la excepcion `!checkpoints/.gitkeep` para que el directorio
    `checkpoints/` quede completamente invisible a Git.
-   Ambas secciones incluyen comentarios que explican la razón de privacidad.
+   Ambas secciones incluyen comentarios que explican la razon de privacidad.
 
 2. **Archivos desindexados con `git rm --cached`**:
-   - `checkpoints/.gitkeep` — ya rastreado, se eliminó del índice.
-   - `data/all_datasets_en_es/all_datasets_en_es readme.txt` — ya rastreado,
-     se eliminó del índice.
+   - `checkpoints/.gitkeep` - ya rastreado, se elimino del indice.
+   - `data/all_datasets_en_es/all_datasets_en_es readme.txt` - ya rastreado,
+     se elimino del indice.
 
-3. **Los archivos físicos permanecen locales** — solo se excluyen del
-   repositorio público. Al finalizar la investigación se pueden hacer públicos.
+3. **Los archivos fisicos permanecen locales** - solo se excluyen del
+   repositorio publico. Al finalizar la investigacion se pueden hacer publicos.
 
 **Razon practica:**
 
 Los datos forman parte de un estudio en curso. Publicarlos antes de tiempo
-podría comprometer la investigación o el proceso de publicación académica.
+podria comprometer la investigacion o el proceso de publicacion academica.
 El `.gitignore` es la barrera correcta para esto; `git rm --cached` limpia
-lo que ya había sido rastreado por error.
+lo que ya habia sido rastreado por error.
 
 **Verificacion realizada:**
 
-- `git status --short` tras la operación: ningún archivo de `checkpoints/` ni
-  de `data/all_datasets_en_es/` aparece en el índice.
+- `git status --short` tras la operacion: ningun archivo de `checkpoints/` ni
+  de `data/all_datasets_en_es/` aparece en el indice.
 - Push exitoso al remoto: commit `f957cc7`.
 
 **Archivos tocados:**
@@ -1202,22 +1202,22 @@ lo que ya había sido rastreado por error.
 - `bitacora.md`
 
 
-### 2026-06-13 20:09 - Cambio de puerto del servidor Flask: 5000 → 7860 (cross-platform)
+### 2026-06-13 20:09 - Cambio de puerto del servidor Flask: 5000 -> 7860 (cross-platform)
 
 **Autor/agente:** Antigravity (Medium).
 
 **Objetivo:** eliminar el conflicto de puerto en macOS, donde el puerto 5000
-está reservado por el sistema operativo para AirPlay Receiver desde macOS 12
-Monterey, y homogeneizar la configuración del servidor para macOS, Windows y
-Linux usando un único puerto libre en todos los sistemas.
+esta reservado por el sistema operativo para AirPlay Receiver desde macOS 12
+Monterey, y homogeneizar la configuracion del servidor para macOS, Windows y
+Linux usando un unico puerto libre en todos los sistemas.
 
 **Contexto observado:**
 
 - En macOS 12+, el servicio AirPlay Receiver ocupa el puerto 5000 por defecto,
   impidiendo que Flask arranque sin cambio manual del usuario.
-- La configuración anterior no era consistente: `app.py` usaba `port=5000` sin
-  `host` explícito, y `main_webapp.py` usaba `127.0.0.1:5000` como default.
-- No había forma de cambiar host o puerto sin editar código fuente.
+- La configuracion anterior no era consistente: `app.py` usaba `port=5000` sin
+  `host` explicito, y `main_webapp.py` usaba `127.0.0.1:5000` como default.
+- No habia forma de cambiar host o puerto sin editar codigo fuente.
 
 **Decision tomada:**
 
@@ -1225,13 +1225,13 @@ Linux usando un único puerto libre en todos los sistemas.
    no requiere privilegios de administrador, reconocido en el ecosistema ML/AI
    (Gradio, HuggingFace Spaces).
 
-2. **Host siempre explícito `127.0.0.1`**: garantiza comportamiento loopback
-   idéntico en los tres sistemas operativos. El usuario puede cambiarlo a
+2. **Host siempre explicito `127.0.0.1`**: garantiza comportamiento loopback
+   identico en los tres sistemas operativos. El usuario puede cambiarlo a
    `0.0.0.0` para acceso en red local.
 
-3. **Jerarquía de configuración** (de mayor a menor prioridad):
+3. **Jerarquia de configuracion** (de mayor a menor prioridad):
    - Argumentos CLI `--host` / `--port` (siempre tienen precedencia)
-   - Variables de entorno `LABELFORGE_HOST` / `LABELFORGE_PORT` (leídas desde
+   - Variables de entorno `LABELFORGE_HOST` / `LABELFORGE_PORT` (leidas desde
      `secrets.env` en `main_webapp.py` y desde el entorno en `app.py`)
    - Valores hardcoded: `127.0.0.1` / `7860`
 
@@ -1242,14 +1242,14 @@ Linux usando un único puerto libre en todos los sistemas.
 
 **Razon practica:**
 
-Un puerto único y libre en todos los SO elimina errores silenciosos en macOS
+Un puerto unico y libre en todos los SO elimina errores silenciosos en macOS
 sin afectar a Windows ni Linux. El mecanismo de env vars permite cambiar el
-comportamiento sin tocar código fuente, alineándolo con la convención
+comportamiento sin tocar codigo fuente, alineandolo con la convencion
 12-factor app.
 
 **Verificacion realizada:**
 
-- Compilación de `webapp/app.py` y `main_webapp.py`: exitosa.
+- Compilacion de `webapp/app.py` y `main_webapp.py`: exitosa.
 - Push exitoso al remoto: commit `3c14804`.
 
 **Archivos tocados:**
@@ -1267,53 +1267,53 @@ comportamiento sin tocar código fuente, alineándolo con la convención
 
 **Objetivo:** eliminar el hardcoding del archivo de entrada (`all_datasets_en_es.csv`)
 y la columna de texto (`claim`), permitiendo etiquetar cualquier dataset CSV o Excel
-con cualquier columna, sin tocar código fuente.
+con cualquier columna, sin tocar codigo fuente.
 
 **Contexto observado:**
 
-- El pipeline asumía siempre `data/all_datasets_en_es/all_datasets_en_es.csv` como
+- El pipeline asumia siempre `data/all_datasets_en_es/all_datasets_en_es.csv` como
   entrada y `claim` como la columna de texto. Ambos estaban hardcodeados en
   `label_persuasion.py` y en el comando que lanza la webapp.
-- No había forma de etiquetar otro dataset sin modificar código.
+- No habia forma de etiquetar otro dataset sin modificar codigo.
 
 **Decision tomada:**
 
-1. **`scripts/arbiters_config.json`**: nueva sección `dataset` con tres campos:
+1. **`scripts/arbiters_config.json`**: nueva seccion `dataset` con tres campos:
    - `input_file`: ruta al archivo de entrada (relativa al root del proyecto o absoluta).
-   - `sheet`: nombre o índice de la hoja (solo Excel; cadena vacía = primera hoja).
+   - `sheet`: nombre o indice de la hoja (solo Excel; cadena vacia = primera hoja).
    - `text_column`: nombre de la columna que contiene el texto a etiquetar.
 
 2. **`scripts/label_persuasion.py`**:
-   - Nueva función `load_dataset(path, sheet, text_column)` que soporta `.csv`,
+   - Nueva funcion `load_dataset(path, sheet, text_column)` que soporta `.csv`,
      `.xlsx` y `.xls`, valida que la columna exista, y lanza error descriptivo si no.
    - Nuevos argumentos CLI `--sheet` y `--column`.
-   - Jerarquía de configuración: `CLI args > config > defaults`.
+   - Jerarquia de configuracion: `CLI args > config > defaults`.
    - Todos los `row.get("claim", "")` reemplazados por `row.get(text_column, "")`.
    - `text_column` y `sheet` se guardan en `run_state.json` para reanudaciones coherentes.
 
-3. **`requirements.txt`**: añadido `openpyxl>=3.1.0` para lectura de Excel.
+3. **`requirements.txt`**: anadido `openpyxl>=3.1.0` para lectura de Excel.
 
 4. **`webapp/app.py`**:
-   - `GET  /api/dataset/config` — devuelve la config actual del dataset.
-   - `PUT  /api/dataset/config` — guarda la config en `arbiters_config.json`.
-   - `POST /api/dataset/inspect` — inspecciona un archivo y devuelve sheets y columnas.
+   - `GET  /api/dataset/config` - devuelve la config actual del dataset.
+   - `PUT  /api/dataset/config` - guarda la config en `arbiters_config.json`.
+   - `POST /api/dataset/inspect` - inspecciona un archivo y devuelve sheets y columnas.
    - `/api/run/start` pasa `--input`, `--sheet` y `--column` al subproceso.
 
 5. **`webapp/templates/processing.html`**: nuevo panel "Dataset de Entrada" (acento cyan)
-   con campo de ruta + botón Inspeccionar, dropdown de sheet (solo si es Excel),
-   dropdown de columna y botón Guardar. Al cargar la página, pre-inspecciona el archivo
-   configurado y muestra un banner con la configuración activa.
+   con campo de ruta + boton Inspeccionar, dropdown de sheet (solo si es Excel),
+   dropdown de columna y boton Guardar. Al cargar la pagina, pre-inspecciona el archivo
+   configurado y muestra un banner con la configuracion activa.
 
 **Razon practica:**
 
-La investigación puede requerir etiquetar datasets distintos al original
+La investigacion puede requerir etiquetar datasets distintos al original
 (diferentes fuentes, idiomas, subconjuntos). Con este cambio, basta con apuntar
-la webapp al nuevo archivo y seleccionar la columna correcta — sin tocar código.
+la webapp al nuevo archivo y seleccionar la columna correcta - sin tocar codigo.
 
 **Verificacion realizada:**
 
-- `conda run -n fakenewsds python -m py_compile scripts/label_persuasion.py webapp/app.py` — limpio.
-- `conda run -n fakenewsds python -m unittest tests/test_pipeline.py` — 9/9 OK.
+- `conda run -n fakenewsds python -m py_compile scripts/label_persuasion.py webapp/app.py` - limpio.
+- `conda run -n fakenewsds python -m unittest tests/test_pipeline.py` - 9/9 OK.
 - Push exitoso: commit `b093799`.
 
 **Archivos tocados:**
@@ -1327,70 +1327,70 @@ la webapp al nuevo archivo y seleccionar la columna correcta — sin tocar códi
 - `README.md`
 - `context.md`
 
-### 2026-06-13 21:30 - Corrección de carga de archivos en la webapp (drag & drop + click)
+### 2026-06-13 21:30 - Correccion de carga de archivos en la webapp (drag & drop + click)
 
 **Autor/agente:** Antigravity (Medium).
 
-**Objetivo:** arreglar el botón "Inspeccionar" / "Seleccionar archivo" en la pantalla `Procesamiento` para que abra el explorador del SO al hacer click en la zona de drop o en el botón, y que el drag-and-drop funcione correctamente.
+**Objetivo:** arreglar el boton "Inspeccionar" / "Seleccionar archivo" en la pantalla `Procesamiento` para que abra el explorador del SO al hacer click en la zona de drop o en el boton, y que el drag-and-drop funcione correctamente.
 
 **Contexto observado:**
 
-- El `onclick` inline en el `<div class="ds-dropzone">` competía con el `onclick` del botón "Seleccionar archivo", causando que al hacer click en el botón se abrieran dos veces el selector o no funcionara.
+- El `onclick` inline en el `<div class="ds-dropzone">` competia con el `onclick` del boton "Seleccionar archivo", causando que al hacer click en el boton se abrieran dos veces el selector o no funcionara.
 - El drag-and-drop estaba implementado con handlers inline (`ondragover`, `ondragleave`, `ondrop`) pero el click en la zona no estaba bien gestionado.
 
 **Decision tomada:**
 
-1. Se eliminó el `onclick` inline del `ds-dropzone` que llamaba a `document.getElementById('ds-file-input').click()`.
-2. Se agregó un event listener `click` en `DOMContentLoaded` que:
-   - Verifica `e.target.closest('button')` para no disparar si se hace click en el botón o sus hijos.
+1. Se elimino el `onclick` inline del `ds-dropzone` que llamaba a `document.getElementById('ds-file-input').click()`.
+2. Se agrego un event listener `click` en `DOMContentLoaded` que:
+   - Verifica `e.target.closest('button')` para no disparar si se hace click en el boton o sus hijos.
    - Solo entonces llama a `ds-file-input.click()`.
 3. Los handlers de drag-and-drop (`onDragOver`, `onDragLeave`, `onDrop`) se mantuvieron igual y funcionan correctamente.
 
 **Razon practica:**
 
-Separar la lógica de click en JS evita conflictos de propagación de eventos entre el contenedor y el botón interno. El patrón `e.target.closest('button')` es robusto y evita doble trigger.
+Separar la logica de click en JS evita conflictos de propagacion de eventos entre el contenedor y el boton interno. El patron `e.target.closest('button')` es robusto y evita doble trigger.
 
 **Verificacion realizada:**
 
-- Click en la zona de drop (fuera del botón) → abre selector de archivos del SO.
-- Click en "Seleccionar archivo" → abre selector de archivos del SO.
-- Drag & drop de archivo CSV/Excel → sube y muestra sheets/columnas.
+- Click en la zona de drop (fuera del boton) -> abre selector de archivos del SO.
+- Click en "Seleccionar archivo" -> abre selector de archivos del SO.
+- Drag & drop de archivo CSV/Excel -> sube y muestra sheets/columnas.
 
 **Archivos tocados:**
 
 - `webapp/templates/processing.html`
 - `bitacora.md`
 
-### 2026-06-13 21:45 - Corrección de JSONDecodeError por truncamiento de respuesta en Vertex AI (gemini-2.5)
+### 2026-06-13 21:45 - Correccion de JSONDecodeError por truncamiento de respuesta en Vertex AI (gemini-2.5)
 
 **Autor/agente:** Antigravity (Medium).
 
-**Objetivo:** resolver el error `JSONDecodeError: Unterminated string` / `Expecting property name enclosed in double quotes` que ocurría al etiquetar con los árbitros Vertex AI (gemini-2.5-pro y gemini-2.5-flash).
+**Objetivo:** resolver el error `JSONDecodeError: Unterminated string` / `Expecting property name enclosed in double quotes` que ocurria al etiquetar con los arbitros Vertex AI (gemini-2.5-pro y gemini-2.5-flash).
 
 **Contexto observado:**
 
 - Los errores indicaban que la respuesta JSON del LLM llegaba truncada a mitad de string.
-- La configuración tenía `max_output_tokens: 256` para los tres árbitros.
+- La configuracion tenia `max_output_tokens: 256` para los tres arbitros.
 - Gemini 2.5 en Vertex AI tiene "thinking mode" activado por defecto, que consume tokens de salida para razonamiento interno antes de emitir el JSON final. Con 256 tokens, el JSON binario `{"AUTH":0,"SP":0,"LSD":0,"CRC":0,"DIS":0}` se cortaba antes de completarse.
 
 **Decision tomada:**
 
-1. **`scripts/arbiters_config.json`**: subido `max_output_tokens` de 256 → **2048** para los tres árbitros.
-2. **`scripts/label_persuasion.py`**: actualizado el default de `max_output_tokens` de 600 → 2048 en todos los proveedores (Gemini AI Studio, Vertex AI, Anthropic, OpenAI-compat).
-3. **Vertex AI (`_call_vertex_gemini`)**: agregado desactivación de thinking solo para `gemini-2.5-flash`:
+1. **`scripts/arbiters_config.json`**: subido `max_output_tokens` de 256 -> **2048** para los tres arbitros.
+2. **`scripts/label_persuasion.py`**: actualizado el default de `max_output_tokens` de 600 -> 2048 en todos los proveedores (Gemini AI Studio, Vertex AI, Anthropic, OpenAI-compat).
+3. **Vertex AI (`_call_vertex_gemini`)**: agregado desactivacion de thinking solo para `gemini-2.5-flash`:
    ```python
    if "gemini-2.5-flash" in provider["model"]:
        generation_config["thinking_config"] = {"thinking_budget": 0}
    ```
-   Nota: `gemini-2.5-pro` en Vertex AI **no soporta** `thinking_budget=0` (error 400), por eso la condición es específica para flash.
+   Nota: `gemini-2.5-pro` en Vertex AI **no soporta** `thinking_budget=0` (error 400), por eso la condicion es especifica para flash.
 
 **Razon practica:**
 
-El JSON de salida binario es muy corto (~35 chars). El problema no era el tamaño de la respuesta esperada, sino que el modelo gastaba tokens en "thinking" interno. Desactivar thinking en flash y dar margen amplio (2048) en ambos modelos elimina el truncamiento. El valor 256 era insuficiente incluso sin thinking si el modelo añadía cualquier token extra.
+El JSON de salida binario es muy corto (~35 chars). El problema no era el tamano de la respuesta esperada, sino que el modelo gastaba tokens en "thinking" interno. Desactivar thinking en flash y dar margen amplio (2048) en ambos modelos elimina el truncamiento. El valor 256 era insuficiente incluso sin thinking si el modelo anadia cualquier token extra.
 
 **Verificacion realizada:**
 
-- `conda run -n fakenewsds python main_label.py --limit 1` → procesa 1 entrada completa sin JSONDecodeError.
+- `conda run -n fakenewsds python main_label.py --limit 1` -> procesa 1 entrada completa sin JSONDecodeError.
 - Logs muestran tokens de salida ~80-100 por arbitro (bien dentro de 2048).
 - Latencias: arb1 (pro) ~12-22s, arb2 (flash) ~0.8-1s, arb3 (pro) ~11-17s.
 
@@ -1400,51 +1400,51 @@ El JSON de salida binario es muy corto (~35 chars). El problema no era el tamañ
 - `scripts/label_persuasion.py`
 - `bitacora.md`
 
-### 2026-06-13 22:18 - Corrección de JavaScript visible como texto en Procesamiento
+### 2026-06-13 22:18 - Correccion de JavaScript visible como texto en Procesamiento
 
 **Autor/agente:** Codex.
 
-**Objetivo:** corregir la pestaña `Procesamiento`, donde se estaba mostrando
-código JavaScript literal en la página a partir de:
+**Objetivo:** corregir la pestana `Procesamiento`, donde se estaba mostrando
+codigo JavaScript literal en la pagina a partir de:
 `// Reset inspected state when user edits the path`.
 
 **Contexto observado:**
 
-- `webapp/templates/processing.html` tenía dos versiones de los helpers de dataset:
-  una versión nueva para drag & drop/upload y una versión anterior basada en
-  `ds-input-file` + botón `Inspeccionar`.
-- La versión anterior quedó pegada después de un cierre `</script>`, así que el
+- `webapp/templates/processing.html` tenia dos versiones de los helpers de dataset:
+  una version nueva para drag & drop/upload y una version anterior basada en
+  `ds-input-file` + boton `Inspeccionar`.
+- La version anterior quedo pegada despues de un cierre `</script>`, asi que el
   navegador interpretaba ese bloque como HTML visible en vez de JavaScript.
-- El HTML actual ya no define `ds-input-file`, por lo que esa segunda versión
-  además apuntaba a elementos inexistentes.
+- El HTML actual ya no define `ds-input-file`, por lo que esa segunda version
+  ademas apuntaba a elementos inexistentes.
 
 **Decision tomada:**
 
-1. Se eliminó el bloque duplicado y obsoleto que estaba fuera del `<script>`.
-2. Se dejó como única implementación activa el flujo actual de:
+1. Se elimino el bloque duplicado y obsoleto que estaba fuera del `<script>`.
+2. Se dejo como unica implementacion activa el flujo actual de:
    - input file oculto `ds-file-input`,
    - zona drag-and-drop,
    - endpoint `/api/dataset/upload`,
-   - selección de sheet/columna,
+   - seleccion de sheet/columna,
    - guardado en `/api/dataset/config`.
-3. Se verificó que el template ya no contenga referencias a `ds-input-file`,
+3. Se verifico que el template ya no contenga referencias a `ds-input-file`,
    `inspectDataset`, `_datasetInspected` ni al texto `Reset inspected state`.
 
 **Razon practica:**
 
 El error no estaba en Flask ni en Bootstrap; era un cierre prematuro del bloque
-`<script>` combinado con código legacy duplicado. Retirar el bloque viejo evita
-que el navegador muestre JS como texto y elimina handlers que ya no correspondían
+`<script>` combinado con codigo legacy duplicado. Retirar el bloque viejo evita
+que el navegador muestre JS como texto y elimina handlers que ya no correspondian
 al HTML actual.
 
 **Verificacion realizada:**
 
-- `conda run -n fakenewsds python -m py_compile webapp\app.py main_webapp.py scripts\label_persuasion.py` — limpio.
-- `conda run -n fakenewsds python -m unittest tests\test_pipeline.py` — 9/9 OK.
-- Render con Flask test client de `/processing` — HTTP 200.
+- `conda run -n fakenewsds python -m py_compile webapp\app.py main_webapp.py scripts\label_persuasion.py` - limpio.
+- `conda run -n fakenewsds python -m unittest tests\test_pipeline.py` - 9/9 OK.
+- Render con Flask test client de `/processing` - HTTP 200.
 - En el HTML renderizado:
-  - `Reset inspected state` → no aparece.
-  - `ds-input-file` → no aparece.
+  - `Reset inspected state` -> no aparece.
+  - `ds-input-file` -> no aparece.
   - conteo de scripts renderizados: 3 `<script>` y 3 `</script>`.
 
 **Archivos tocados:**
@@ -1453,53 +1453,53 @@ al HTML actual.
 - `bitacora.md`
 - `context.md`
 
-### 2026-06-13 22:55 - Métricas por entrada y frontera backend/frontend
+### 2026-06-13 22:55 - Metricas por entrada y frontera backend/frontend
 
 **Autor/agente:** Codex.
 
-**Objetivo:** asegurar que el consenso, el diagnóstico por entrada y las estadísticas
-de tokens/latencia se calculen en backend, de forma común para CLI y webapp, y que
+**Objetivo:** asegurar que el consenso, el diagnostico por entrada y las estadisticas
+de tokens/latencia se calculen en backend, de forma comun para CLI y webapp, y que
 la interfaz solo presente datos ya calculados.
 
 **Contexto observado:**
 
-- El log de ejecución mostraba líneas como:
-  `[entrada 15] OK — AUTH=0 SP=1 LSD=0 CRC=0 DIS=0`.
-- Ese valor correspondía al consenso final de la entrada, pero no incluía señales
-  de auditoría sobre cuánta coincidencia hubo entre árbitros en esa entrada.
-- La webapp todavía sumaba tokens/tiempos por fila en algunos puntos y calculaba
-  promedios simples para mostrar “tokens por entrada”.
-- También quedaban pequeñas interpretaciones visuales de métricas en JavaScript,
-  como el tono del kappa o la conversión de acuerdo a porcentaje.
+- El log de ejecucion mostraba lineas como:
+  `[entrada 15] OK - AUTH=0 SP=1 LSD=0 CRC=0 DIS=0`.
+- Ese valor correspondia al consenso final de la entrada, pero no incluia senales
+  de auditoria sobre cuanta coincidencia hubo entre arbitros en esa entrada.
+- La webapp todavia sumaba tokens/tiempos por fila en algunos puntos y calculaba
+  promedios simples para mostrar "tokens por entrada".
+- Tambien quedaban pequenas interpretaciones visuales de metricas en JavaScript,
+  como el tono del kappa o la conversion de acuerdo a porcentaje.
 
-**Decisión tomada:**
+**Decision tomada:**
 
 1. **`scripts/label_persuasion.py`**:
-   - Se añadieron campos de diagnóstico de consenso por entrada:
+   - Se anadieron campos de diagnostico de consenso por entrada:
      `entry_consensus_observed_agreement`,
      `entry_consensus_observed_agreement_percent`,
      `entry_consensus_mean_support_ratio`,
      `entry_consensus_mean_support_percent`,
      `entry_consensus_unanimous_principles`,
      `entry_consensus_split_principles` y campos por principio con apoyo/votos.
-   - Se añadieron métricas de uso por entrada:
+   - Se anadieron metricas de uso por entrada:
      `entry_prompt_tokens`, `entry_completion_tokens`, `entry_total_tokens`,
      `entry_latency_s`, `entry_latency_avg_s`, `entry_arbiter_calls`,
      `entry_tokens_per_call`.
    - `process_claim`, `build_claim_metric`, `summarize_records`,
-     `make_failed_record` y `write_output_csv` usan estas métricas del backend.
-   - El log de cada entrada OK ahora incluye diagnóstico operativo del consenso:
+     `make_failed_record` y `write_output_csv` usan estas metricas del backend.
+   - El log de cada entrada OK ahora incluye diagnostico operativo del consenso:
      `acuerdo`, `unanimidad`, `divididos` y `apoyo`.
    - Se filtraron checkpoints y resultados parciales al `--limit` activo para evitar
      reportes incoherentes como `Exitosos: 21/1` al hacer pruebas cortas.
 
 2. **`scripts/agreement_metrics.py`**:
-   - El módulo compartido ahora entrega también porcentajes y metadatos de
-     presentación para kappa (`fleiss_kappa_tone`,
-     `fleiss_kappa_interpretation`), de modo que la UI no interprete la métrica.
+   - El modulo compartido ahora entrega tambien porcentajes y metadatos de
+     presentacion para kappa (`fleiss_kappa_tone`,
+     `fleiss_kappa_interpretation`), de modo que la UI no interprete la metrica.
 
 3. **`webapp/app.py`**:
-   - `/api/run/stats` y `/api/run/current-stats` exponen métricas ya calculadas:
+   - `/api/run/stats` y `/api/run/current-stats` exponen metricas ya calculadas:
      `tokens_per_row`, `tokens_per_successful_row`,
      `tokens_per_processed_row`, `tokens_per_successful_row`,
      `usage_metrics` por fila y `consensus_metrics` por fila.
@@ -1510,44 +1510,44 @@ la interfaz solo presente datos ya calculados.
      `ModuleNotFoundError: No module named 'scripts'`.
 
 4. **`webapp/templates/run.html`**:
-   - Se retiraron cálculos de “tokens por entrada” y la interpretación visual del
+   - Se retiraron calculos de "tokens por entrada" y la interpretacion visual del
      kappa.
    - La plantilla solo renderiza datos recibidos, formatea valores y maneja
-     interacción visual.
+     interaccion visual.
 
 **Aclaracion metodologica:**
 
-Los campos `entry_consensus_*` son diagnósticos por entrada para auditoría,
-depuración y trazabilidad. No deben presentarse como las métricas principales de
-confiabilidad del paper. Para metodología/reportes académicos, usar las métricas
-agregadas inter-árbitros del módulo `scripts/agreement_metrics.py`: acuerdo
+Los campos `entry_consensus_*` son diagnosticos por entrada para auditoria,
+depuracion y trazabilidad. No deben presentarse como las metricas principales de
+confiabilidad del paper. Para metodologia/reportes academicos, usar las metricas
+agregadas inter-arbitros del modulo `scripts/agreement_metrics.py`: acuerdo
 observado agregado, kappa de Fleiss, kappa de Cohen promedio por pares,
 Krippendorff alpha nominal y tasa positiva por principio/global.
 
 **Razon practica:**
 
-Las métricas deben tener una sola fuente de verdad para que CLI, webapp, CSV,
-logs y futuras evaluaciones académicas coincidan. El frontend no debe contener
-lógica de negocio porque eso crea divergencias silenciosas entre la versión CLI y
-la versión web.
+Las metricas deben tener una sola fuente de verdad para que CLI, webapp, CSV,
+logs y futuras evaluaciones academicas coincidan. El frontend no debe contener
+logica de negocio porque eso crea divergencias silenciosas entre la version CLI y
+la version web.
 
 **Verificacion realizada:**
 
-- `conda run -n fakenewsds python -m py_compile scripts\agreement_metrics.py scripts\label_persuasion.py webapp\app.py main_webapp.py` — limpio.
-- `conda run -n fakenewsds python -m unittest tests\test_pipeline.py` — 9/9 OK.
-- `conda run -n fakenewsds python main_label.py --limit 1` — completó con
+- `conda run -n fakenewsds python -m py_compile scripts\agreement_metrics.py scripts\label_persuasion.py webapp\app.py main_webapp.py` - limpio.
+- `conda run -n fakenewsds python -m unittest tests\test_pipeline.py` - 9/9 OK.
+- `conda run -n fakenewsds python main_label.py --limit 1` - completo con
   `Exitosos : 1/1`.
 - CSV generado `output/labeled_20260613_225238.csv` contiene:
   `entry_prompt_tokens=832`, `entry_completion_tokens=90`,
   `entry_total_tokens=922`, `entry_latency_s=34.035`,
   `entry_latency_avg_s=11.345`, `entry_arbiter_calls=3`,
   `entry_tokens_per_call=307.33`.
-- `GET /api/run/stats?limit=1` con Flask test client devolvió HTTP 200 e incluyó
+- `GET /api/run/stats?limit=1` con Flask test client devolvio HTTP 200 e incluyo
   `tokens_per_row=922`, `tokens_per_successful_row=922`,
   `observed_agreement_percent=100.0`,
   `fleiss_kappa_tone=success` e
   `fleiss_kappa_interpretation=casi perfecto`.
-- Búsqueda dirigida confirmó que los cálculos de métricas quedan en Python; en
+- Busqueda dirigida confirmo que los calculos de metricas quedan en Python; en
   plantillas quedan solo formato y renderizado.
 
 **Archivos tocados:**
@@ -1560,92 +1560,92 @@ la versión web.
 - `context.md`
 - `README.md`
 
-### 2026-06-13 21:30 - Corrección de carga de archivos en la webapp (drag & drop + click)
+### 2026-06-13 21:30 - Correccion de carga de archivos en la webapp (drag & drop + click)
 
 **Autor/agente:** Antigravity (Medium).
 
-**Objetivo:** arreglar el botón "Inspeccionar" / "Seleccionar archivo" en la pantalla
+**Objetivo:** arreglar el boton "Inspeccionar" / "Seleccionar archivo" en la pantalla
 `Procesamiento` para que abra el explorador del SO al hacer click en la zona de drop
-o en el botón, y que el drag-and-drop funcione correctamente.
+o en el boton, y que el drag-and-drop funcione correctamente.
 
 **Contexto observado:**
 
-- El `onclick` inline en el `<div class="ds-dropzone">` competía con el `onclick`
-  del botón "Seleccionar archivo", causando que al hacer click en el botón se
+- El `onclick` inline en el `<div class="ds-dropzone">` competia con el `onclick`
+  del boton "Seleccionar archivo", causando que al hacer click en el boton se
   abrieran dos veces el selector o no funcionara.
 - El drag-and-drop estaba implementado con handlers inline (`ondragover`,
   `ondragleave`, `ondrop`) pero el click en la zona no estaba bien gestionado.
 
 **Decision tomada:**
 
-1. Se eliminó el `onclick` inline del `ds-dropzone` que llamaba a
+1. Se elimino el `onclick` inline del `ds-dropzone` que llamaba a
    `document.getElementById('ds-file-input').click()`.
-2. Se agregó un event listener `click` en `DOMContentLoaded` que:
+2. Se agrego un event listener `click` en `DOMContentLoaded` que:
    - Verifica `e.target.closest('button')` para no disparar si se hace click en
-     el botón o sus hijos.
+     el boton o sus hijos.
    - Solo entonces llama a `ds-file-input.click()`.
 3. Los handlers de drag-and-drop (`onDragOver`, `onDragLeave`, `onDrop`) se
    mantuvieron igual y funcionan correctamente.
 
 **Razon practica:**
 
-Separar la lógica de click en JS evita conflictos de propagación de eventos entre
-el contenedor y el botón interno. El patrón `e.target.closest('button')` es
+Separar la logica de click en JS evita conflictos de propagacion de eventos entre
+el contenedor y el boton interno. El patron `e.target.closest('button')` es
 robusto y evita doble trigger.
 
 **Verificacion realizada:**
 
-- Click en la zona de drop (fuera del botón) → abre selector de archivos del SO.
-- Click en "Seleccionar archivo" → abre selector de archivos del SO.
-- Drag & drop de archivo CSV/Excel → sube y muestra sheets/columnas.
+- Click en la zona de drop (fuera del boton) -> abre selector de archivos del SO.
+- Click en "Seleccionar archivo" -> abre selector de archivos del SO.
+- Drag & drop de archivo CSV/Excel -> sube y muestra sheets/columnas.
 
 **Archivos tocados:**
 
 - `webapp/templates/processing.html`
 - `bitacora.md`
 
-### 2026-06-13 21:45 - Corrección de JSONDecodeError por truncamiento de respuesta en Vertex AI (gemini-2.5)
+### 2026-06-13 21:45 - Correccion de JSONDecodeError por truncamiento de respuesta en Vertex AI (gemini-2.5)
 
 **Autor/agente:** Antigravity (Medium).
 
-**Objetivo:** resolver el error `JSONDecodeError: Unterminated string` que ocurría
-al etiquetar con los árbitros Vertex AI (gemini-2.5-pro y gemini-2.5-flash).
+**Objetivo:** resolver el error `JSONDecodeError: Unterminated string` que ocurria
+al etiquetar con los arbitros Vertex AI (gemini-2.5-pro y gemini-2.5-flash).
 
 **Contexto observado:**
 
 - Los errores indicaban que la respuesta JSON del LLM llegaba truncada a mitad
   de string.
-- La configuración tenía `max_output_tokens: 256` para los tres árbitros.
+- La configuracion tenia `max_output_tokens: 256` para los tres arbitros.
 - Gemini 2.5 en Vertex AI tiene "thinking mode" activado por defecto, que consume
   tokens de salida para razonamiento interno antes de emitir el JSON final. Con
   256 tokens, el JSON binario se cortaba antes de completarse.
 
 **Decision tomada:**
 
-1. **`scripts/arbiters_config.json`**: subido `max_output_tokens` de 256 → 2048
-   para los tres árbitros.
+1. **`scripts/arbiters_config.json`**: subido `max_output_tokens` de 256 -> 2048
+   para los tres arbitros.
 2. **`scripts/label_persuasion.py`**: actualizado el default de `max_output_tokens`
-   de 600 → 2048 en todos los proveedores (Gemini AI Studio, Vertex AI, Anthropic,
+   de 600 -> 2048 en todos los proveedores (Gemini AI Studio, Vertex AI, Anthropic,
    OpenAI-compat).
-3. **Vertex AI (`_call_vertex_gemini`)**: agregado desactivación de thinking solo
+3. **Vertex AI (`_call_vertex_gemini`)**: agregado desactivacion de thinking solo
    para `gemini-2.5-flash`:
    ```python
    if "gemini-2.5-flash" in provider["model"]:
        generation_config["thinking_config"] = {"thinking_budget": 0}
    ```
    Nota: `gemini-2.5-pro` en Vertex AI **no soporta** `thinking_budget=0` (error
-   400), por eso la condición es específica para flash.
+   400), por eso la condicion es especifica para flash.
 
 **Razon practica:**
 
-El JSON de salida binario es muy corto (~35 chars). El problema no era el tamaño
+El JSON de salida binario es muy corto (~35 chars). El problema no era el tamano
 de la respuesta esperada, sino que el modelo gastaba tokens en "thinking" interno.
 Desactivar thinking en flash y dar margen amplio (2048) en ambos modelos elimina
 el truncamiento.
 
 **Verificacion realizada:**
 
-- `conda run -n fakenewsds python main_label.py --limit 1` → procesa 1 entrada
+- `conda run -n fakenewsds python main_label.py --limit 1` -> procesa 1 entrada
   completa sin JSONDecodeError.
 - Logs muestran tokens de salida ~80-100 por arbitro (bien dentro de 2048).
 
@@ -1655,57 +1655,57 @@ el truncamiento.
 - `scripts/label_persuasion.py`
 - `bitacora.md`
 
-### 2026-06-13 21:55 - Bloqueo de controles durante ejecución en la webapp
+### 2026-06-13 21:55 - Bloqueo de controles durante ejecucion en la webapp
 
 **Autor/agente:** Antigravity (Medium).
 
-**Objetivo:** evitar que el usuario modifique parámetros mientras el proceso de
-etiquetado está corriendo desde la pestaña "Ejecutar".
+**Objetivo:** evitar que el usuario modifique parametros mientras el proceso de
+etiquetado esta corriendo desde la pestana "Ejecutar".
 
 **Contexto observado:**
 
-- El botón "Iniciar" ya se deshabilitaba con `setRunning(true)`, pero el campo
-  "Límite de entradas" y el botón "Limpiar checkpoint" seguían editables.
-- Si el usuario cambiaba el límite durante la ejecución, generaba confusión
-  (no afectaba el run activo pero parecía que sí).
+- El boton "Iniciar" ya se deshabilitaba con `setRunning(true)`, pero el campo
+  "Limite de entradas" y el boton "Limpiar checkpoint" seguian editables.
+- Si el usuario cambiaba el limite durante la ejecucion, generaba confusion
+  (no afectaba el run activo pero parecia que si).
 
 **Decision tomada:**
 
-Se extendió `setRunning(running)` para deshabilitar/habilitar:
-- Campo `limit-input` (número de entradas)
-- Botón "Limpiar checkpoint" (buscado dinámicamente dentro de `#checkpoint-area`)
+Se extendio `setRunning(running)` para deshabilitar/habilitar:
+- Campo `limit-input` (numero de entradas)
+- Boton "Limpiar checkpoint" (buscado dinamicamente dentro de `#checkpoint-area`)
 
 **Razon practica:**
 
-Congelar los controles evita la falsa impresión de que se pueden cambiar
-parámetros durante un run activo. Al finalizar o cancelar, todo vuelve a
-habilitarse automáticamente.
+Congelar los controles evita la falsa impresion de que se pueden cambiar
+parametros durante un run activo. Al finalizar o cancelar, todo vuelve a
+habilitarse automaticamente.
 
 **Archivos tocados:**
 
 - `webapp/templates/run.html`
 - `bitacora.md`
 
-### 2026-06-13 22:10 - Sistema de colores semántico para métricas de acuerdo
+### 2026-06-13 22:10 - Sistema de colores semantico para metricas de acuerdo
 
 **Autor/agente:** Antigravity (Medium).
 
-**Objetivo:** aplicar colores consistentes a todas las métricas de acuerdo
-inter-árbitros (Fleiss Kappa, Cohen Kappa, Krippendorff Alpha, acuerdo
+**Objetivo:** aplicar colores consistentes a todas las metricas de acuerdo
+inter-arbitros (Fleiss Kappa, Cohen Kappa, Krippendorff Alpha, acuerdo
 observado, tasa positiva) usando una escala unificada de 4 niveles.
 
 **Contexto observado:**
 
-- Solo Fleiss Kappa tenía color (`fleiss_kappa_tone`), el resto se mostraban como
-  texto plano sin indicación visual.
-- El badge global usaba la interpretación del Fleiss Kappa (ej: "bajo") aunque el
-  acuerdo observado fuera 92.3%, generando contradicción visual.
+- Solo Fleiss Kappa tenia color (`fleiss_kappa_tone`), el resto se mostraban como
+  texto plano sin indicacion visual.
+- El badge global usaba la interpretacion del Fleiss Kappa (ej: "bajo") aunque el
+  acuerdo observado fuera 92.3%, generando contradiccion visual.
 
 **Decision tomada:**
 
 1. **Backend (`scripts/agreement_metrics.py`)**:
-   - Nueva función `_percent_tone()` para valores porcentuales.
-   - `_with_display_fields()` ahora genera `*_tone` para todas las métricas:
+   - Nueva funcion `_percent_tone()` para valores porcentuales.
+   - `_with_display_fields()` ahora genera `*_tone` para todas las metricas:
      `observed_agreement_tone`, `pairwise_cohen_kappa_avg_tone`,
      `krippendorff_alpha_nominal_tone`, `positive_rate_tone`.
 
@@ -1713,29 +1713,29 @@ observado, tasa positiva) usando una escala unificada de 4 niveles.
    - Funciones helper `consensusTone()`, `consensusBg()`, `consensusBorder()`
      con la misma escala 4 niveles.
    - Las tarjetas resumen globales ahora muestran badges coloreados para cada
-     métrica.
+     metrica.
    - La tabla por principio tiene todas las columnas como badges coloreados.
    - El badge global ahora muestra **acuerdo observado** (con su color) en vez
-     de solo Fleiss Kappa. Se agregó un badge separado para Fleiss Kappa.
+     de solo Fleiss Kappa. Se agrego un badge separado para Fleiss Kappa.
 
 3. **Escala unificada (4 niveles)**:
    | Nivel | Kappa | Porcentaje | Color |
    |---|---|---|---|
-   | Alto | ≥ 0.8 | ≥ 80% | `success` (verde) |
-   | Medio-alto | ≥ 0.6 | ≥ 60% | `info` (azul) |
-   | Bajo | ≥ 0.4 | ≥ 40% | `warning` (amarillo) |
+   | Alto | >= 0.8 | >= 80% | `success` (verde) |
+   | Medio-alto | >= 0.6 | >= 60% | `info` (azul) |
+   | Bajo | >= 0.4 | >= 40% | `warning` (amarillo) |
    | Muy bajo | < 0.4 | < 40% | `danger` (rojo) |
 
-4. **Aplicación en toda la página "Ejecutar"**:
-   - Tarjeta "Última entrada procesada": borde y fondo según acuerdo.
-   - Diagnóstico por entrada: fondo y texto coloreados.
+4. **Aplicacion en toda la pagina "Ejecutar"**:
+   - Tarjeta "Ultima entrada procesada": borde y fondo segun acuerdo.
+   - Diagnostico por entrada: fondo y texto coloreados.
    - Tabla de resultados: borde izquierdo coloreado en cada fila.
-   - Panel "Acuerdo entre árbitros": badges en todas las métricas.
+   - Panel "Acuerdo entre arbitros": badges en todas las metricas.
 
 **Verificacion realizada:**
 
 - `python -c "from scripts.agreement_metrics import compute_agreement_metrics"`
-  → todos los campos `*_tone` presentes con valores correctos.
+  -> todos los campos `*_tone` presentes con valores correctos.
 
 **Archivos tocados:**
 
@@ -1743,64 +1743,64 @@ observado, tasa positiva) usando una escala unificada de 4 niveles.
 - `webapp/templates/run.html`
 - `bitacora.md`
 
-### 2026-06-13 22:15 - scripts/__init__.py para corrección de importación
+### 2026-06-13 22:15 - scripts/__init__.py para correccion de importacion
 
 **Objetivo:** resolver ModuleNotFoundError: No module named 'scripts' al ejecutar
 el pipeline como subproceso desde la webapp.
 
 **Contexto observado:**
 
-- El directorio `scripts/` no tenía `__init__.py`, por lo que no era un paquete
+- El directorio `scripts/` no tenia `__init__.py`, por lo que no era un paquete
   Python reconocible.
 - Al ejecutar `label_persuasion.py` como subproceso con `cwd=BASE_DIR`, el
   import `from scripts.agreement_metrics import ...` fallaba.
 
 **Decision tomada:**
 
-Crear `scripts/__init__.py` vacío para que Python trate `scripts/` como paquete.
+Crear `scripts/__init__.py` vacio para que Python trate `scripts/` como paquete.
 
 **Archivos tocados:**
 
 - `scripts/__init__.py` (nuevo)
 - `bitacora.md`
 
-### 2026-06-15 - Gestión segura de árbitros, secretos y paridad WebApp/CLI
+### 2026-06-15 - Gestion segura de arbitros, secretos y paridad WebApp/CLI
 
-**Objetivo:** permitir experimentar con distintas configuraciones de árbitros sin
+**Objetivo:** permitir experimentar con distintas configuraciones de arbitros sin
 perder las existentes, proteger prompts/API keys al exportar, permitir borrar todos
-los árbitros cuando el usuario lo necesite, y asegurar que la lógica viva en backend
+los arbitros cuando el usuario lo necesite, y asegurar que la logica viva en backend
 compartido en vez de quedar duplicada en la interfaz web.
 
 **Contexto observado:**
 
-- La pestaña `Arbitros` permitía editar proveedores/modelos, pero no había forma de
-  respaldar/restaurar configuraciones de árbitros.
-- Los árbitros contienen información sensible: prompts, proveedores, modelos y, en
+- La pestana `Arbitros` permitia editar proveedores/modelos, pero no habia forma de
+  respaldar/restaurar configuraciones de arbitros.
+- Los arbitros contienen informacion sensible: prompts, proveedores, modelos y, en
   configuraciones heredadas, posibles `api_key_override`.
-- La UI bloqueaba eliminar el último árbitro, aunque es válido querer dejar la lista
-  vacía para probar otra configuración.
+- La UI bloqueaba eliminar el ultimo arbitro, aunque es valido querer dejar la lista
+  vacia para probar otra configuracion.
 - El formulario de API key era confuso: separaba "variable de entorno" y "clave de
   API", lo que llevaba a pegar claves reales en el campo equivocado.
-- El cambio debía aplicar tanto a la WebApp como al CLI. La WebApp debe ser interfaz;
-  cifrado, merge, validación y escritura de secretos deben vivir en Python.
+- El cambio debia aplicar tanto a la WebApp como al CLI. La WebApp debe ser interfaz;
+  cifrado, merge, validacion y escritura de secretos deben vivir en Python.
 
-**Decisión tomada:**
+**Decision tomada:**
 
-1. **Nuevo backend compartido para árbitros (`scripts/arbiters_io.py`)**:
-   - Exporta/importa la sección `arbiters` en archivos `.lfarb`.
-   - Cifra con contraseña usando PBKDF2-HMAC-SHA256 + AES-256-GCM.
-   - Valida formato, normaliza árbitros y aplica merge por ID o reemplazo total.
-   - La importación por defecto fusiona; `replace` debe pedirse explícitamente.
+1. **Nuevo backend compartido para arbitros (`scripts/arbiters_io.py`)**:
+   - Exporta/importa la seccion `arbiters` en archivos `.lfarb`.
+   - Cifra con contrasena usando PBKDF2-HMAC-SHA256 + AES-256-GCM.
+   - Valida formato, normaliza arbitros y aplica merge por ID o reemplazo total.
+   - La importacion por defecto fusiona; `replace` debe pedirse explicitamente.
 
 2. **Nuevo backend compartido para secretos (`scripts/secrets_io.py`)**:
-   - Mapea proveedor → variable estándar:
-     `gemini → GEMINI_API_KEY`, `anthropic → ANTHROPIC_API_KEY`,
-     `openai/openai_compat → OPENAI_API_KEY`.
+   - Mapea proveedor -> variable estandar:
+     `gemini -> GEMINI_API_KEY`, `anthropic -> ANTHROPIC_API_KEY`,
+     `openai/openai_compat -> OPENAI_API_KEY`.
    - Escribe `secrets.env` de forma controlada y actualiza `os.environ`.
    - Soporta lectura con BOM (`utf-8-sig`) para evitar fallos por editores Windows.
 
 3. **WebApp (`webapp/app.py` + `webapp/templates/arbiters.html`)**:
-   - Agregados botones **Importar** y **Exportar** en la pestaña `Arbitros`.
+   - Agregados botones **Importar** y **Exportar** en la pestana `Arbitros`.
    - Agregado endpoint `POST /api/arbiters/export`.
    - Agregado endpoint `POST /api/arbiters/import`.
    - Agregado endpoint `POST /api/provider-key`: verifica la key listando modelos,
@@ -1808,7 +1808,7 @@ compartido en vez de quedar duplicada en la interfaz web.
    - El formulario ahora muestra un solo campo visible **Clave de API** para Gemini,
      Anthropic, OpenAI y OpenAI-compatible. El backend decide la variable destino.
    - Vertex AI no muestra API key directa porque usa ADC/GCP; Ollama no la necesita.
-   - Se permite eliminar todos los árbitros. Si la lista queda vacía, la UI muestra:
+   - Se permite eliminar todos los arbitros. Si la lista queda vacia, la UI muestra:
      "Sin arbitros no se puede hacer nada." y ofrece crear/importar.
 
 4. **CLI (`scripts/label_persuasion.py`)**:
@@ -1818,28 +1818,28 @@ compartido en vez de quedar duplicada en la interfaz web.
    - `--arbiters-password` / `--arbiters-password-file`
    - `--set-provider-key proveedor`
    - `--api-key`, `--api-key-env`, `--base-url`
-   - Ejecutar el pipeline sin árbitros ahora falla con mensaje explícito:
+   - Ejecutar el pipeline sin arbitros ahora falla con mensaje explicito:
      "Sin arbitros no se puede hacer nada..."
 
-5. **Documentación**:
-   - Actualizados `README.md` y `context.md` para reflejar los módulos compartidos,
-     comandos CLI, endpoints nuevos, formato `.lfarb`, gestión de API keys y frontera
+5. **Documentacion**:
+   - Actualizados `README.md` y `context.md` para reflejar los modulos compartidos,
+     comandos CLI, endpoints nuevos, formato `.lfarb`, gestion de API keys y frontera
      backend/frontend.
 
-**Razon práctica:**
+**Razon practica:**
 
-La configuración de árbitros es parte del experimento; debe poder respaldarse,
-restaurarse y transportarse sin exponer secretos. Además, una sola fuente de verdad
+La configuracion de arbitros es parte del experimento; debe poder respaldarse,
+restaurarse y transportarse sin exponer secretos. Ademas, una sola fuente de verdad
 para export/import y secretos evita que WebApp y CLI diverjan. La UI debe disparar
 acciones, no implementar reglas de seguridad ni cifrado.
 
-**Verificación realizada:**
+**Verificacion realizada:**
 
 - `conda run -n LabelForge python -m py_compile webapp\app.py scripts\label_persuasion.py scripts\arbiters_io.py scripts\secrets_io.py`
 - Prueba de export/import CLI sobre una copia temporal del config.
-- Verificación de que el archivo `.lfarb` no contiene en claro `system_prompt`,
+- Verificacion de que el archivo `.lfarb` no contiene en claro `system_prompt`,
   `api_key_override`, `provider` ni `arbiters`.
-- Verificación de endpoint `/api/provider-key` sin key real: error controlado.
+- Verificacion de endpoint `/api/provider-key` sin key real: error controlado.
 - Reinicio de la WebApp y respuesta `200` en `/arbiters`.
 
 **Archivos tocados:**
@@ -1906,17 +1906,17 @@ en la raiz quedan como registro de una decision previa ya reemplazada.
 
 ### 2026-06-15 - Rate limits por proveedor/modelo para todos los LLMs
 
-**Objetivo:** que el tab de árbitros y el backend calculen delays no solo para
+**Objetivo:** que el tab de arbitros y el backend calculen delays no solo para
 Gemini, sino para todos los proveedores soportados por el sistema.
 
 **Cambios realizados:**
 
 1. Agregado `scripts/rate_limits.py` como fuente compartida de perfiles de rate
-   limit y cálculo de espera mínima.
+   limit y calculo de espera minima.
 2. `webapp/app.py` ahora usa `compute_min_delay(provider, model, tier, n_arbiters)`
-   en `/api/rate-limits`, `/api/rate-limits/summary` y validación de parámetros
+   en `/api/rate-limits`, `/api/rate-limits/summary` y validacion de parametros
    de procesamiento.
-3. `webapp/templates/arbiters.html` consulta límites con `provider + model` y
+3. `webapp/templates/arbiters.html` consulta limites con `provider + model` y
    muestra si el dato es publicado (`published`) o dependiente de cuenta
    (`account_dependent`).
 4. Se agregaron perfiles por modelo/familia para:
@@ -1927,14 +1927,14 @@ Gemini, sino para todos los proveedores soportados por el sistema.
    - OpenAI-compatible
    - Ollama/local
 
-**Decisión importante:**
+**Decision importante:**
 
 Solo `gemini` se presenta como perfil publicado cuando coincide con la tabla
-conocida de Gemini API/AI Studio. Vertex, Anthropic y OpenAI exponen límites que
-dependen de proyecto/cuenta/región/tier/organización, por lo que sus valores se
+conocida de Gemini API/AI Studio. Vertex, Anthropic y OpenAI exponen limites que
+dependen de proyecto/cuenta/region/tier/organizacion, por lo que sus valores se
 marcan como fallback conservador y no como cuota oficial fija.
 
-**Verificación realizada:**
+**Verificacion realizada:**
 
 - `conda run -n LabelForge python -m py_compile webapp\app.py scripts\rate_limits.py`
 - Prueba directa de `compute_min_delay()` para `gemini`, `vertex_gemini`,
@@ -1942,21 +1942,21 @@ marcan como fallback conservador y no como cuota oficial fija.
 
 ---
 
-### 2026-06-15 - Autorización explícita de Claude en `free_only_mode`
+### 2026-06-15 - Autorizacion explicita de Claude en `free_only_mode`
 
-**Problema:** la ejecución fallaba porque `arb4` usa `provider.type="anthropic"`
-y `safety.free_only_mode=true` bloquea cualquier proveedor que no esté en
+**Problema:** la ejecucion fallaba porque `arb4` usa `provider.type="anthropic"`
+y `safety.free_only_mode=true` bloquea cualquier proveedor que no este en
 `allowed_provider_types`.
 
 **Cambio:** agregado `anthropic` a `safety.allowed_provider_types` en
 `scripts/arbiters_config.json`, manteniendo `free_only_mode=true`.
 
-**Razon práctica:** Claude sigue siendo un proveedor con riesgo de costo, pero en
-esta configuración se está usando conscientemente como cuarto árbitro. La política
+**Razon practica:** Claude sigue siendo un proveedor con riesgo de costo, pero en
+esta configuracion se esta usando conscientemente como cuarto arbitro. La politica
 de seguridad queda activa para bloquear proveedores no autorizados, sin bloquear
 `arb4`.
 
-**Verificación realizada:**
+**Verificacion realizada:**
 
 - `validate_safety_policy()` pasa con:
   `arb1:vertex_gemini`, `arb2:vertex_gemini`, `arb3:vertex_gemini`,
@@ -1966,9 +1966,9 @@ de seguridad queda activa para bloquear proveedores no autorizados, sin bloquear
 
 ### 2026-06-15 - Preflight con instrucciones accionables por proveedor
 
-**Problema:** ante falta de credenciales de Vertex AI, el sistema sugería
+**Problema:** ante falta de credenciales de Vertex AI, el sistema sugeria
 directamente `gcloud auth application-default login`, asumiendo que Google Cloud
-CLI estaba instalado. Eso no cubre máquinas sin `gcloud` ni explicaba alternativas
+CLI estaba instalado. Eso no cubre maquinas sin `gcloud` ni explicaba alternativas
 equivalentes para otros proveedores.
 
 **Cambio:** `scripts/provider_preflight.py` ahora:
@@ -1977,31 +1977,31 @@ equivalentes para otros proveedores.
 - Para Vertex AI, explica que no se usa API key directa y ofrece:
   - service account JSON + `GOOGLE_APPLICATION_CREDENTIALS` como ruta sin login
     interactivo local;
-  - Google Cloud CLI como ruta de login interactivo si está disponible o se instala.
-- Para Gemini, Anthropic y OpenAI, indica tres caminos: WebApp (`Arbitros` →
-  `Clave de API` → verificar), CLI `--set-provider-key`, o `secrets.env`.
+  - Google Cloud CLI como ruta de login interactivo si esta disponible o se instala.
+- Para Gemini, Anthropic y OpenAI, indica tres caminos: WebApp (`Arbitros` ->
+  `Clave de API` -> verificar), CLI `--set-provider-key`, o `secrets.env`.
 - Para OpenAI-compatible/Ollama, valida `base_url` y muestra ejemplos locales.
 
-**Documentación:** actualizados `README.md` y `context.md` para reflejar que Vertex
-tiene dos rutas de autenticación y que las API keys se gestionan por WebApp/CLI o
+**Documentacion:** actualizados `README.md` y `context.md` para reflejar que Vertex
+tiene dos rutas de autenticacion y que las API keys se gestionan por WebApp/CLI o
 `secrets.env`.
 
 ---
 
-### 2026-06-15 - Claridad operativa de procesamiento, ejecución y logs
+### 2026-06-15 - Claridad operativa de procesamiento, ejecucion y logs
 
-**Objetivo:** cerrar ambigüedades detectadas al correr pruebas reales y dejar la
+**Objetivo:** cerrar ambiguedades detectadas al correr pruebas reales y dejar la
 interfaz alineada con lo que el backend realmente hace.
 
 **Problemas observados:**
 
 1. En `/processing`, aunque `dataset.input_file` ya estaba guardado, la interfaz
-   seguía pareciendo vacía porque el dropzone era el elemento dominante.
-2. En `/run`, "Límite de entradas = 70" era ambiguo: podía interpretarse como
+   seguia pareciendo vacia porque el dropzone era el elemento dominante.
+2. En `/run`, "Limite de entradas = 70" era ambiguo: podia interpretarse como
    70 entradas nuevas o como hasta la entrada 70 del dataset.
-3. En los logs de ejecución, no era fácil identificar visualmente qué árbitro estaba
+3. En los logs de ejecucion, no era facil identificar visualmente que arbitro estaba
    hablando o fallando.
-4. El preflight de proveedores necesitaba instrucciones más accionables y no asumir
+4. El preflight de proveedores necesitaba instrucciones mas accionables y no asumir
    que `gcloud` estaba instalado.
 
 **Cambios aplicados:**
@@ -2013,12 +2013,12 @@ interfaz alineada con lo que el backend realmente hace.
     columna y pulsar **Guardar** para que ese archivo sea el usado por el run.
 
 - `/run`:
-  - El campo **Límite de entradas** ahora explica que es un límite total desde el
+  - El campo **Limite de entradas** ahora explica que es un limite total desde el
     inicio del dataset, no una cantidad adicional.
-  - Con checkpoint, la UI calcula una aproximación de entradas nuevas a procesar.
-    Ejemplo: checkpoint con 50 entradas + límite 70 ⇒ ~20 nuevas.
-  - Los logs detectan menciones a `arb1`, `arb2`, etc. y pintan la línea con el
-    color correspondiente al árbitro en la pestaña `Arbitros`.
+  - Con checkpoint, la UI calcula una aproximacion de entradas nuevas a procesar.
+    Ejemplo: checkpoint con 50 entradas + limite 70 => ~20 nuevas.
+  - Los logs detectan menciones a `arb1`, `arb2`, etc. y pintan la linea con el
+    color correspondiente al arbitro en la pestana `Arbitros`.
 
 - `scripts/provider_preflight.py`:
   - Detecta si `gcloud` existe en `PATH`.
@@ -2027,7 +2027,7 @@ interfaz alineada con lo que el backend realmente hace.
   - Para Gemini/Claude/OpenAI, indica WebApp, CLI `--set-provider-key` o `secrets.env`.
   - Para Ollama/OpenAI-compatible, valida `base_url`.
 
-- Configuración:
+- Configuracion:
   - `scripts/arbiters_config.json` queda con `safety.free_only_mode=false` para
     permitir pruebas con Vertex/Claude.
   - La lista `allowed_provider_types` conserva `gemini`, `vertex_gemini`,
@@ -2037,17 +2037,17 @@ interfaz alineada con lo que el backend realmente hace.
 
 El backend manda. La UI no debe inventar estado de procesamiento: muestra el dataset
 guardado, consulta checkpoints, dispara APIs y presenta mensajes del preflight. La
-semántica de `--limit` vive en el pipeline: es total desde el inicio del dataset.
+semantica de `--limit` vive en el pipeline: es total desde el inicio del dataset.
 
-**Verificación realizada:**
+**Verificacion realizada:**
 
 - Render de Flask para `/processing` contiene `ds-ready-card` y `renderDatasetReady`.
 - Render de Flask para `/run` contiene `updateLimitExplanation`, `detectArbiterInLog`
   y estilos `log-arbiter-line`.
-- `python -m py_compile` sobre módulos tocados durante el preflight.
+- `python -m py_compile` sobre modulos tocados durante el preflight.
 - `/api/run/start` devuelve `400` con instrucciones accionables cuando faltan ADC
   de Vertex, antes de arrancar el subproceso.
-# 2026-06-15 — Centralizacion de secretos en `secrets/`
+# 2026-06-15 - Centralizacion de secretos en `secrets/`
 
 **Objetivo:** evitar que credenciales reales queden sueltas en la raiz del proyecto.
 
@@ -2065,98 +2065,98 @@ semántica de `--limit` vive en el pipeline: es total desde el inicio del datase
 
 ---
 
-### 2026-06-16 — Rediseño de árbitros: 3 árbitros, modelos diversos, system prompts con lente profesional
+### 2026-06-16 - Rediseno de arbitros: 3 arbitros, modelos diversos, system prompts con lente profesional
 
-**Objetivo:** mejorar la calidad metodológica del etiquetado antes de correr el pipeline
-completo sobre el dataset. Se detectaron tres debilidades en la configuración anterior.
+**Objetivo:** mejorar la calidad metodologica del etiquetado antes de correr el pipeline
+completo sobre el dataset. Se detectaron tres debilidades en la configuracion anterior.
 
 **Problemas identificados:**
 
 1. **System prompts demasiado cortos:** los prompts anteriores eran etiquetas de rol
-   más dos restricciones (~15 tokens). Las personas no añadían valor real porque no
-   describían cómo aplicar el lente profesional a la tarea.
+   mas dos restricciones (~15 tokens). Las personas no anadian valor real porque no
+   describian como aplicar el lente profesional a la tarea.
 
-2. **Cuatro árbitros generan empates 2-2:** con número par de árbitros el consenso
-   por mayoría simple puede quedar indeciso. Tres árbitros garantizan siempre una
-   mayoría.
+2. **Cuatro arbitros generan empates 2-2:** con numero par de arbitros el consenso
+   por mayoria simple puede quedar indeciso. Tres arbitros garantizan siempre una
+   mayoria.
 
-3. **arb1 y arb3 compartían el mismo modelo (gemini-2.5-pro):** con temperatura 0.1
-   los dos árbitros son cuasi-deterministas para el mismo input. Sus respuestas estarían
+3. **arb1 y arb3 compartian el mismo modelo (gemini-2.5-pro):** con temperatura 0.1
+   los dos arbitros son cuasi-deterministas para el mismo input. Sus respuestas estarian
    correlacionadas por los pesos del modelo, no por genuino desacuerdo de criterio. Eso
-   infla el Fleiss Kappa artificialmente — problema metodológico para el paper.
+   infla el Fleiss Kappa artificialmente - problema metodologico para el paper.
 
 **Cambios realizados en `scripts/arbiters_config.json`:**
 
 - **Eliminado arb2** (Carlos Doce, Especialista Ciberseguridad, gemini-2.5-flash):
-  era el árbitro de menor capacidad y su modelo flash sería más útil como diferenciador
-  en arb3 que como árbitro independiente con arb4 ya cubriendo la perspectiva de menor
+  era el arbitro de menor capacidad y su modelo flash seria mas util como diferenciador
+  en arb3 que como arbitro independiente con arb4 ya cubriendo la perspectiva de menor
   costo.
 
 - **arb4 subido de `claude-haiku-4-5-20251001` a `claude-sonnet-4-6`:** Haiku es el
-  modelo más ligero de Claude, inadecuado para detección matizada de principios de
-  persuasión. Sonnet ofrece razonamiento sustancialmente mejor para esta tarea.
+  modelo mas ligero de Claude, inadecuado para deteccion matizada de principios de
+  persuasion. Sonnet ofrece razonamiento sustancialmente mejor para esta tarea.
 
 - **arb3 cambiado de gemini-2.5-pro a gemini-2.5-flash:** para garantizar que los tres
-  árbitros usen modelos genuinamente distintos. Flash tiene escala y comportamiento
+  arbitros usen modelos genuinamente distintos. Flash tiene escala y comportamiento
   diferente a Pro; el desacuerdo entre ellos refleja diferencia real de criterio.
 
-- **System prompts reescritos para los 3 árbitros:** cada uno ahora describe su rol
-  profesional, cómo ese rol se aplica a la detección de cada uno de los 5 principios,
-  y refuerza el criterio de "solo lo explícito" en lenguaje propio de esa profesión.
-  Extensión: ~80-100 palabras por árbitro vs ~15 anteriores.
+- **System prompts reescritos para los 3 arbitros:** cada uno ahora describe su rol
+  profesional, como ese rol se aplica a la deteccion de cada uno de los 5 principios,
+  y refuerza el criterio de "solo lo explicito" en lenguaje propio de esa profesion.
+  Extension: ~80-100 palabras por arbitro vs ~15 anteriores.
 
-**Configuración final de árbitros:**
+**Configuracion final de arbitros:**
 
 | ID | Persona | Modelo | Proveedor |
 |---|---|---|---|
-| arb1 | Viviana Inés Fuentes (Psicóloga Clínica) | gemini-2.5-pro | vertex_gemini |
+| arb1 | Viviana Ines Fuentes (Psicologa Clinica) | gemini-2.5-pro | vertex_gemini |
 | arb3 | Rodrigo Santana (Investigador Forense) | gemini-2.5-flash | vertex_gemini |
-| arb4 | Claudio Codencio (Psicólogo Forense) | claude-sonnet-4-6 | anthropic |
+| arb4 | Claudio Codencio (Psicologo Forense) | claude-sonnet-4-6 | anthropic |
 
 **Archivo de resultados anteriores:**
 
-Los checkpoints, outputs y logs de la configuración de 4 árbitros fueron movidos a
+Los checkpoints, outputs y logs de la configuracion de 4 arbitros fueron movidos a
 `archive/4arb_v1/` para preservarlos. Las carpetas `checkpoints/`, `output/` y `logs/`
-quedaron limpias para la nueva corrida. Se agregó `archive/` a `.gitignore`.
+quedaron limpias para la nueva corrida. Se agrego `archive/` a `.gitignore`.
 
-**Pendiente estratégico documentado:**
+**Pendiente estrategico documentado:**
 
-Incorporar un cuarto árbitro de familia completamente distinta (GPT-4o, Llama 3 u otro)
-para máxima diversidad de arquitectura. Al hacerlo, revisar el sistema de consenso:
-con 4 árbitros hay riesgo de empate 2-2 y se necesitaría mayoría ponderada o un quinto
-árbitro desempatador. Por ahora se mantienen 3.
+Incorporar un cuarto arbitro de familia completamente distinta (GPT-4o, Llama 3 u otro)
+para maxima diversidad de arquitectura. Al hacerlo, revisar el sistema de consenso:
+con 4 arbitros hay riesgo de empate 2-2 y se necesitaria mayoria ponderada o un quinto
+arbitro desempatador. Por ahora se mantienen 3.
 
-**Verificación:**
-- `python -c "import json; json.load(open('scripts/arbiters_config.json'))"` — JSON válido.
-- Árbitros activos confirmados: `['arb1', 'arb3', 'arb4']`.
+**Verificacion:**
+- `python -c "import json; json.load(open('scripts/arbiters_config.json'))"` - JSON valido.
+- Arbitros activos confirmados: `['arb1', 'arb3', 'arb4']`.
 
 ---
 
-### 2026-06-19 — Diseño de soporte nativo para modelos locales GGUF (llama-cpp-python)
+### 2026-06-19 - Diseno de soporte nativo para modelos locales GGUF (llama-cpp-python)
 
-**Autor/agente:** Claude Sonnet 4.6 (sesión de diseño — SIN implementación aún).
+**Autor/agente:** Claude Sonnet 4.6 (sesion de diseno - SIN implementacion aun).
 
-**Objetivo:** permitir que cualquier árbitro use un modelo GGUF local sin depender de
+**Objetivo:** permitir que cualquier arbitro use un modelo GGUF local sin depender de
 servidores externos (Ollama, LM Studio, llama.cpp server, etc.). El usuario solo
 apunta a un archivo `.gguf` y el backend lo carga directamente en el mismo proceso Python.
 
-**Contexto / motivación:**
+**Contexto / motivacion:**
 
-Los árbitros actuales usan APIs de nube (Gemini Vertex, Anthropic, OpenAI). Para
-maximizar la independencia de modelos y reducir costes en producción, se quiere añadir
-árbitros locales basados en modelos cuantizados (.gguf). Se descartaron los servidores
+Los arbitros actuales usan APIs de nube (Gemini Vertex, Anthropic, OpenAI). Para
+maximizar la independencia de modelos y reducir costes en produccion, se quiere anadir
+arbitros locales basados en modelos cuantizados (.gguf). Se descartaron los servidores
 externos (Ollama, LM Studio, llama.cpp server) porque agregan complejidad de
-configuración y dependencias fuera del proyecto, especialmente cuando otros usuarios
+configuracion y dependencias fuera del proyecto, especialmente cuando otros usuarios
 del equipo repliquen el entorno.
 
-**Decisiones de diseño tomadas:**
+**Decisiones de diseno tomadas:**
 
 1. **Nuevo provider `llama_cpp`** en `label_persuasion.py`.
-   - Usa la librería `llama-cpp-python` directamente en proceso.
+   - Usa la libreria `llama-cpp-python` directamente en proceso.
    - `llama-cpp-python` se importa como dependencia **opcional**: solo se carga si
-     existe al menos un árbitro con `type: llama_cpp`. Así no rompe entornos que no
+     existe al menos un arbitro con `type: llama_cpp`. Asi no rompe entornos que no
      usan modelos locales.
-   - Se añade a `requirements.txt` y `environment.yml` para que se instale al crear
+   - Se anade a `requirements.txt` y `environment.yml` para que se instale al crear
      el entorno desde cero.
 
 2. **GPU auto-detectada, transparente al usuario.**
@@ -2164,32 +2164,32 @@ del equipo repliquen el entorno.
      GPU (`llama_cpp.llama_supports_gpu_offload()`).
    - Si hay GPU: `n_gpu_layers = -1` (todas las capas en GPU).
    - Si no hay GPU: `n_gpu_layers = 0` (CPU only).
-   - El usuario no configura este parámetro; el backend lo resuelve solo.
-   - `n_ctx` (ventana de contexto) tiene default 4096, configurable por árbitro.
+   - El usuario no configura este parametro; el backend lo resuelve solo.
+   - `n_ctx` (ventana de contexto) tiene default 4096, configurable por arbitro.
 
 3. **Cache de modelo cargado en memoria** (`_LLAMA_MODEL_CACHE` dict global).
    - Cargar un GGUF tarda entre 5 y 30 segundos. Se carga una vez y se reutiliza.
    - La clave del cache es `(model_path, n_ctx)`.
    - En el contexto de CLI (proceso independiente): el cache vive mientras el proceso
-     corre — comportamiento correcto.
+     corre - comportamiento correcto.
    - En el contexto de webapp (subproceso): cada run carga el modelo una sola vez al
-     inicio. Aceptable porque la carga es pequeña comparada con la duración del run.
+     inicio. Aceptable porque la carga es pequena comparada con la duracion del run.
 
 4. **Tab "Ollama (local)" reemplazado por "Local (GGUF)"** en `arbiters.html`.
-   - Ollama desaparece del frontend (queda disponible vía `openai_compat` para quien
+   - Ollama desaparece del frontend (queda disponible via `openai_compat` para quien
      lo necesite, pero sin tab propio).
    - El nuevo tab muestra los modelos GGUF del directorio de cache como una grilla.
-   - No tiene sección de API key ni rate limits (modelos locales no tienen límites).
-   - Tiene un botón "Descargar modelos" que abre el flujo de descarga asistida.
+   - No tiene seccion de API key ni rate limits (modelos locales no tienen limites).
+   - Tiene un boton "Descargar modelos" que abre el flujo de descarga asistida.
    - El "modelo seleccionado" es el nombre del archivo `.gguf`.
 
 5. **Cache de modelos en `BASE_DIR/models/`** (dentro del proyecto, no en `~/.cache`).
-   - Portable y visible: el usuario sabe exactamente dónde están los archivos.
-   - Incluye `models/models.json` como índice con metadata (nombre, tamaño, repo HF, fecha).
-   - El directorio `models/` se añade a `.gitignore`.
+   - Portable y visible: el usuario sabe exactamente donde estan los archivos.
+   - Incluye `models/models.json` como indice con metadata (nombre, tamano, repo HF, fecha).
+   - El directorio `models/` se anade a `.gitignore`.
 
 6. **Inventario de hardware en arranque de la webapp.**
-   - Al levantar la webapp, si el directorio `models/` está vacío, se muestra un banner
+   - Al levantar la webapp, si el directorio `models/` esta vacio, se muestra un banner
      no intrusivo: "No tienes modelos locales. [Configurar]".
    - El flujo de setup detecta: RAM total, GPU y VRAM disponible, CPU cores.
    - Con ese inventario, el backend sugiere modelos que caben en el hardware del usuario
@@ -2197,19 +2197,19 @@ del equipo repliquen el entorno.
    - La descarga usa `huggingface_hub` en background con progreso visible (SSE o polling).
    - Una vez descargados, los modelos aparecen en el grid del tab Local.
 
-**Tabla de criterios de recomendación de modelos:**
+**Tabla de criterios de recomendacion de modelos:**
 
 | RAM/VRAM disponible | Modelos recomendados |
 |---|---|
-| ≥ 8 GB GPU VRAM | Llama 3.2 8B Q5_K_M, Mistral 7B Q5_K_M |
-| 4–8 GB GPU VRAM | Llama 3.2 3B Q8_0, Phi-3 Mini Q8_0 |
-| < 4 GB GPU o solo CPU con ≥ 16 GB RAM | Llama 3.2 8B Q4_K_M |
-| Solo CPU con 8–16 GB RAM | Llama 3.2 3B Q4_K_M, Mistral 7B Q4_K_M |
+| >= 8 GB GPU VRAM | Llama 3.2 8B Q5_K_M, Mistral 7B Q5_K_M |
+| 4-8 GB GPU VRAM | Llama 3.2 3B Q8_0, Phi-3 Mini Q8_0 |
+| < 4 GB GPU o solo CPU con >= 16 GB RAM | Llama 3.2 8B Q4_K_M |
+| Solo CPU con 8-16 GB RAM | Llama 3.2 3B Q4_K_M, Mistral 7B Q4_K_M |
 | Solo CPU con < 8 GB RAM | Llama 3.2 1B Q8_0, Phi-3 Mini Q4_K_M |
 
 Fuente de descarga: Hugging Face (repos curados: bartowski, lmstudio-community).
 
-**Config JSON del árbitro con `llama_cpp`:**
+**Config JSON del arbitro con `llama_cpp`:**
 
 ```json
 {
@@ -2226,54 +2226,54 @@ Fuente de descarga: Hugging Face (repos curados: bartowski, lmstudio-community).
 ```
 
 `model` = nombre del archivo (para UI y logs). `model_path` = ruta relativa al GGUF.
-`n_ctx` = tamaño de contexto; la GPU offloading es automática y no se guarda en config.
+`n_ctx` = tamano de contexto; la GPU offloading es automatica y no se guarda en config.
 
 **Nuevas piezas a crear/modificar:**
 
-| Pieza | Tipo | Descripción |
+| Pieza | Tipo | Descripcion |
 |---|---|---|
-| `scripts/local_models.py` | Nuevo módulo | HW detection, recomendaciones, descarga vía huggingface_hub, índice de cache |
+| `scripts/local_models.py` | Nuevo modulo | HW detection, recomendaciones, descarga via huggingface_hub, indice de cache |
 | `scripts/label_persuasion.py` | Modificar | `_call_llama_cpp()`, `_LLAMA_MODEL_CACHE`, `_detect_gpu_layers()`, entrada en `PROVIDER_CALLERS` |
-| `scripts/provider_preflight.py` | Modificar | Preflight para `llama_cpp`: verificar que el archivo existe y `llama-cpp-python` está instalado |
-| `scripts/rate_limits.py` | Modificar | Retornar "sin límites" para `llama_cpp` |
+| `scripts/provider_preflight.py` | Modificar | Preflight para `llama_cpp`: verificar que el archivo existe y `llama-cpp-python` esta instalado |
+| `scripts/rate_limits.py` | Modificar | Retornar "sin limites" para `llama_cpp` |
 | `webapp/app.py` | Modificar | Nuevos endpoints: `/api/local/hardware`, `/api/local/recommended`, `/api/local/cached`, `/api/local/download` (SSE de progreso), `/api/models` ampliar para `llama_cpp` |
-| `webapp/templates/arbiters.html` | Modificar | Tab "Ollama" → "Local (GGUF)", nuevo panel de ruta de modelo, sin API key, sin rate limits, botón de descarga |
-| `webapp/templates/base.html` | Posible | Añadir enlace o ruta a setup local si aplica |
-| `requirements.txt` | Modificar | Añadir `llama-cpp-python`, `huggingface_hub`, `psutil` |
+| `webapp/templates/arbiters.html` | Modificar | Tab "Ollama" -> "Local (GGUF)", nuevo panel de ruta de modelo, sin API key, sin rate limits, boton de descarga |
+| `webapp/templates/base.html` | Posible | Anadir enlace o ruta a setup local si aplica |
+| `requirements.txt` | Modificar | Anadir `llama-cpp-python`, `huggingface_hub`, `psutil` |
 | `environment.yml` | Modificar | Mismo |
-| `.gitignore` | Modificar | Añadir `models/` |
+| `.gitignore` | Modificar | Anadir `models/` |
 
-**Pendiente (implementación):**
+**Pendiente (implementacion):**
 
-Todo lo anterior está decidido en diseño pero **no implementado**. La próxima sesión
+Todo lo anterior esta decidido en diseno pero **no implementado**. La proxima sesion
 debe comenzar por implementar en este orden:
-1. `scripts/local_models.py` (módulo base de detección y cache).
+1. `scripts/local_models.py` (modulo base de deteccion y cache).
 2. Backend `_call_llama_cpp()` + cache + `PROVIDER_CALLERS`.
 3. Preflight y rate limits para `llama_cpp`.
 4. Endpoints en `webapp/app.py`.
 5. Frontend: tab Local (GGUF) + flujo de descarga.
 
-**Criterios de calidad para la implementación:**
-- `llama-cpp-python` debe ser import opcional (try/except en el módulo).
-- El cache de modelo debe sobrevivir múltiples claims dentro del mismo run.
+**Criterios de calidad para la implementacion:**
+- `llama-cpp-python` debe ser import opcional (try/except en el modulo).
+- El cache de modelo debe sobrevivir multiples claims dentro del mismo run.
 - El flujo de descarga debe poder cancelarse sin dejar el archivo corrupto en cache.
-- El preflight debe dar un mensaje claro si el archivo `.gguf` no existe o está incompleto.
+- El preflight debe dar un mensaje claro si el archivo `.gguf` no existe o esta incompleto.
 
 ---
 
-### 2026-06-19 — Diseño de setup_env.py: instalación guiada por hardware con prioridad NPU → GPU → CPU
+### 2026-06-19 - Diseno de setup_env.py: instalacion guiada por hardware con prioridad NPU -> GPU -> CPU
 
-**Autor/agente:** Claude Sonnet 4.6 (sesión de diseño — SIN implementación aún).
+**Autor/agente:** Claude Sonnet 4.6 (sesion de diseno - SIN implementacion aun).
 
-**Objetivo:** crear un script de setup que se ejecuta UNA VEZ por máquina, antes de
+**Objetivo:** crear un script de setup que se ejecuta UNA VEZ por maquina, antes de
 arrancar cualquier entrypoint (`main_webapp.py` o `main_label.py`). El script detecta
-el hardware disponible, instala el backend de inferencia más eficiente para ese hardware
+el hardware disponible, instala el backend de inferencia mas eficiente para ese hardware
 y deja un perfil persistente en `models/hw_profile.json`. Los entrypoints leen ese
 perfil al arrancar; si no existe o tiene errores, abortan con un mensaje claro.
 
-**Contexto del parque de máquinas objetivo:**
+**Contexto del parque de maquinas objetivo:**
 
-| Máquina | OS | GPU/NPU | RAM/VRAM | Uso |
+| Maquina | OS | GPU/NPU | RAM/VRAM | Uso |
 |---|---|---|---|---|
 | iMac i9 | macOS | AMD Radeon (PCIe) | 8 GB RAM | webapp |
 | Servidor | Linux | NVIDIA A100 | 40 GB VRAM | CLI |
@@ -2281,25 +2281,25 @@ perfil al arrancar; si no existe o tiene errores, abortan con un mensaje claro.
 | PC desktop | Windows | Sin GPU dedicada | 24 GB RAM | webapp |
 | ASUS NUC 14 PRO | Windows | Intel Arc + Intel NPU | 24 GB compartida | webapp |
 
-**Prioridad de hardware decidida: NPU → GPU → CPU**
+**Prioridad de hardware decidida: NPU -> GPU -> CPU**
 
-El script intenta instalar soporte en ese orden. Si un nivel falla (error de instalación,
+El script intenta instalar soporte en ese orden. Si un nivel falla (error de instalacion,
 HW no detectado, driver ausente), baja al siguiente y lo registra en el log.
 
-**Decisión crítica: Camino B — dos rutas de inferencia**
+**Decision critica: Camino B - dos rutas de inferencia**
 
-- **Ruta NPU:** Intel AI Boost (NUC) → `openvino` + `optimum[openvino]`
+- **Ruta NPU:** Intel AI Boost (NUC) -> `openvino` + `optimum[openvino]`
   El NPU de Intel Core Ultra NO es soportado por `llama-cpp-python`. Requiere OpenVINO.
-  Se añade `_call_openvino()` en `label_persuasion.py` como ruta de inferencia alternativa.
-- **Ruta GPU/CPU:** todos los demás casos → `llama-cpp-python` compilado para el backend
-  correcto según el hardware detectado (CUDA / ROCm / Vulkan / Metal / CPU).
+  Se anade `_call_openvino()` en `label_persuasion.py` como ruta de inferencia alternativa.
+- **Ruta GPU/CPU:** todos los demas casos -> `llama-cpp-python` compilado para el backend
+  correcto segun el hardware detectado (CUDA / ROCm / Vulkan / Metal / CPU).
 
 El dispatch en `PROVIDER_CALLERS["llama_cpp"]` llama a `_call_local()`, que lee
-`hw_profile.json` y decide qué ruta usar.
+`hw_profile.json` y decide que ruta usar.
 
-**Mapa de hardware → backend de llama-cpp-python:**
+**Mapa de hardware -> backend de llama-cpp-python:**
 
-| Hardware | Backend | Comando de instalación |
+| Hardware | Backend | Comando de instalacion |
 |---|---|---|
 | NVIDIA GPU | CUDA | `pip install llama-cpp-python --extra-index-url .../whl/cu121` |
 | AMD GPU + Linux | ROCm | `CMAKE_ARGS="-DGGML_HIPBLAS=on" pip install llama-cpp-python` |
@@ -2308,32 +2308,32 @@ El dispatch en `PROVIDER_CALLERS["llama_cpp"]` llama a `_call_local()`, que lee
 | Apple Silicon | Metal | `CMAKE_ARGS="-DGGML_METAL=on" pip install llama-cpp-python` |
 | Sin GPU / fallback | CPU | `pip install llama-cpp-python` |
 
-**Convención de logging del setup — IDÉNTICA al pipeline existente:**
+**Convencion de logging del setup - IDENTICA al pipeline existente:**
 
 El sistema de logging del pipeline (`label_persuasion.py`) usa:
 - Formato: `%(asctime)s [%(levelname)s] %(message)s`
 - Timestamp con milisegundos: `2026-06-16 02:32:09,029 [INFO] mensaje`
-- Secciones delimitadas: `=== NOMBRE DE SECCIÓN ===`
+- Secciones delimitadas: `=== NOMBRE DE SECCION ===`
 - Dual output: `FileHandler` (archivo) + `StreamHandler` (consola)
 - Loggers ruidosos silenciados al nivel WARNING: `httpx`, `httpcore`, `pip`, `urllib3`
 - Directorio: `logs/` (ya gestionado por el pipeline)
-- Nombre del archivo: `setup_YYYYMMDD_HHMMSS.log` (análogo a `run_YYYYMMDD_HHMMSS.log`)
+- Nombre del archivo: `setup_YYYYMMDD_HHMMSS.log` (analogo a `run_YYYYMMDD_HHMMSS.log`)
 
-El setup sigue las mismas reglas. No hay un formato alternativo — todo al mismo `logs/`.
+El setup sigue las mismas reglas. No hay un formato alternativo - todo al mismo `logs/`.
 
 **Secciones del log de setup (con delimitadores `===`):**
 
 ```
 === LABELFORGE SETUP ===
-2026-06-19 10:00:00,000 [INFO] Python 3.12.4 — OK
+2026-06-19 10:00:00,000 [INFO] Python 3.12.4 - OK
 2026-06-19 10:00:00,010 [INFO] Entorno virtual activo: /path/to/.venv
 
 === DETECTANDO HARDWARE ===
 2026-06-19 10:00:00,020 [INFO] OS: Windows 11
-2026-06-19 10:00:00,030 [INFO] CPU: Intel Core Ultra i7-155H — 16 cores — AVX2: sí
+2026-06-19 10:00:00,030 [INFO] CPU: Intel Core Ultra i7-155H - 16 cores - AVX2: si
 2026-06-19 10:00:00,040 [INFO] RAM: 32.0 GB
 2026-06-19 10:00:00,050 [INFO] NPU detectado: Intel AI Boost (Neural Processing Unit)
-2026-06-19 10:00:00,060 [INFO] GPU detectada: Intel Arc Xe-LPG — VRAM compartida ~24 GB
+2026-06-19 10:00:00,060 [INFO] GPU detectada: Intel Arc Xe-LPG - VRAM compartida ~24 GB
 
 === INSTALANDO DEPENDENCIAS BASE ===
 2026-06-19 10:00:01,000 [INFO] pip install -r requirements.txt
@@ -2341,32 +2341,32 @@ El setup sigue las mismas reglas. No hay un formato alternativo — todo al mism
 
 === INSTALANDO BACKEND NPU (OpenVINO) ===
 2026-06-19 10:00:15,010 [INFO] Intentando instalar openvino + optimum[openvino]...
-2026-06-19 10:00:45,000 [INFO] OpenVINO 2024.5.0 instalado — OK
+2026-06-19 10:00:45,000 [INFO] OpenVINO 2024.5.0 instalado - OK
 
 === INSTALANDO BACKEND GPU (llama-cpp-python Vulkan) ===
 2026-06-19 10:00:45,010 [INFO] Intentando instalar llama-cpp-python con backend Vulkan...
-2026-06-19 10:01:00,000 [INFO] llama-cpp-python 0.3.x instalado — GPU offload: sí
+2026-06-19 10:01:00,000 [INFO] llama-cpp-python 0.3.x instalado - GPU offload: si
 
-=== VERIFICANDO INSTALACIÓN ===
-2026-06-19 10:01:00,010 [INFO] import llama_cpp — OK
-2026-06-19 10:01:00,020 [INFO] llama_cpp.llama_supports_gpu_offload() — True
-2026-06-19 10:01:00,030 [INFO] import openvino — OK
+=== VERIFICANDO INSTALACION ===
+2026-06-19 10:01:00,010 [INFO] import llama_cpp - OK
+2026-06-19 10:01:00,020 [INFO] llama_cpp.llama_supports_gpu_offload() - True
+2026-06-19 10:01:00,030 [INFO] import openvino - OK
 2026-06-19 10:01:00,040 [INFO] Perfil guardado en models/hw_profile.json
 
 === RESUMEN ===
-2026-06-19 10:01:00,050 [INFO] Backend NPU : OpenVINO 2024.5.0 — ACTIVO
-2026-06-19 10:01:00,060 [INFO] Backend GPU : llama-cpp-python Vulkan — ACTIVO
-2026-06-19 10:01:00,070 [INFO] Backend CPU : llama-cpp-python CPU — DISPONIBLE (fallback)
+2026-06-19 10:01:00,050 [INFO] Backend NPU : OpenVINO 2024.5.0 - ACTIVO
+2026-06-19 10:01:00,060 [INFO] Backend GPU : llama-cpp-python Vulkan - ACTIVO
+2026-06-19 10:01:00,070 [INFO] Backend CPU : llama-cpp-python CPU - DISPONIBLE (fallback)
 2026-06-19 10:01:00,080 [INFO] Setup completado sin errores. Puedes arrancar main_webapp.py o main_label.py
 ```
 
-Si una instalación falla:
+Si una instalacion falla:
 ```
 2026-06-19 10:00:50,000 [WARNING] OpenVINO no se pudo instalar: <traceback resumido>
-2026-06-19 10:00:50,010 [WARNING] Backend NPU desactivado — usando GPU como mejor opción disponible
+2026-06-19 10:00:50,010 [WARNING] Backend NPU desactivado - usando GPU como mejor opcion disponible
 ```
 
-**Salida del subprocess de pip:** capturada línea a línea y escrita como `[INFO]` al log.
+**Salida del subprocess de pip:** capturada linea a linea y escrita como `[INFO]` al log.
 Los errores de pip van como `[ERROR]` con el stderr completo.
 
 **Artefacto `models/hw_profile.json`:**
@@ -2396,126 +2396,126 @@ Los errores de pip van como `[ERROR]` con el stderr completo.
 }
 ```
 
-**Integración con los entrypoints:**
+**Integracion con los entrypoints:**
 
 `main_webapp.py` y `main_label.py` verifican al arrancar:
-1. `models/hw_profile.json` existe → si no: error + instrucción de ejecutar `setup_env.py`
-2. `setup_ok == true` → si no: error + referencia al log de setup
-3. Si OK → `local_models.py` carga los parámetros del perfil sin re-detectar nada
+1. `models/hw_profile.json` existe -> si no: error + instruccion de ejecutar `setup_env.py`
+2. `setup_ok == true` -> si no: error + referencia al log de setup
+3. Si OK -> `local_models.py` carga los parametros del perfil sin re-detectar nada
 
 **Nuevas piezas a crear/modificar (adicional a las ya listadas):**
 
-| Pieza | Tipo | Descripción |
+| Pieza | Tipo | Descripcion |
 |---|---|---|
-| `setup_env.py` | Nuevo — raíz | Script principal de setup; detecta HW, instala, verifica, escribe hw_profile.json |
-| `scripts/hw_detection.py` | Nuevo módulo | Detección de OS/CPU/RAM/GPU/NPU; usado por setup_env.py y local_models.py en runtime |
+| `setup_env.py` | Nuevo - raiz | Script principal de setup; detecta HW, instala, verifica, escribe hw_profile.json |
+| `scripts/hw_detection.py` | Nuevo modulo | Deteccion de OS/CPU/RAM/GPU/NPU; usado por setup_env.py y local_models.py en runtime |
 | `main_webapp.py` | Modificar | Verificar hw_profile.json al arrancar antes de importar la app Flask |
 | `main_label.py` | Modificar | Mismo chequeo |
-| `logs/setup_*.log` | Artefacto | Generado por setup_env.py con formato idéntico al de los run logs |
+| `logs/setup_*.log` | Artefacto | Generado por setup_env.py con formato identico al de los run logs |
 | `models/hw_profile.json` | Artefacto | Perfil persistente del HW + backends instalados |
-| `.gitignore` | Modificar | Añadir `models/hw_profile.json` (es local por máquina) |
+| `.gitignore` | Modificar | Anadir `models/hw_profile.json` (es local por maquina) |
 
-**Criterios de calidad para la implementación del setup:**
+**Criterios de calidad para la implementacion del setup:**
 - El script debe funcionar en los tres OS sin dependencias de shell externas (solo stdlib + lo que instala).
-- La captura de salida de pip debe ser línea a línea (no buffered) para que el log muestre progreso real.
-- Si el entorno virtual no está activo, abortar con error claro antes de instalar nada.
-- Un segundo `python setup_env.py` debe ser idempotente: detectar que el backend ya está instalado y verificarlo sin reinstalar (a menos que `--force` se pase).
+- La captura de salida de pip debe ser linea a linea (no buffered) para que el log muestre progreso real.
+- Si el entorno virtual no esta activo, abortar con error claro antes de instalar nada.
+- Un segundo `python setup_env.py` debe ser idempotente: detectar que el backend ya esta instalado y verificarlo sin reinstalar (a menos que `--force` se pase).
 - Todo error debe quedar en el log; la consola solo muestra resumen final (+ errores).
 
-**Pendiente (implementación):**
+**Pendiente (implementacion):**
 
-Completo en diseño. Implementar en el orden del todos.md actualizado.
+Completo en diseno. Implementar en el orden del todos.md actualizado.
 
 ---
 
-### 2026-06-19 — Implementación completa: soporte nativo GGUF, setup de hardware y catálogo dinámico
+### 2026-06-19 - Implementacion completa: soporte nativo GGUF, setup de hardware y catalogo dinamico
 
 **Autor/agente:** Claude Sonnet 4.6.
 
-**Objetivo:** implementar los 10 pasos del plan diseñado en las entradas anteriores de esta fecha, más las adiciones surgidas durante la sesión.
+**Objetivo:** implementar los 10 pasos del plan disenado en las entradas anteriores de esta fecha, mas las adiciones surgidas durante la sesion.
 
 **Pasos implementados:**
 
-1. **`scripts/hw_detection.py`** (nuevo): detección multiplataforma de OS/CPU/RAM/GPU/NPU.
-   - GPU: NVIDIA (`nvidia-smi`) → AMD Linux (`rocm-smi`) / Windows (WMI/registry) → Intel Arc (WMI/`lspci`) → Apple Silicon (`sysctl`) → ATI Radeon macOS (`system_profiler`).
+1. **`scripts/hw_detection.py`** (nuevo): deteccion multiplataforma de OS/CPU/RAM/GPU/NPU.
+   - GPU: NVIDIA (`nvidia-smi`) -> AMD Linux (`rocm-smi`) / Windows (WMI/registry) -> Intel Arc (WMI/`lspci`) -> Apple Silicon (`sysctl`) -> ATI Radeon macOS (`system_profiler`).
    - NPU: WMI query para "Neural"/"AI Boost" en Windows, `lspci` en Linux.
-   - Función `detect_all()` retorna dict completo compatible con `hw_profile.json`.
+   - Funcion `detect_all()` retorna dict completo compatible con `hw_profile.json`.
 
-2. **`setup_env.py`** (nuevo, raíz): script de setup único por máquina.
-   - Logging idéntico al pipeline: `%(asctime)s [%(levelname)s] %(message)s`, FileHandler + StreamHandler, `logs/setup_YYYYMMDD_HHMMSS.log`.
-   - Flujo: verificar Python ≥3.10 → verificar venv → detectar HW → instalar `requirements.txt` base → instalar backend NPU (OpenVINO, opcional) → instalar `llama-cpp-python` con el backend correcto → verificar imports → `ensure_project_dirs()` → escribir `models/hw_profile.json` → imprimir resumen.
-   - Flag `--force` para reinstalar aunque ya esté hecho.
-   - `_LLAMA_INSTALL_MAP`: dict `backend → (env_vars, pip_args)` para CUDA/ROCm/Metal/Vulkan/CPU.
+2. **`setup_env.py`** (nuevo, raiz): script de setup unico por maquina.
+   - Logging identico al pipeline: `%(asctime)s [%(levelname)s] %(message)s`, FileHandler + StreamHandler, `logs/setup_YYYYMMDD_HHMMSS.log`.
+   - Flujo: verificar Python >=3.10 -> verificar venv -> detectar HW -> instalar `requirements.txt` base -> instalar backend NPU (OpenVINO, opcional) -> instalar `llama-cpp-python` con el backend correcto -> verificar imports -> `ensure_project_dirs()` -> escribir `models/hw_profile.json` -> imprimir resumen.
+   - Flag `--force` para reinstalar aunque ya este hecho.
+   - `_LLAMA_INSTALL_MAP`: dict `backend -> (env_vars, pip_args)` para CUDA/ROCm/Metal/Vulkan/CPU.
 
-3. **`scripts/local_models.py`** (nuevo): módulo central de modelos locales.
-   - `_LLAMA_MODEL_CACHE: dict = {}` + `_cache_lock = threading.Lock()` — cache thread-safe de instancias Llama.
-   - `build_dynamic_catalog(hw_profile, force)`: consulta Gemini, Anthropic y OpenAI en paralelo (`ThreadPoolExecutor(max_workers=3)`), sintetiza por número de votos, cache 7 días en `models/catalog_cache.json`, fallback a `_FALLBACK_CATALOG` si ningún LLM disponible.
-   - `recommended_models(hw_profile, force_refresh)`: filtra por `effective_mem`, ordena por fits/votos/tamaño.
+3. **`scripts/local_models.py`** (nuevo): modulo central de modelos locales.
+   - `_LLAMA_MODEL_CACHE: dict = {}` + `_cache_lock = threading.Lock()` - cache thread-safe de instancias Llama.
+   - `build_dynamic_catalog(hw_profile, force)`: consulta Gemini, Anthropic y OpenAI en paralelo (`ThreadPoolExecutor(max_workers=3)`), sintetiza por numero de votos, cache 7 dias en `models/catalog_cache.json`, fallback a `_FALLBACK_CATALOG` si ningun LLM disponible.
+   - `recommended_models(hw_profile, force_refresh)`: filtra por `effective_mem`, ordena por fits/votos/tamano.
    - `get_or_load_llama(model_path, n_ctx)`: carga con `n_gpu_layers=-1` si hay soporte GPU, `n_gpu_layers=0` si no.
-   - `download_model(repo_id, filename, expected_sha256)`: `hf_hub_download()` + verificación SHA-256.
+   - `download_model(repo_id, filename, expected_sha256)`: `hf_hub_download()` + verificacion SHA-256.
    - Lectura de `n_layers` directamente del header binario GGUF (sin cargar el modelo completo).
 
 4. **`scripts/label_persuasion.py`** (modificado):
-   - `_call_llama_cpp(arbiter, prompt_user)`: import opcional con `try/except`, cache vía `get_or_load_llama()`, `create_chat_completion()` con `response_format={"type":"json_object"}`.
+   - `_call_llama_cpp(arbiter, prompt_user)`: import opcional con `try/except`, cache via `get_or_load_llama()`, `create_chat_completion()` con `response_format={"type":"json_object"}`.
    - `_call_openvino(arbiter, prompt_user)`: import opcional de `optimum.intel.OVModelForCausalLM`, ruta NPU.
    - `_call_local(arbiter, prompt_user)`: dispatcher que lee `hw_profile.json`; si `best_backend == "npu"` intenta OpenVINO primero, cae a `llama_cpp` si falla.
    - `PROVIDER_CALLERS["llama_cpp"] = _call_local`.
-   - En `call_arbiter()`: `if prov_type != "llama_cpp": rate_limiter.wait()` — no hay delay para modelos locales.
+   - En `call_arbiter()`: `if prov_type != "llama_cpp": rate_limiter.wait()` - no hay delay para modelos locales.
 
 5. **`scripts/provider_preflight.py`** (modificado):
    - `_check_llama_cpp(arb_id, provider)`: verifica que `hw_profile.json` exista y `setup_ok=true`, que `llama_cpp` sea importable, y que el `model_path` exista como archivo `.gguf`. Mensaje accionable si algo falta.
 
 6. **`scripts/rate_limits.py`** (modificado):
-   - `get_rate_limit_profile()`: early return para `llama_cpp` con `limit_kind="local"`, todos los límites `None`.
+   - `get_rate_limit_profile()`: early return para `llama_cpp` con `limit_kind="local"`, todos los limites `None`.
    - `compute_min_delay()`: early return para `limit_kind="local"` con `min_delay_s=0`, `safe_delay_s=0`.
 
 7. **`webapp/app.py`** (modificado):
-   - Carga `models/hw_profile.json` al arrancar (`_load_hw_profile()`); si falta, loguea warning y continúa (no aborta la webapp).
-   - `_list_local_gguf_models()`: lista archivos `.gguf` en `models/` con ruta y tamaño.
+   - Carga `models/hw_profile.json` al arrancar (`_load_hw_profile()`); si falta, loguea warning y continua (no aborta la webapp).
+   - `_list_local_gguf_models()`: lista archivos `.gguf` en `models/` con ruta y tamano.
    - Nuevas rutas: `GET /api/local/hardware`, `GET /api/local/recommended`, `GET /api/local/cached`, `POST /api/local/download`, `GET /api/local/download/<job_id>` (SSE), `DELETE /api/local/model/<filename>`.
    - `POST /api/models` ampliado: para `llama_cpp` retorna lista de GGUFs locales.
    - `_download_jobs: dict` + `_download_jobs_lock` para descargas en background.
 
 8. **`webapp/templates/arbiters.html`** (modificado):
-   - Tab `data-provider="ollama"` → `data-provider="llama_cpp"`, label "Local (GGUF)", ícono `bi-cpu`.
-   - `selectProvider("llama_cpp")`: oculta API key, oculta rate limits, muestra sección local-gguf con campo `n_ctx` y botón "Descargar modelos".
-   - `saveArbiter()` para `llama_cpp`: añade `model_path` (ruta relativa del GGUF) y `n_ctx`.
-   - Modal `downloadModal`: sección de inventario HW, lista de recomendados con badge de votos (★N), barra de progreso SSE, botón "Refrescar".
+   - Tab `data-provider="ollama"` -> `data-provider="llama_cpp"`, label "Local (GGUF)", icono `bi-cpu`.
+   - `selectProvider("llama_cpp")`: oculta API key, oculta rate limits, muestra seccion local-gguf con campo `n_ctx` y boton "Descargar modelos".
+   - `saveArbiter()` para `llama_cpp`: anade `model_path` (ruta relativa del GGUF) y `n_ctx`.
+   - Modal `downloadModal`: seccion de inventario HW, lista de recomendados con badge de votos (*N), barra de progreso SSE, boton "Refrescar".
    - Funciones JS: `openDownloadModal()`, `loadRecommended(forceRefresh)`, `startDownload(repoId, filename, btn)`.
 
 9. **`main_label.py`** y **`main_webapp.py`** (modificados):
    - `ensure_project_dirs(ROOT)` llamado al inicio.
-   - `_check_hw_profile_if_needed()` en `main_label.py`: solo verifica `hw_profile.json` si hay árbitros `llama_cpp` en el config actual; no fuerza setup si el usuario solo usa APIs cloud.
+   - `_check_hw_profile_if_needed()` en `main_label.py`: solo verifica `hw_profile.json` si hay arbitros `llama_cpp` en el config actual; no fuerza setup si el usuario solo usa APIs cloud.
 
-10. **`.gitignore`** (modificado): añadidos `models/*.gguf`, `models/hw_profile.json`, `models/models.json`.
+10. **`.gitignore`** (modificado): anadidos `models/*.gguf`, `models/hw_profile.json`, `models/models.json`.
 
-**Adiciones mid-sesión:**
+**Adiciones mid-sesion:**
 
-**ensure_project_dirs():** el usuario pidió que los entrypoints verifiquen y creen todos los directorios necesarios. Se añadió a `scripts/utils.py`:
+**ensure_project_dirs():** el usuario pidio que los entrypoints verifiquen y creen todos los directorios necesarios. Se anadio a `scripts/utils.py`:
 ```python
 REQUIRED_DIRS = [root/"logs", root/"output", root/"checkpoints", root/"models",
                  root/"secrets", root/"scripts", root/"data", root/"archive"]
 ```
 Retorna lista de `Path` creados. Llamado por ambos entrypoints y por `setup_env.py`.
 
-**Catálogo dinámico (en lugar de lista estática):** el usuario rechazó la lista `RECOMMENDED_CATALOG` hardcodeada porque quedaría obsoleta. Se implementó `build_dynamic_catalog()` que consulta en paralelo los LLMs ya configurados (Gemini, Anthropic, OpenAI), sintetiza respuestas por votos, mantiene cache de 7 días en `models/catalog_cache.json`, y cae a `_FALLBACK_CATALOG` de 6 modelos si ningún LLM está disponible.
+**Catalogo dinamico (en lugar de lista estatica):** el usuario rechazo la lista `RECOMMENDED_CATALOG` hardcodeada porque quedaria obsoleta. Se implemento `build_dynamic_catalog()` que consulta en paralelo los LLMs ya configurados (Gemini, Anthropic, OpenAI), sintetiza respuestas por votos, mantiene cache de 7 dias en `models/catalog_cache.json`, y cae a `_FALLBACK_CATALOG` de 6 modelos si ningun LLM esta disponible.
 
-**Prompts a archivo de configuración:** el usuario pidió que los prompts del catálogo no estuvieran hardcodeados en código. Se creó `scripts/local_models_config.json` con:
-- `catalog.cache_ttl_days`: TTL de la caché del catálogo.
-- `catalog.llm_models`: qué modelo usar de cada proveedor (ej. `"gemini": "gemini-2.5-flash"`).
+**Prompts a archivo de configuracion:** el usuario pidio que los prompts del catalogo no estuvieran hardcodeados en codigo. Se creo `scripts/local_models_config.json` con:
+- `catalog.cache_ttl_days`: TTL de la cache del catalogo.
+- `catalog.llm_models`: que modelo usar de cada proveedor (ej. `"gemini": "gemini-2.5-flash"`).
 - `catalog.system_prompt`: prompt de sistema para la consulta.
 - `catalog.user_prompt_template`: template con `{hw_summary}` como placeholder.
 
 **Paquetes instalados en venv:** `requirements.txt` fue reescrito con todas las dependencias directas (incluyendo `llama-cpp-python`, `huggingface_hub`, `psutil`, `openpyxl`). `environment.yml` actualizado con las mismas adiciones. Paquetes verificados en el venv del iMac:
-- `psutil 7.2.2` ✅
-- `huggingface_hub 1.20.1` ✅
-- `llama_cpp 0.3.30` ✅ — GPU offload: True (AMD Radeon Pro 580X detectada via Metal)
+- `psutil 7.2.2` OK
+- `huggingface_hub 1.20.1` OK
+- `llama_cpp 0.3.30` OK - GPU offload: True (AMD Radeon Pro 580X detectada via Metal)
 
-**Verificación realizada:**
+**Verificacion realizada:**
 
 - `py_compile` sobre todos los archivos nuevos y modificados: sin errores de sintaxis.
 - Import verificado: `psutil`, `huggingface_hub`, `llama_cpp` importan correctamente en el venv.
-- `llama_cpp.llama_supports_gpu_offload()` → `True` en iMac i9 con AMD Radeon Pro 580X.
+- `llama_cpp.llama_supports_gpu_offload()` -> `True` en iMac i9 con AMD Radeon Pro 580X.
 - Metal backend activo: `ggml_metal_device_init: GPU name: MTL0 (AMD Radeon Pro 580X)`.
 
 **Archivos tocados:**
@@ -2542,7 +2542,7 @@ Retorna lista de `Path` creados. Llamado por ambos entrypoints y por `setup_env.
 
 ---
 
-### 2026-06-19 — Correcciones: setup_env.py, logging Flask, modal GGUF y auto-ID de árbitros
+### 2026-06-19 - Correcciones: setup_env.py, logging Flask, modal GGUF y auto-ID de arbitros
 
 **Autor/agente:** Claude Sonnet 4.6.
 
@@ -2550,21 +2550,21 @@ Retorna lista de `Path` creados. Llamado por ambos entrypoints y por `setup_env.
 
 ---
 
-#### 1. Bug crítico: `setup_env.py` nunca escribía `hw_profile.json`
+#### 1. Bug critico: `setup_env.py` nunca escribia `hw_profile.json`
 
-**Causa raíz:** `requirements.txt` incluía `llama-cpp-python>=0.3.0`. Al ejecutar `pip install -r requirements.txt`, pip intentaba compilar `llama-cpp-python` desde fuente pero Windows no tiene MSVC/CMake. Pip retornaba código 1 → `_abort()` ejecutaba `sys.exit(1)` → el setup terminaba antes de detectar hardware o escribir `hw_profile.json`.
+**Causa raiz:** `requirements.txt` incluia `llama-cpp-python>=0.3.0`. Al ejecutar `pip install -r requirements.txt`, pip intentaba compilar `llama-cpp-python` desde fuente pero Windows no tiene MSVC/CMake. Pip retornaba codigo 1 -> `_abort()` ejecutaba `sys.exit(1)` -> el setup terminaba antes de detectar hardware o escribir `hw_profile.json`.
 
 **Fixes aplicados:**
 
-- `requirements.txt`: eliminada la línea `llama-cpp-python>=0.3.0` (comentada con instrucciones). `llama-cpp-python` **nunca debe estar en `requirements.txt`**; requiere compilación con flags de GPU o wheel precompilada específica al hardware.
+- `requirements.txt`: eliminada la linea `llama-cpp-python>=0.3.0` (comentada con instrucciones). `llama-cpp-python` **nunca debe estar en `requirements.txt`**; requiere compilacion con flags de GPU o wheel precompilada especifica al hardware.
 
-- `environment.yml`: actualizado el comentario del bloque llama-cpp-python para explicar por qué está comentado.
+- `environment.yml`: actualizado el comentario del bloque llama-cpp-python para explicar por que esta comentado.
 
-- `setup_env.py — install_base_requirements()`: ahora filtra las líneas de `llama-cpp-python` del `requirements.txt` usando un archivo temporal antes de pasarlo a pip. Retorna `bool` en lugar de llamar `_abort()`. El flujo principal loguea el error pero **continúa**.
+- `setup_env.py - install_base_requirements()`: ahora filtra las lineas de `llama-cpp-python` del `requirements.txt` usando un archivo temporal antes de pasarlo a pip. Retorna `bool` en lugar de llamar `_abort()`. El flujo principal loguea el error pero **continua**.
 
-- `setup_env.py` — flujo principal: el `hw_profile.json` **siempre se escribe** independientemente de si los requirements o `llama-cpp-python` fallaron. Antes, cualquier fallo de pip abortaba antes de llegar a `write_hw_profile()`.
+- `setup_env.py` - flujo principal: el `hw_profile.json` **siempre se escribe** independientemente de si los requirements o `llama-cpp-python` fallaron. Antes, cualquier fallo de pip abortaba antes de llegar a `write_hw_profile()`.
 
-#### 2. Bug: instalación de `llama-cpp-python` en Windows CUDA fallaba
+#### 2. Bug: instalacion de `llama-cpp-python` en Windows CUDA fallaba
 
 **Causa:** `_LLAMA_INSTALL_MAP["cuda"]` usaba `CMAKE_ARGS="-DGGML_CUDA=on"` que compila desde fuente. Sin MSVC instalado en Windows, falla con "no such file or directory: nmake".
 
@@ -2575,13 +2575,13 @@ Retorna lista de `Path` creados. Llamado por ambos entrypoints y por `setup_env.
     ({}, ["--prefer-binary", "--extra-index-url", ".../cu126"]),  # wheel CUDA 12.6
     ({}, ["--prefer-binary", "--extra-index-url", ".../cu124"]),  # wheel CUDA 12.4
     ({}, ["--prefer-binary", "--extra-index-url", ".../cu121"]),  # wheel CUDA 12.1
-    ({"CMAKE_ARGS": "-DGGML_CUDA=on"}, ["--force-reinstall"]),   # último recurso: fuente
+    ({"CMAKE_ARGS": "-DGGML_CUDA=on"}, ["--force-reinstall"]),   # ultimo recurso: fuente
 ]
 ```
 
-`--prefer-binary` dice a pip que prefiera un `.whl` precompilado sobre compilar `sdist`. Las wheels provienen del índice de abetlen en GitHub (`https://abetlen.github.io/llama-cpp-python/whl/cuXXX`). No requieren MSVC.
+`--prefer-binary` dice a pip que prefiera un `.whl` precompilado sobre compilar `sdist`. Las wheels provienen del indice de abetlen en GitHub (`https://abetlen.github.io/llama-cpp-python/whl/cuXXX`). No requieren MSVC.
 
-Añadida detección de versión CUDA vía `nvidia-smi` para elegir el índice correcto primero:
+Anadida deteccion de version CUDA via `nvidia-smi` para elegir el indice correcto primero:
 ```python
 def _detect_cuda_version() -> str:
     out = subprocess.check_output(["nvidia-smi"], ...)
@@ -2589,20 +2589,20 @@ def _detect_cuda_version() -> str:
     ...
 ```
 
-Añadido `import re` que faltaba en `setup_env.py`.
+Anadido `import re` que faltaba en `setup_env.py`.
 
-**Hardware del equipo donde se descubrió:** NVIDIA GeForce RTX 5050 Laptop GPU (8 GB VRAM), 23.2 GB RAM, Windows 11, AMD Ryzen 12 núcleos. Backend óptimo: `cuda`.
+**Hardware del equipo donde se descubrio:** NVIDIA GeForce RTX 5050 Laptop GPU (8 GB VRAM), 23.2 GB RAM, Windows 11, AMD Ryzen 12 nucleos. Backend optimo: `cuda`.
 
-#### 3. Bug: logging de acceso de Flask/Werkzeug era inútil
+#### 3. Bug: logging de acceso de Flask/Werkzeug era inutil
 
-**Síntoma:** el servidor imprimía `127.0.0.1 - - [19/Jun/2026 20:24:03] "GET / HTTP/1.1" 200 -` para cada request — sin método útil, sin timing, sin contexto.
+**Sintoma:** el servidor imprimia `127.0.0.1 - - [19/Jun/2026 20:24:03] "GET / HTTP/1.1" 200 -` para cada request - sin metodo util, sin timing, sin contexto.
 
 **Fix en `webapp/app.py`:**
 - Importado `g` de Flask.
-- `logging.getLogger("werkzeug").setLevel(logging.ERROR)` — silencia el access log de Werkzeug.
+- `logging.getLogger("werkzeug").setLevel(logging.ERROR)` - silencia el access log de Werkzeug.
 - Logger dedicado `labelforge.http` con `StreamHandler` y formato del proyecto.
 - `@app.before_request`: guarda `g._t0 = time.perf_counter()`.
-- `@app.after_request`: loguea `METHOD /path → STATUS (Xms)`. Level INFO para 2xx, WARNING para 4xx, ERROR para 5xx. Silencia `/static/`, `/favicon.ico` y 304.
+- `@app.after_request`: loguea `METHOD /path -> STATUS (Xms)`. Level INFO para 2xx, WARNING para 4xx, ERROR para 5xx. Silencia `/static/`, `/favicon.ico` y 304.
 
 Resultado:
 ```
@@ -2612,50 +2612,50 @@ Resultado:
 
 #### 4. Bug: modal de modelos GGUF mostraba "No cabe" para todos los modelos
 
-**Causa:** cuando `hw_profile.json` no existe, `_HW_PROFILE = {}` → `ram_gb = 0`, `vram_gb = 0` → `effective_mem = 0 * 0.6 = 0` → `model["size_gb"] > 0` → `fits_in_memory = False` para todos.
+**Causa:** cuando `hw_profile.json` no existe, `_HW_PROFILE = {}` -> `ram_gb = 0`, `vram_gb = 0` -> `effective_mem = 0 * 0.6 = 0` -> `model["size_gb"] > 0` -> `fits_in_memory = False` para todos.
 
 **Fix en `scripts/local_models.py`:**
-- `hw_known = bool(ram_gb or vram_gb)` — detecta si hay datos reales de HW.
-- Cuando no hay datos en hw_profile, intenta obtener RAM vía `psutil.virtual_memory()` como fallback en vivo.
+- `hw_known = bool(ram_gb or vram_gb)` - detecta si hay datos reales de HW.
+- Cuando no hay datos en hw_profile, intenta obtener RAM via `psutil.virtual_memory()` como fallback en vivo.
 - `fits_in_memory = (size_gb <= effective_mem) if hw_known else None`.
 - Sort actualizado: `m["fits_in_memory"] is False` (antes `not m["fits_in_memory"]` que trata `None` como falsy).
 
 **Fix en `webapp/templates/arbiters.html`:**
-- `fits_in_memory === false` (estricto) → "No cabe" en rojo con tooltip.
-- `fits_in_memory !== false` (incluye `null`) → botón Descargar.
+- `fits_in_memory === false` (estricto) -> "No cabe" en rojo con tooltip.
+- `fits_in_memory !== false` (incluye `null`) -> boton Descargar.
 - Borde e intensidad de texto del item ahora usan `=== false` en lugar de truthy/falsy.
 
-#### 5. Mejoras al modal de gestión de modelos GGUF
+#### 5. Mejoras al modal de gestion de modelos GGUF
 
-**Problema:** el modal no tenía scrollbar, no listaba los modelos ya descargados, y no permitía descargar por nombre.
+**Problema:** el modal no tenia scrollbar, no listaba los modelos ya descargados, y no permitia descargar por nombre.
 
 **Fixes en `webapp/templates/arbiters.html`:**
-- `modal-dialog-scrollable` añadido al `downloadModal`.
-- Nueva sección "Modelos descargados": lista todos los `.gguf` en `models/` con tamaño, capas (si legible del header GGUF) y botones **Eliminar** y **Re-descargar**.
-- Nueva sección "Descargar por nombre": campos `repo_id` (ej: `bartowski/Llama-3.2-3B-Instruct-GGUF`) + `filename` (ej: `Llama-3.2-3B-Instruct-Q4_K_M.gguf`). Permite descargar cualquier GGUF de HuggingFace directamente.
+- `modal-dialog-scrollable` anadido al `downloadModal`.
+- Nueva seccion "Modelos descargados": lista todos los `.gguf` en `models/` con tamano, capas (si legible del header GGUF) y botones **Eliminar** y **Re-descargar**.
+- Nueva seccion "Descargar por nombre": campos `repo_id` (ej: `bartowski/Llama-3.2-3B-Instruct-GGUF`) + `filename` (ej: `Llama-3.2-3B-Instruct-Q4_K_M.gguf`). Permite descargar cualquier GGUF de HuggingFace directamente.
 - `openDownloadModal()`: ahora carga modelos descargados Y recomendados en paralelo (`Promise.all`).
-- `startDownload()` exitoso: refresca también la lista de modelos descargados.
+- `startDownload()` exitoso: refresca tambien la lista de modelos descargados.
 
 **Fix en `scripts/local_models.py`:**
-- `list_cached_models()`: lee `models/models.json` (si existe) para añadir `repo_id` a cada modelo, necesario para el botón re-descargar.
+- `list_cached_models()`: lee `models/models.json` (si existe) para anadir `repo_id` a cada modelo, necesario para el boton re-descargar.
 - `_update_models_json()`: ahora persiste `repo_id` junto con `filename`, `path`, `size_gb`.
-- `download_model()`: eliminado parámetro deprecado `local_dir_use_symlinks=False` de `hf_hub_download`.
+- `download_model()`: eliminado parametro deprecado `local_dir_use_symlinks=False` de `hf_hub_download`.
 
-#### 6. Bug: catálogo dinámico tenía repos de HuggingFace inventados por los LLMs
+#### 6. Bug: catalogo dinamico tenia repos de HuggingFace inventados por los LLMs
 
-**Síntoma:** al descargar modelos, el error era `401 Client Error — Repository Not Found` porque el `repo_id` estaba mal (ej: `bartowski/Llama-3-8B-Instruct-GGUF` en lugar de `bartowski/Meta-Llama-3-8B-Instruct-GGUF`).
+**Sintoma:** al descargar modelos, el error era `401 Client Error - Repository Not Found` porque el `repo_id` estaba mal (ej: `bartowski/Llama-3-8B-Instruct-GGUF` en lugar de `bartowski/Meta-Llama-3-8B-Instruct-GGUF`).
 
-**Fix:** eliminado `models/catalog_cache.json`. Se regenerará en el próximo uso del modal, ya sea consultando los LLMs configurados o usando el catálogo estático `_FALLBACK_CATALOG` en `local_models.py` (cuyos repo IDs sí son correctos).
+**Fix:** eliminado `models/catalog_cache.json`. Se regenerara en el proximo uso del modal, ya sea consultando los LLMs configurados o usando el catalogo estatico `_FALLBACK_CATALOG` en `local_models.py` (cuyos repo IDs si son correctos).
 
-**Lección:** el catálogo dinámico generado por LLMs puede tener repo IDs incorrectos. En el futuro sería útil validar los repo IDs contra la API de HuggingFace antes de cachear.
+**Leccion:** el catalogo dinamico generado por LLMs puede tener repo IDs incorrectos. En el futuro seria util validar los repo IDs contra la API de HuggingFace antes de cachear.
 
-#### 7. Auto-ID de árbitros
+#### 7. Auto-ID de arbitros
 
-**Petición:** al abrir "Nuevo árbitro", el campo ID debería sugerirse automáticamente.
+**Peticion:** al abrir "Nuevo arbitro", el campo ID deberia sugerirse automaticamente.
 
 **Fix en `webapp/templates/arbiters.html`:**
-- Nueva función `nextArbId(arbiters)`: encuentra el número más alto en IDs con patrón `arb\d+` y retorna `arb{max+1}`.
-- `openModal(null)`: pre-rellena `#arb-id` con `nextArbId(arbiters)` en lugar de dejarlo vacío.
+- Nueva funcion `nextArbId(arbiters)`: encuentra el numero mas alto en IDs con patron `arb\d+` y retorna `arb{max+1}`.
+- `openModal(null)`: pre-rellena `#arb-id` con `nextArbId(arbiters)` en lugar de dejarlo vacio.
 
 #### Archivos tocados
 
@@ -2671,13 +2671,13 @@ Resultado:
 
 ---
 
-### 2026-06-19 — Auditoría de seguridad y corrección de vulnerabilidades (parte 1: código)
+### 2026-06-19 - Auditoria de seguridad y correccion de vulnerabilidades (parte 1: codigo)
 
 **Autor/agente:** Claude Sonnet 4.6.
 
-**Contexto que motivó la auditoría:**
+**Contexto que motivo la auditoria:**
 
-El usuario decidió que la webapp será expuesta en internet (no solo en localhost). Se realizó una auditoría de seguridad completa con un agente especializado, seguida de verificación de falsos positivos por agentes paralelos para cada hallazgo. El resultado fue 4 vulnerabilidades reales corregidas y 2 descartadas como falsos positivos.
+El usuario decidio que la webapp sera expuesta en internet (no solo en localhost). Se realizo una auditoria de seguridad completa con un agente especializado, seguida de verificacion de falsos positivos por agentes paralelos para cada hallazgo. El resultado fue 4 vulnerabilidades reales corregidas y 2 descartadas como falsos positivos.
 
 ---
 
@@ -2685,38 +2685,38 @@ El usuario decidió que la webapp será expuesta en internet (no solo en localho
 
 **1. Path traversal en descarga de modelos GGUF**
 
-- **Archivo:** `webapp/app.py` — `api_local_download()` (POST `/api/local/download`)
-- **Descripción:** El campo `filename` del body JSON se pasaba directamente a `download_model()` sin validación. `download_model()` construía `dest = MODELS_DIR / filename`. Con un filename como `../secrets/secrets.env`, Python construye la ruta `models/../secrets/secrets.env` que el SO resuelve a `secrets/secrets.env`, fuera del directorio `models/`. Un atacante podría sobrescribir `secrets/secrets.env` (u otros archivos del proyecto en el directorio padre) con contenido controlado descargado desde una URL remota.
-- **Por qué el DELETE no tenía este bug pero el POST sí:** `api_local_delete_model()` ya validaba `"/" in filename or "\\" in filename`, pero esa validación nunca se aplicó al endpoint de descarga cuando se creó.
-- **Fix aplicado:** Añadida la misma validación que ya tenía DELETE, extendida con `.gguf`:
+- **Archivo:** `webapp/app.py` - `api_local_download()` (POST `/api/local/download`)
+- **Descripcion:** El campo `filename` del body JSON se pasaba directamente a `download_model()` sin validacion. `download_model()` construia `dest = MODELS_DIR / filename`. Con un filename como `../secrets/secrets.env`, Python construye la ruta `models/../secrets/secrets.env` que el SO resuelve a `secrets/secrets.env`, fuera del directorio `models/`. Un atacante podria sobrescribir `secrets/secrets.env` (u otros archivos del proyecto en el directorio padre) con contenido controlado descargado desde una URL remota.
+- **Por que el DELETE no tenia este bug pero el POST si:** `api_local_delete_model()` ya validaba `"/" in filename or "\\" in filename`, pero esa validacion nunca se aplico al endpoint de descarga cuando se creo.
+- **Fix aplicado:** Anadida la misma validacion que ya tenia DELETE, extendida con `.gguf`:
   ```python
   if not filename.endswith(".gguf") or "/" in filename or "\\" in filename or ".." in filename:
-      return jsonify({"error": "Nombre de archivo inválido"}), 400
+      return jsonify({"error": "Nombre de archivo invalido"}), 400
   ```
 
-**2. Stored XSS en la tarjeta de árbitros**
+**2. Stored XSS en la tarjeta de arbitros**
 
-- **Archivo:** `webapp/templates/arbiters.html` — función `renderList()`
-- **Descripción:** Los campos `a.name`, `a.persona`, `a.system_prompt`, `a.id` y `p.model` se interpolaban directamente en el `innerHTML` del contenedor de tarjetas mediante template literals. Un árbitro con `name: "<img src=x onerror=alert(document.cookie)>"` se almacenaría en `arbiters_config.json` vía POST `/api/arbiters` y ejecutaría JavaScript en el navegador de cualquier usuario que cargara `/arbiters`.
-- **Agravante:** La función `escapeHtml()` ya existía en el mismo archivo (usada en otros contextos), lo que confirma que su ausencia aquí fue un olvido, no una decisión de diseño.
+- **Archivo:** `webapp/templates/arbiters.html` - funcion `renderList()`
+- **Descripcion:** Los campos `a.name`, `a.persona`, `a.system_prompt`, `a.id` y `p.model` se interpolaban directamente en el `innerHTML` del contenedor de tarjetas mediante template literals. Un arbitro con `name: "<img src=x onerror=alert(document.cookie)>"` se almacenaria en `arbiters_config.json` via POST `/api/arbiters` y ejecutaria JavaScript en el navegador de cualquier usuario que cargara `/arbiters`.
+- **Agravante:** La funcion `escapeHtml()` ya existia en el mismo archivo (usada en otros contextos), lo que confirma que su ausencia aqui fue un olvido, no una decision de diseno.
 - **Fix aplicado:** Todos los campos de datos de usuario en `renderList()` envueltos con `escapeHtml()`:
   - `a.name`, `a.persona`, `a.system_prompt`, `a.id`, `p.model`, `p.base_url`
-  - Los atributos `onclick="openModal('...')"` y `onclick="askDelete('...')"` también, ya que `escapeHtml()` escapa comillas simples a `&#039;`.
+  - Los atributos `onclick="openModal('...')"` y `onclick="askDelete('...')"` tambien, ya que `escapeHtml()` escapa comillas simples a `&#039;`.
 
 **3. Reflected XSS en el panel de hardware**
 
-- **Archivo:** `webapp/templates/arbiters.html` — función de carga del perfil HW (llama a `/api/local/hardware`)
-- **Descripción:** Los valores de `hw.os`, `hw.cpu.vendor`, `hw.ram_gb`, `gpu.name`, `npu.vendor`, `npu.type` y `hw.best_backend` se interpolaban sin escapar en `hwBody.innerHTML`. Estos valores provienen de `models/hw_profile.json` generado por `setup_env.py`. Si alguien modifica `hw_profile.json` directamente (o si la detección de hardware devuelve un valor inesperado), podría ejecutarse JS en la página.
-- **Severidad menor que los anteriores** porque el origen es un archivo local generado internamente, no input de usuario remoto. Aun así es corregible de forma trivial.
+- **Archivo:** `webapp/templates/arbiters.html` - funcion de carga del perfil HW (llama a `/api/local/hardware`)
+- **Descripcion:** Los valores de `hw.os`, `hw.cpu.vendor`, `hw.ram_gb`, `gpu.name`, `npu.vendor`, `npu.type` y `hw.best_backend` se interpolaban sin escapar en `hwBody.innerHTML`. Estos valores provienen de `models/hw_profile.json` generado por `setup_env.py`. Si alguien modifica `hw_profile.json` directamente (o si la deteccion de hardware devuelve un valor inesperado), podria ejecutarse JS en la pagina.
+- **Severidad menor que los anteriores** porque el origen es un archivo local generado internamente, no input de usuario remoto. Aun asi es corregible de forma trivial.
 - **Fix aplicado:** `escapeHtml()` aplicado a todos los campos interpolados en el bloque de hardware.
 
 **4. SSRF via `base_url` en proveedor `openai_compat`**
 
-- **Archivo:** `webapp/app.py` — `_list_openai_compat_models()` (llamada desde POST `/api/models` y POST `/api/provider-key`)
-- **Descripción:** El campo `base_url` del body JSON se pasaba directamente a `openai.OpenAI(base_url=base_url)`. El SDK de OpenAI inmediatamente hace un GET a `{base_url}/models` para listar modelos. Sin validación de esquema o host, un atacante podía enviar `base_url: "http://169.254.169.254/"` para acceder al endpoint de metadatos de instancias cloud (AWS IMDS, GCP metadata server). La respuesta parcial del error se devolvía en el JSON de error (hasta 260 chars), convirtiendo el endpoint en un oráculo SSRF limitado.
-- **Fix aplicado:** Nueva función `_validate_base_url()` que:
+- **Archivo:** `webapp/app.py` - `_list_openai_compat_models()` (llamada desde POST `/api/models` y POST `/api/provider-key`)
+- **Descripcion:** El campo `base_url` del body JSON se pasaba directamente a `openai.OpenAI(base_url=base_url)`. El SDK de OpenAI inmediatamente hace un GET a `{base_url}/models` para listar modelos. Sin validacion de esquema o host, un atacante podia enviar `base_url: "http://169.254.169.254/"` para acceder al endpoint de metadatos de instancias cloud (AWS IMDS, GCP metadata server). La respuesta parcial del error se devolvia en el JSON de error (hasta 260 chars), convirtiendo el endpoint en un oraculo SSRF limitado.
+- **Fix aplicado:** Nueva funcion `_validate_base_url()` que:
   - Rechaza esquemas que no sean `http` o `https`
-  - Bloquea IPs link-local (169.254.x.x) — cloud metadata endpoints
+  - Bloquea IPs link-local (169.254.x.x) - cloud metadata endpoints
   - Bloquea hostnames conocidos de metadatos internos (`metadata.google.internal`, etc.)
   - Permite localhost y redes privadas (necesarios para Ollama/APIs locales)
 
@@ -2724,11 +2724,11 @@ El usuario decidió que la webapp será expuesta en internet (no solo en localho
 
 #### Falsos positivos descartados
 
-**Path traversal via `model_path`** (confianza inicial: alta; tras verificación: 2/10):
-La hipótesis era que POST `/api/arbiters` con `model_path: "../secrets/secrets.env"` permitiría que `llama_cpp.Llama()` abriera un archivo arbitrario. Verificación de código: `normalize_arbiter()` en `scripts/arbiters_io.py` usa una **allowlist explícita** de campos de proveedor y descarta silenciosamente `model_path`. El campo nunca se persiste vía API. Falso positivo confirmado.
+**Path traversal via `model_path`** (confianza inicial: alta; tras verificacion: 2/10):
+La hipotesis era que POST `/api/arbiters` con `model_path: "../secrets/secrets.env"` permitiria que `llama_cpp.Llama()` abriera un archivo arbitrario. Verificacion de codigo: `normalize_arbiter()` en `scripts/arbiters_io.py` usa una **allowlist explicita** de campos de proveedor y descarta silenciosamente `model_path`. El campo nunca se persiste via API. Falso positivo confirmado.
 
-**Sin autenticación** (clasificado antes como alta severidad para herramienta local):
-Con el modelo de amenaza original (localhost-only), la ausencia de auth era por diseño. Al cambiar el threat model a internet-facing, esto se convirtió en una vulnerabilidad real — manejada en la entrada siguiente.
+**Sin autenticacion** (clasificado antes como alta severidad para herramienta local):
+Con el modelo de amenaza original (localhost-only), la ausencia de auth era por diseno. Al cambiar el threat model a internet-facing, esto se convirtio en una vulnerabilidad real - manejada en la entrada siguiente.
 
 ---
 
@@ -2739,13 +2739,13 @@ Con el modelo de amenaza original (localhost-only), la ausencia de auth era por 
 
 ---
 
-### 2026-06-19 — Auditoría de seguridad y corrección de vulnerabilidades (parte 2: despliegue en internet)
+### 2026-06-19 - Auditoria de seguridad y correccion de vulnerabilidades (parte 2: despliegue en internet)
 
 **Autor/agente:** Claude Sonnet 4.6.
 
 **Contexto:**
 
-La app pasó de ser "solo localhost" a "expuesta en internet". Esto cambia completamente el threat model: el atacante ya no necesita estar en la misma máquina. Con ~40 endpoints sin autenticación, cualquier persona en internet podía ejecutar el pipeline (quemando créditos de API), borrar árbitros, sobreescribir la configuración, o descargar modelos hasta llenar el disco.
+La app paso de ser "solo localhost" a "expuesta en internet". Esto cambia completamente el threat model: el atacante ya no necesita estar en la misma maquina. Con ~40 endpoints sin autenticacion, cualquier persona en internet podia ejecutar el pipeline (quemando creditos de API), borrar arbitros, sobreescribir la configuracion, o descargar modelos hasta llenar el disco.
 
 ---
 
@@ -2753,78 +2753,78 @@ La app pasó de ser "solo localhost" a "expuesta en internet". Esto cambia compl
 
 **1. HTTP Basic Auth global (`LABELFORGE_PASSWORD`)**
 
-- **Archivo:** `webapp/app.py` — bloque de autenticación añadido después de `_log_http` (línea ~112)
+- **Archivo:** `webapp/app.py` - bloque de autenticacion anadido despues de `_log_http` (linea ~112)
 - **Mecanismo:**
   - Nueva variable de entorno `LABELFORGE_PASSWORD` en `secrets/secrets.env`
-  - Si la variable **no está configurada**: solo se permite acceso desde `127.0.0.1` o `::1` (localhost). Cualquier otra IP recibe 403. Este es el comportamiento seguro por defecto: si alguien despliega sin leer la documentación, la app no queda expuesta.
-  - Si la variable **está configurada**: HTTP Basic Auth estándar. El navegador muestra el diálogo nativo de usuario/contraseña. El usuario puede ser cualquier string; solo importa la contraseña. Se usa `secrets.compare_digest()` para comparación resistente a timing attacks.
+  - Si la variable **no esta configurada**: solo se permite acceso desde `127.0.0.1` o `::1` (localhost). Cualquier otra IP recibe 403. Este es el comportamiento seguro por defecto: si alguien despliega sin leer la documentacion, la app no queda expuesta.
+  - Si la variable **esta configurada**: HTTP Basic Auth estandar. El navegador muestra el dialogo nativo de usuario/contrasena. El usuario puede ser cualquier string; solo importa la contrasena. Se usa `secrets.compare_digest()` para comparacion resistente a timing attacks.
 - **Rutas exentas:** `/static/` y `/favicon.ico` (recursos que el navegador carga antes de autenticar).
 - **Sin nuevas dependencias:** implementado con `base64` y `secrets` de la stdlib de Python.
 
-**Por qué Basic Auth y no sesiones o JWT:**
-Para una herramienta de investigación de un solo investigador, Basic Auth es suficiente, sin estado, funciona en el navegador y en curl/scripts, y no requiere una pantalla de login adicional. El HTTPS (configurado a nivel de nginx) hace que Basic Auth sea seguro en tránsito.
+**Por que Basic Auth y no sesiones o JWT:**
+Para una herramienta de investigacion de un solo investigador, Basic Auth es suficiente, sin estado, funciona en el navegador y en curl/scripts, y no requiere una pantalla de login adicional. El HTTPS (configurado a nivel de nginx) hace que Basic Auth sea seguro en transito.
 
 **2. `app.secret_key` desde variable de entorno**
 
-- `app.secret_key` ahora se lee de `LABELFORGE_SECRET_KEY` en secrets.env. Si no está configurado, se genera uno aleatorio en cada reinicio (las sesiones no persisten entre reinicios). Para producción, generar con `python -c "import secrets; print(secrets.token_hex(32))"`.
+- `app.secret_key` ahora se lee de `LABELFORGE_SECRET_KEY` en secrets.env. Si no esta configurado, se genera uno aleatorio en cada reinicio (las sesiones no persisten entre reinicios). Para produccion, generar con `python -c "import secrets; print(secrets.token_hex(32))"`.
 
-**3. Límite de tamaño de uploads (50 MB)**
+**3. Limite de tamano de uploads (50 MB)**
 
 - `app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024`
-- Flask devuelve 413 automáticamente si se supera. Sin este límite, cualquier atacante podía enviar archivos arbitrariamente grandes a `/api/dataset/upload` para agotar el disco.
+- Flask devuelve 413 automaticamente si se supera. Sin este limite, cualquier atacante podia enviar archivos arbitrariamente grandes a `/api/dataset/upload` para agotar el disco.
 
 **4. Cabeceras de seguridad HTTP en todas las respuestas HTML**
 
-Añadidas en el hook `@app.after_request`:
-- `Content-Security-Policy`: restringe las fuentes de scripts, estilos, fuentes e imágenes. Permite `unsafe-inline` para JS/CSS (necesario para la app actual) y CDN de Bootstrap (`cdn.jsdelivr.net`) para iconos y fuentes.
+Anadidas en el hook `@app.after_request`:
+- `Content-Security-Policy`: restringe las fuentes de scripts, estilos, fuentes e imagenes. Permite `unsafe-inline` para JS/CSS (necesario para la app actual) y CDN de Bootstrap (`cdn.jsdelivr.net`) para iconos y fuentes.
 - `X-Frame-Options: DENY`: previene clickjacking (la app no puede ser embebida en un iframe).
 - `X-Content-Type-Options: nosniff`: previene MIME sniffing en navegadores antiguos.
 
 ---
 
-#### Pendientes de infraestructura (no código, deben hacerse antes de desplegar)
+#### Pendientes de infraestructura (no codigo, deben hacerse antes de desplegar)
 
-Estas acciones son responsabilidad del operador/administrador, no del código. Se documentan aquí para que no se olviden al desplegar:
+Estas acciones son responsabilidad del operador/administrador, no del codigo. Se documentan aqui para que no se olviden al desplegar:
 
-1. **HTTPS obligatorio**: configurar nginx como reverse proxy con certificado Let's Encrypt. Flask HTTP en internet expone las credenciales de Basic Auth en claro (aunque estén codificadas en base64, son trivialmente decodificables). Sin HTTPS, la autenticación no protege nada contra un atacante en la red.
+1. **HTTPS obligatorio**: configurar nginx como reverse proxy con certificado Let's Encrypt. Flask HTTP en internet expone las credenciales de Basic Auth en claro (aunque esten codificadas en base64, son trivialmente decodificables). Sin HTTPS, la autenticacion no protege nada contra un atacante en la red.
 
-2. **Configurar la contraseña**: añadir a `secrets/secrets.env`:
+2. **Configurar la contrasena**: anadir a `secrets/secrets.env`:
    ```
-   LABELFORGE_PASSWORD=<mínimo 20 caracteres aleatorios>
+   LABELFORGE_PASSWORD=<minimo 20 caracteres aleatorios>
    LABELFORGE_SECRET_KEY=<python -c "import secrets; print(secrets.token_hex(32))">
    ```
 
-3. **No usar `--debug` en producción**: el modo debug de Flask expone un REPL interactivo en el navegador si ocurre una excepción. Ya está desactivado por defecto; verificar que el proceso de arranque no lo active.
+3. **No usar `--debug` en produccion**: el modo debug de Flask expone un REPL interactivo en el navegador si ocurre una excepcion. Ya esta desactivado por defecto; verificar que el proceso de arranque no lo active.
 
 ---
 
-#### Vulnerabilidades conocidas pendientes (para abordar en una sesión futura)
+#### Vulnerabilidades conocidas pendientes (para abordar en una sesion futura)
 
-Estas vulnerabilidades **no han sido corregidas** en esta sesión. Se documentan con suficiente detalle para que puedan abordarse sin necesidad de re-auditar el código.
+Estas vulnerabilidades **no han sido corregidas** en esta sesion. Se documentan con suficiente detalle para que puedan abordarse sin necesidad de re-auditar el codigo.
 
 **V-PEND-1: `api_key_override` persistido en texto plano en `arbiters_config.json`**
 
 - **Archivo:** `scripts/arbiters_config.json` (versionado en git)
-- **Descripción:** `normalize_arbiter()` en `scripts/arbiters_io.py` conserva el campo `api_key_override` de cada árbitro cuando se guarda. Si un usuario pega una API key real en el campo "Clave de API" de la UI y la webapp la guarda en `api_key_override` en lugar de (o además de) en `secrets/secrets.env`, esa key quedaría en el JSON. `arbiters_config.json` está versionado en git: si el usuario hace commit sin revisar, la key se publicaría en el repositorio.
-- **Estado actual:** Los tres árbitros configurados tienen `api_key_override: ""` (vacío) y usan `api_key_env` apuntando a las variables de entorno. El riesgo es operacional, no de código.
-- **Solución propuesta:** En `normalize_arbiter()`, si `api_key_override` es no vacío, moverlo automáticamente a `secrets/secrets.env` y reemplazarlo por cadena vacía antes de persistir en el JSON. Esto convertiría el campo en un "buzón transitorio" que nunca persiste en disco.
+- **Descripcion:** `normalize_arbiter()` en `scripts/arbiters_io.py` conserva el campo `api_key_override` de cada arbitro cuando se guarda. Si un usuario pega una API key real en el campo "Clave de API" de la UI y la webapp la guarda en `api_key_override` en lugar de (o ademas de) en `secrets/secrets.env`, esa key quedaria en el JSON. `arbiters_config.json` esta versionado en git: si el usuario hace commit sin revisar, la key se publicaria en el repositorio.
+- **Estado actual:** Los tres arbitros configurados tienen `api_key_override: ""` (vacio) y usan `api_key_env` apuntando a las variables de entorno. El riesgo es operacional, no de codigo.
+- **Solucion propuesta:** En `normalize_arbiter()`, si `api_key_override` es no vacio, moverlo automaticamente a `secrets/secrets.env` y reemplazarlo por cadena vacia antes de persistir en el JSON. Esto convertiria el campo en un "buzon transitorio" que nunca persiste en disco.
 - **Prioridad:** Media. Bajo control mientras el equipo sepa no usar `api_key_override`.
 
-**V-PEND-2: `/api/provider-key` escribe API keys al disco sin restricción adicional**
+**V-PEND-2: `/api/provider-key` escribe API keys al disco sin restriccion adicional**
 
-- **Archivo:** `webapp/app.py` — `api_provider_key()` (POST `/api/provider-key`)
-- **Descripción:** Este endpoint recibe una API key del usuario, la verifica contra el proveedor LLM (bueno), y si la verificación pasa, llama a `set_secret_value(SECRETS_ENV_PATH, env_var, api_key)` para escribirla en `secrets/secrets.env`. Con autenticación ahora en vigor, solo usuarios autenticados pueden usarlo. Sin embargo, si la contraseña de LabelForge se compromete, un atacante podría usar este endpoint para sobreescribir las API keys de Gemini/Anthropic/OpenAI con claves vacías o inválidas, rompiendo el pipeline de investigación.
-- **Impacto:** Denegación de servicio / sabotaje (no exfiltración de datos existentes).
-- **Solución propuesta:** Añadir una confirmación de contraseña secundaria antes de cualquier escritura en `secrets/secrets.env`, similar a cómo sudo pide contraseña incluso a usuarios ya autenticados en su sesión. Alternativa más simple: hacer que `/api/provider-key` solo funcione desde localhost independientemente de la autenticación global.
+- **Archivo:** `webapp/app.py` - `api_provider_key()` (POST `/api/provider-key`)
+- **Descripcion:** Este endpoint recibe una API key del usuario, la verifica contra el proveedor LLM (bueno), y si la verificacion pasa, llama a `set_secret_value(SECRETS_ENV_PATH, env_var, api_key)` para escribirla en `secrets/secrets.env`. Con autenticacion ahora en vigor, solo usuarios autenticados pueden usarlo. Sin embargo, si la contrasena de LabelForge se compromete, un atacante podria usar este endpoint para sobreescribir las API keys de Gemini/Anthropic/OpenAI con claves vacias o invalidas, rompiendo el pipeline de investigacion.
+- **Impacto:** Denegacion de servicio / sabotaje (no exfiltracion de datos existentes).
+- **Solucion propuesta:** Anadir una confirmacion de contrasena secundaria antes de cualquier escritura en `secrets/secrets.env`, similar a como sudo pide contrasena incluso a usuarios ya autenticados en su sesion. Alternativa mas simple: hacer que `/api/provider-key` solo funcione desde localhost independientemente de la autenticacion global.
 - **Prioridad:** Baja-media. Solo explotable por atacantes ya autenticados en la app.
 
-**V-PEND-3: Sin CSRF en endpoints de modificación de estado**
+**V-PEND-3: Sin CSRF en endpoints de modificacion de estado**
 
-- **Archivo:** `webapp/app.py` — todos los endpoints POST/PUT/DELETE
-- **Descripción:** HTTP Basic Auth enviada por el navegador en cada request hace que las peticiones cross-site también incluyan las credenciales automáticamente. Un sitio web malicioso podría embeber una imagen o script que haga POST a `http://tu-servidor/api/run/start`, y el navegador incluiría las credenciales Basic Auth guardadas en caché, iniciando el pipeline sin que el usuario lo sepa.
-- **Mitigación parcial existente:** `X-Frame-Options: DENY` previene que la app sea embebida en iframes (bloquea algunos vectores). Los endpoints que reciben JSON con `Content-Type: application/json` son menos vulnerables porque los navegadores no envían CSRF con ese Content-Type por defecto desde formularios HTML.
-- **Solución propuesta:** Añadir un token CSRF (usando Flask-WTF o una implementación manual con `secrets.token_hex()` guardado en sesión). Alternativamente, migrar de Basic Auth a session-based auth con cookies `SameSite=Strict`, que bloquea CSRF por diseño.
-- **Prioridad:** Media. Solo explotable si la app tiene usuarios que visitan sitios maliciosos mientras tienen sesión activa.
+- **Archivo:** `webapp/app.py` - todos los endpoints POST/PUT/DELETE
+- **Descripcion:** HTTP Basic Auth enviada por el navegador en cada request hace que las peticiones cross-site tambien incluyan las credenciales automaticamente. Un sitio web malicioso podria embeber una imagen o script que haga POST a `http://tu-servidor/api/run/start`, y el navegador incluiria las credenciales Basic Auth guardadas en cache, iniciando el pipeline sin que el usuario lo sepa.
+- **Mitigacion parcial existente:** `X-Frame-Options: DENY` previene que la app sea embebida en iframes (bloquea algunos vectores). Los endpoints que reciben JSON con `Content-Type: application/json` son menos vulnerables porque los navegadores no envian CSRF con ese Content-Type por defecto desde formularios HTML.
+- **Solucion propuesta:** Anadir un token CSRF (usando Flask-WTF o una implementacion manual con `secrets.token_hex()` guardado en sesion). Alternativamente, migrar de Basic Auth a session-based auth con cookies `SameSite=Strict`, que bloquea CSRF por diseno.
+- **Prioridad:** Media. Solo explotable si la app tiene usuarios que visitan sitios maliciosos mientras tienen sesion activa.
 
 ---
 
@@ -2835,18 +2835,18 @@ Estas vulnerabilidades **no han sido corregidas** en esta sesión. Se documentan
 - `bitacora.md`
 - `context.md`
 
-### 2026-06-19 — Reorganización de configuración fuera de `scripts/`
+### 2026-06-19 - Reorganizacion de configuracion fuera de `scripts/`
 
 **Autor/agente:** Codex.
 
-**Objetivo:** separar código Python de configuración editable. El usuario señaló que
-`arbiters_config.json` y `local_models_config.json` no debían vivir junto al código
+**Objetivo:** separar codigo Python de configuracion editable. El usuario senalo que
+`arbiters_config.json` y `local_models_config.json` no debian vivir junto al codigo
 en `scripts/`.
 
-**Decisión tomada:**
+**Decision tomada:**
 
-- `config/` queda como directorio canónico para configuración editable/versionable.
-- `scripts/` queda reservado para código Python importable.
+- `config/` queda como directorio canonico para configuracion editable/versionable.
+- `scripts/` queda reservado para codigo Python importable.
 - `secrets/` sigue siendo el lugar de credenciales privadas.
 - `models/`, `logs/`, `output/`, `checkpoints/` y `archive/` siguen como estado,
   cache o artefactos locales ignorados por Git.
@@ -2854,19 +2854,19 @@ en `scripts/`.
 **Cambios realizados:**
 
 - Movidos:
-  - `scripts/arbiters_config.json` → `config/arbiters_config.json`
-  - `scripts/local_models_config.json` → `config/local_models_config.json`
-- Política de almacenamiento documentada en el README raíz del proyecto.
-- Añadido `scripts/paths.py` como fuente única de rutas canónicas y fallbacks legacy.
-- Actualizados WebApp, CLI, pipeline y catálogo GGUF para usar `config/`.
+  - `scripts/arbiters_config.json` -> `config/arbiters_config.json`
+  - `scripts/local_models_config.json` -> `config/local_models_config.json`
+- Politica de almacenamiento documentada en el README raiz del proyecto.
+- Anadido `scripts/paths.py` como fuente unica de rutas canonicas y fallbacks legacy.
+- Actualizados WebApp, CLI, pipeline y catalogo GGUF para usar `config/`.
 - `.gitignore` ahora ignora overrides locales `config/*.local.json` y
   `config/*.private.json`.
 
 **Compatibilidad:**
 
-Se mantiene fallback para rutas antiguas: si algún comando usa explícitamente
-`scripts/arbiters_config.json` y ese archivo ya no existe, el código resuelve la
-ruta canónica `config/arbiters_config.json`.
+Se mantiene fallback para rutas antiguas: si algun comando usa explicitamente
+`scripts/arbiters_config.json` y ese archivo ya no existe, el codigo resuelve la
+ruta canonica `config/arbiters_config.json`.
 
 **Archivos tocados:**
 

@@ -1,7 +1,7 @@
-﻿"""
+"""
 test_pipeline.py
 Pruebas unitarias para validar las funciones utilitarias,
-las mÃ©tricas de acuerdo inter-Ã¡rbitros y las validaciones de configuraciÃ³n.
+las metricas de acuerdo inter-arbitros y las validaciones de configuracion.
 """
 
 import sys
@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-# Asegurar que el root del proyecto estÃ© en el path
+# Asegurar que el root del proyecto este en el path
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))

@@ -1,4 +1,4 @@
-﻿"""
+"""
 hw_detection.py
 ---------------
 Deteccion multiplataforma de hardware.
@@ -196,7 +196,7 @@ def detect_npu() -> dict:
         return _detect_npu_windows()
     if os_name == "Linux":
         return _detect_npu_linux()
-    # macOS: sin NPU externo, Apple Neural Engine no expuesto como acelerador genérico
+    # macOS: sin NPU externo, Apple Neural Engine no expuesto como acelerador generico
     return {"detected": False, "vendor": None, "type": None}
 
 

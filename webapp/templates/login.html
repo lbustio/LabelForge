@@ -6,16 +6,6 @@
   <div class="card-dark accent-card accent-cyan">
     <div class="card-header-label">Acceso seguro</div>
     <h1 class="h4 mb-3">Entrar a LabelForge</h1>
-    {% if login_disabled %}
-    <div class="alert alert-warning mb-3">
-      La autenticacion de la webapp no esta configurada.
-    </div>
-    <div class="small text-secondary mb-3">
-      Configura <code>LABELFORGE_AUTH_MODE=local</code> y reinicia la webapp.
-      En el primer arranque podras crear el usuario local.
-    </div>
-    <button class="btn btn-secondary w-100" type="button" disabled>Configura autenticacion para continuar</button>
-    {% elif auth_mode == 'local' %}
     <form method="post" action="{{ url_for('login') }}" class="d-grid gap-3">
       <input type="hidden" name="next" value="{{ next_url }}">
       {% if first_setup %}
@@ -45,23 +35,6 @@
       {% endif %}
       <button class="btn btn-primary" type="submit">{{ 'Crear usuario' if first_setup else 'Entrar' }}</button>
     </form>
-    {% else %}
-    {% if oauth_setup_error %}
-    <div class="alert alert-warning py-2 mb-3">{{ oauth_setup_error }}</div>
-    {% endif %}
-    <div class="d-grid gap-2">
-      {% for provider in providers %}
-      <a class="btn btn-primary"
-         href="/login/{{ provider.id }}?next={{ next_url|urlencode }}">
-        Continuar con {{ provider.label }}
-      </a>
-      {% endfor %}
-    </div>
-    <div class="small text-secondary mt-3">
-      Tus credenciales se introducen en la pagina oficial del proveedor. Si falta la configuracion OAuth de LabelForge,
-      el proveedor no puede abrir su ventana de autenticacion.
-    </div>
-    {% endif %}
   </div>
 </div>
 {% endblock %}

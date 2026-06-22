@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Arbitros — LabelForge{% endblock %}
+{% block title %}Arbitros - LabelForge{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
@@ -21,8 +21,8 @@
   <div class="d-flex align-items-center gap-2">
     <span class="spinner-border spinner-border-sm text-info" id="preflight-spinner"></span>
     <div>
-      <div class="fw-semibold" id="preflight-title">Verificando árbitros...</div>
-      <div class="text-secondary small" id="preflight-body">Revisando configuración, credenciales y acceso básico a proveedores.</div>
+      <div class="fw-semibold" id="preflight-title">Verificando arbitros...</div>
+      <div class="text-secondary small" id="preflight-body">Revisando configuracion, credenciales y acceso basico a proveedores.</div>
     </div>
     <button class="btn btn-outline-secondary btn-sm ms-auto" onclick="loadArbiterPreflight()" title="Revisar de nuevo">
       <i class="bi bi-arrow-clockwise"></i>
@@ -61,7 +61,7 @@
 
         <!-- Proveedor -->
         <div class="p-3 rounded mb-4 accent-panel accent-cyan" style="background:#12141e;border:1px solid rgba(var(--tone-cyan), .28)">
-          <div class="card-header-label mb-3">Configuración del proveedor de modelos de lenguaje</div>
+          <div class="card-header-label mb-3">Configuracion del proveedor de modelos de lenguaje</div>
 
           <!-- Selector de proveedor -->
           <div class="row g-3 mb-3">
@@ -90,12 +90,12 @@
             </div>
           </div>
 
-          <!-- Parámetros locales GGUF (solo para llama_cpp) -->
+          <!-- Parametros locales GGUF (solo para llama_cpp) -->
           <div class="row g-3 mb-3" id="local-gguf-section" style="display:none!important">
             <div class="col-md-4">
               <label class="form-label small text-secondary">Contexto (tokens)</label>
               <input type="number" id="arb-n-ctx" class="form-control" value="4096" min="512" max="131072" step="512">
-              <div class="form-text text-secondary">Ventana de contexto máximo del modelo</div>
+              <div class="form-text text-secondary">Ventana de contexto maximo del modelo</div>
             </div>
             <div class="col-12">
               <button type="button" class="btn btn-sm btn-outline-info" onclick="openDownloadModal()">
@@ -121,12 +121,12 @@
             </div>
           </div>
 
-          <!-- Dirección base (Ollama / compatible con OpenAI) -->
+          <!-- Direccion base (Ollama / compatible con OpenAI) -->
           <div class="row g-3 mb-3" id="baseurl-section" style="display:none!important">
             <div class="col-md-8">
-              <label class="form-label small text-secondary">Dirección base <span class="text-danger">*</span></label>
+              <label class="form-label small text-secondary">Direccion base <span class="text-danger">*</span></label>
               <input type="text" id="arb-base-url" class="form-control" placeholder="ej: http://localhost:11434/v1">
-              <div class="form-text text-secondary">Dirección base del servidor local. Para Ollama: http://localhost:11434/v1</div>
+              <div class="form-text text-secondary">Direccion base del servidor local. Para Ollama: http://localhost:11434/v1</div>
             </div>
           </div>
 
@@ -135,10 +135,10 @@
             <div class="col-md-6">
               <label class="form-label small text-secondary">Identificador del proyecto en Google Cloud <span class="text-danger">*</span></label>
               <input type="text" id="arb-vertex-project" class="form-control" placeholder="ej: mi-proyecto-gcp">
-              <div class="form-text text-secondary">También puede venir de GOOGLE_CLOUD_PROJECT en secrets/secrets.env.</div>
+              <div class="form-text text-secondary">Tambien puede venir de GOOGLE_CLOUD_PROJECT en secrets/secrets.env.</div>
             </div>
             <div class="col-md-4">
-              <label class="form-label small text-secondary">Región de Vertex AI</label>
+              <label class="form-label small text-secondary">Region de Vertex AI</label>
               <input type="text" id="arb-vertex-location" class="form-control" placeholder="us-central1" value="us-central1">
               <div class="form-text text-secondary">Ej: us-central1, europe-west4.</div>
             </div>
@@ -177,28 +177,28 @@
               <span id="selected-model-chip" class="text-secondary small fst-italic">ninguno</span>
             </div>
 
-            <!-- Información de limites de peticiones por proveedor/modelo -->
+            <!-- Informacion de limites de peticiones por proveedor/modelo -->
             <div id="rate-limit-box" class="mt-2 p-2 rounded" style="display:none;font-size:.8rem">
             </div>
           </div>
         </div>
 
-        <!-- Configuración de generación -->
+        <!-- Configuracion de generacion -->
         <div class="row g-3 mb-4">
           <div class="col-md-3">
             <label class="form-label small text-secondary">Temperatura</label>
             <input type="number" id="arb-temp" class="form-control" value="0.1" min="0" max="2" step="0.05">
-            <div class="form-text text-secondary">0 = determinista · 1 = creativo</div>
+            <div class="form-text text-secondary">0 = determinista  -  1 = creativo</div>
           </div>
           <div class="col-md-3">
-            <label class="form-label small text-secondary">Máximo de tokens de salida</label>
+            <label class="form-label small text-secondary">Maximo de tokens de salida</label>
             <input type="number" id="arb-tokens" class="form-control" value="600" min="100" max="8192">
           </div>
         </div>
 
-        <!-- Instrucción de sistema -->
+        <!-- Instruccion de sistema -->
         <div class="mb-2">
-          <label class="form-label small text-secondary">Instrucción de sistema <span class="text-danger">*</span></label>
+          <label class="form-label small text-secondary">Instruccion de sistema <span class="text-danger">*</span></label>
           <textarea id="arb-system-prompt" class="form-control" rows="9"
             placeholder="Describe la personalidad, experiencia y enfoque de este arbitro..."></textarea>
         </div>
@@ -278,7 +278,7 @@
     <div class="modal-content" style="background:#1a1d27;border:1px solid #2d3148;color:#e2e8f0">
       <div class="modal-body text-center py-4">
         <i class="bi bi-trash3 text-danger fs-1 mb-3 d-block"></i>
-        <p>¿Eliminar <strong id="delete-arb-name"></strong>?</p>
+        <p>Eliminar <strong id="delete-arb-name"></strong>?</p>
         <div class="d-flex gap-2 justify-content-center mt-3">
           <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
           <button class="btn btn-danger btn-sm" onclick="confirmDelete()">Eliminar</button>
@@ -293,14 +293,14 @@
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content" style="background:#1a1d27;border:1px solid #2d3148;color:#e2e8f0">
       <div class="modal-header border-0">
-        <h5 class="modal-title"><i class="bi bi-cpu me-2"></i>Gestión de modelos locales GGUF</h5>
+        <h5 class="modal-title"><i class="bi bi-cpu me-2"></i>Gestion de modelos locales GGUF</h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
         <!-- Hardware -->
         <div class="mb-3 p-3 rounded" style="background:#12141e;border:1px solid #2d3148;font-size:.82rem">
           <div class="fw-semibold mb-2 text-secondary"><i class="bi bi-motherboard me-1"></i>Hardware detectado</div>
-          <div id="hw-info-body" class="text-secondary">Cargando inventario…</div>
+          <div id="hw-info-body" class="text-secondary">Cargando inventario...</div>
         </div>
 
         <!-- Modelos descargados -->
@@ -311,7 +311,7 @@
           </button>
         </div>
         <div id="cached-models-list" class="mb-3">
-          <div class="text-secondary small">Cargando…</div>
+          <div class="text-secondary small">Cargando...</div>
         </div>
 
         <div class="d-flex align-items-center justify-content-between mb-2">
@@ -353,7 +353,7 @@
         </div>
         <div id="recommended-source" class="text-secondary mb-2" style="font-size:.72rem"></div>
         <div id="recommended-models-list" class="mb-3">
-          <div class="text-secondary small">Cargando…</div>
+          <div class="text-secondary small">Cargando...</div>
         </div>
 
         <!-- Descargas activas -->
@@ -450,7 +450,7 @@ const API_KEY_HELP = {
   openai:        "OpenAI: se verificara y guardara como OPENAI_API_KEY en secrets/secrets.env.",
   openai_compat: "Compatible con OpenAI: se verificara contra la direccion base y se guardara como OPENAI_API_KEY en secrets/secrets.env.",
   vertex_gemini: "Vertex AI usa credenciales de Google Cloud, no una API key directa aqui.",
-  llama_cpp:     "Modelo local GGUF — sin API key. El backend se detecta automáticamente al ejecutar setup_env.py.",
+  llama_cpp:     "Modelo local GGUF - sin API key. El backend se detecta automaticamente al ejecutar setup_env.py.",
 };
 
 function updateApiKeyHelp() {
@@ -487,7 +487,7 @@ function updateApiKeyStatus(arbId) {
   }
 
   const status = preflightByArbiter[arbId];
-  const envVar = DEFAULT_ENV[activeProvider] || '…';
+  const envVar = DEFAULT_ENV[activeProvider] || '...';
 
   if (!status) {
     el.innerHTML = '';
@@ -498,7 +498,7 @@ function updateApiKeyStatus(arbId) {
     el.innerHTML = `<span class="small" style="color:#34d399">
       <i class="bi bi-check2-circle me-1"></i>Clave activa en
       <code style="color:#6ee7b7;background:transparent">${envVar}</code>
-      — escribe una nueva para reemplazarla</span>`;
+      - escribe una nueva para reemplazarla</span>`;
     if (keyInp) _setKeySentinel(keyInp, envVar);
   } else {
     const hasKeyIssue = (status.issues || []).some(i => /key|clave|api|credencial/i.test(i));
@@ -506,7 +506,7 @@ function updateApiKeyStatus(arbId) {
       el.innerHTML = `<span class="small" style="color:#fbbf24">
         <i class="bi bi-exclamation-triangle me-1"></i>Sin clave en
         <code style="color:#fde68a;background:transparent">${envVar}</code>
-        — pega una y pulsa verificar</span>`;
+        - pega una y pulsa verificar</span>`;
     } else {
       el.innerHTML = '';
     }
@@ -616,7 +616,7 @@ async function loadModels() {
   } catch(e) {
     grid.innerHTML = `<div class="col-12 py-3">
       <div class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>${e.message}</div>
-      <div class="text-secondary small mt-1">Verifica tu clave de API o la dirección del servidor local.</div>
+      <div class="text-secondary small mt-1">Verifica tu clave de API o la direccion del servidor local.</div>
     </div>`;
     currentModels = [];
   }
@@ -681,7 +681,7 @@ async function verifyProviderKey() {
     statusEl.innerHTML = `<span class="small" style="color:#34d399">
       <i class="bi bi-check2-circle me-1"></i>Clave activa en
       <code style="color:#6ee7b7;background:transparent">${evn}</code>
-      — escribe una nueva para reemplazarla</span>`;
+      - escribe una nueva para reemplazarla</span>`;
   }
   currentModels = data.models || [];
   activeFilter = 'all';
@@ -787,21 +787,21 @@ async function loadRateLimitInfo() {
     if (data.otpm !== undefined) metrics.push(data.otpm === null ? 'OTPM dependiente de cuenta' : `${fmt(data.otpm)} OTPM`);
     metrics.push(data.rpd === null || data.rpd === undefined ? 'RPD dependiente de cuenta' : `${fmt(data.rpd)} RPD`);
     const kind = data.limit_kind === 'published' ? 'publicados' : 'dependientes de cuenta';
-    const source = data.source_label ? ` · ${data.source_label}` : '';
+    const source = data.source_label ? `  -  ${data.source_label}` : '';
     box.className = `mt-2 p-2 rounded border border-${tone} text-${tone}`;
     box.style.display = '';
     box.style.fontSize = '.8rem';
     box.innerHTML = `
-      <div class="fw-semibold mb-1"><i class="bi bi-speedometer2 me-1"></i>Límites ${kind}${source}</div>
-      <div>${metrics.join(' · ')}</div>
-      <div class="mt-1">Espera mínima recomendada con ${data.n_arbiters} árbitro(s): <strong>${data.min_delay_s}s</strong></div>
+      <div class="fw-semibold mb-1"><i class="bi bi-speedometer2 me-1"></i>Limites ${kind}${source}</div>
+      <div>${metrics.join('  -  ')}</div>
+      <div class="mt-1">Espera minima recomendada con ${data.n_arbiters} arbitro(s): <strong>${data.min_delay_s}s</strong></div>
       <div class="mt-1 text-secondary">${data.alert_msg}</div>
     `;
   } catch(e) {
     box.className = 'mt-2 p-2 rounded border border-warning text-warning';
     box.style.display = '';
     box.style.fontSize = '.8rem';
-    box.innerHTML = 'No se pudieron cargar los límites de peticiones para este modelo.';
+    box.innerHTML = 'No se pudieron cargar los limites de peticiones para este modelo.';
   }
 }
 
@@ -836,10 +836,10 @@ async function loadArbiterPreflight(shouldRender = true) {
       box.classList.toggle('accent-rose', !data.ok);
       box.classList.toggle('accent-blue', false);
       title.innerHTML = data.ok
-        ? '<i class="bi bi-check2-circle text-success me-1"></i>Árbitros listos'
-        : '<i class="bi bi-exclamation-triangle text-warning me-1"></i>Hay árbitros que necesitan atención';
+        ? '<i class="bi bi-check2-circle text-success me-1"></i>Arbitros listos'
+        : '<i class="bi bi-exclamation-triangle text-warning me-1"></i>Hay arbitros que necesitan atencion';
       body.innerHTML = data.ok
-        ? 'Configuración y credenciales básicas verificadas. Puedes ejecutar cuando quieras.'
+        ? 'Configuracion y credenciales basicas verificadas. Puedes ejecutar cuando quieras.'
         : `${preflightIssues.length} problema(s) detectado(s). Revisa las tarjetas marcadas abajo.`;
     }
   } catch (e) {
@@ -847,7 +847,7 @@ async function loadArbiterPreflight(shouldRender = true) {
       box.classList.remove('accent-emerald');
       box.classList.add('accent-rose');
       title.innerHTML = '<i class="bi bi-x-circle text-danger me-1"></i>No se pudo verificar';
-      body.textContent = e.message || 'Error consultando el preflight de árbitros.';
+      body.textContent = e.message || 'Error consultando el preflight de arbitros.';
     }
   } finally {
     if (spinner) spinner.style.display = 'none';
@@ -868,15 +868,15 @@ const PROVIDER_LABELS = {
 function arbiterPreflightBadge(arbId) {
   const status = preflightByArbiter[arbId];
   if (!status) {
-    return `<span class="text-secondary small"><i class="bi bi-hourglass-split me-1"></i>verificación pendiente</span>`;
+    return `<span class="text-secondary small"><i class="bi bi-hourglass-split me-1"></i>verificacion pendiente</span>`;
   }
   if (status.ok) {
-    const access = status.access_checked ? ' y acceso básico verificado' : '';
-    return `<span class="small" style="color:#34d399"><i class="bi bi-check2-circle me-1"></i>configuración${access}</span>`;
+    const access = status.access_checked ? ' y acceso basico verificado' : '';
+    return `<span class="small" style="color:#34d399"><i class="bi bi-check2-circle me-1"></i>configuracion${access}</span>`;
   }
   const details = (status.issues || []).map(i => `<div class="mt-1">${escapeHtml(i)}</div>`).join('');
   return `<div class="small text-warning">
-    <div class="fw-semibold"><i class="bi bi-exclamation-triangle me-1"></i>requiere atención antes de ejecutar</div>
+    <div class="fw-semibold"><i class="bi bi-exclamation-triangle me-1"></i>requiere atencion antes de ejecutar</div>
     <div class="text-secondary" style="font-size:.76rem">${details}</div>
   </div>`;
 }
@@ -918,7 +918,7 @@ function renderList() {
           </div>
           <div style="flex:1">
             <div class="fw-semibold mb-1">${escapeHtml(a.name)}
-              ${a.persona ? `<span class="text-secondary fw-normal" style="font-size:.82rem"> · ${escapeHtml(a.persona)}</span>` : ''}
+              ${a.persona ? `<span class="text-secondary fw-normal" style="font-size:.82rem">  -  ${escapeHtml(a.persona)}</span>` : ''}
             </div>
             <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
               <span class="soft-chip" style="font-size:.72rem">
@@ -939,7 +939,7 @@ function renderList() {
       </div>
       <div class="d-flex gap-3 mt-3 pt-2 border-top border-dark">
         ${temperatureBadge(a.generation_config?.temperature ?? 0.1)}
-        <span class="text-secondary small"><i class="bi bi-hash me-1"></i>máximo de tokens: ${a.generation_config?.max_output_tokens ?? 600}</span>
+        <span class="text-secondary small"><i class="bi bi-hash me-1"></i>maximo de tokens: ${a.generation_config?.max_output_tokens ?? 600}</span>
       </div>
       <div class="mt-2 pt-2 border-top border-dark">
         ${arbiterPreflightBadge(a.id)}
@@ -1063,7 +1063,7 @@ async function saveArbiter() {
   };
 
   if (!payload.name || !payload.system_prompt) {
-    showToast('Completa el nombre y la instrucción de sistema', 'error'); return;
+    showToast('Completa el nombre y la instruccion de sistema', 'error'); return;
   }
   if (!selectedModel) {
     showToast('Selecciona un modelo', 'error'); return;
@@ -1132,8 +1132,8 @@ function localRuntimeStatus(hw) {
   const backend = (hw.best_backend || 'cpu').toLowerCase();
   const gpu = hw.gpu || {};
   const npu = hw.npu || {};
-  if (backend === 'cuda' && gpu.ok) {
-    return {label: 'GPU CUDA', tone: 'success', icon: 'bi-gpu-card', detail: gpu.name || 'GPU NVIDIA'};
+  if (['cuda', 'metal', 'rocm', 'vulkan'].includes(backend) && gpu.ok) {
+    return {label: `GPU ${backend.toUpperCase()}`, tone: 'success', icon: 'bi-gpu-card', detail: gpu.name || 'GPU'};
   }
   if (backend === 'npu' && npu.ok) {
     return {label: 'NPU OpenVINO', tone: 'info', icon: 'bi-cpu', detail: `${npu.vendor || ''} ${npu.type || ''}`.trim()};
@@ -1146,7 +1146,7 @@ function localRuntimeStatus(hw) {
       label: 'CPU',
       tone: 'warning',
       icon: 'bi-cpu',
-      detail: `RTX/GPU detectada (${gpu.name || 'GPU'}), pero llama_cpp no tiene CUDA activo.`,
+      detail: `GPU detectada (${gpu.name || 'GPU'}), pero llama_cpp no confirmo offload ${backend.toUpperCase()}.`,
     };
   }
   return {label: 'CPU', tone: 'secondary', icon: 'bi-cpu', detail: 'Ejecucion local por CPU'};
@@ -1258,7 +1258,7 @@ async function importArbiters() {
       _clearKeySentinel(this);
       const el = document.getElementById('api-key-status');
       if (el) el.innerHTML = `<span class="small" style="color:#64748b">
-        <i class="bi bi-pencil me-1"></i>Escribe la nueva clave y pulsa verificar — deja vacío para mantener la actual</span>`;
+        <i class="bi bi-pencil me-1"></i>Escribe la nueva clave y pulsa verificar - deja vacio para mantener la actual</span>`;
     }
   });
 
@@ -1276,279 +1276,7 @@ async function importArbiters() {
 loadArbiters();
 
 // ---------------------------------------------------------------------------
-// Modal de descarga de modelos GGUF
-// ---------------------------------------------------------------------------
-async function openDownloadModal() {
-  bootstrap.Modal.getOrCreateInstance(document.getElementById('downloadModal')).show();
-  document.getElementById('download-progress-area').style.display = 'none';
-
-  // Hardware
-  const hwBody = document.getElementById('hw-info-body');
-  try {
-    const hw = await fetch('/api/local/hardware').then(r => r.json());
-    if (!hw || !hw.os) {
-      hwBody.innerHTML = '<span class="text-warning">No se encontró hw_profile.json. Ejecuta <code>python setup_env.py</code> primero.</span>';
-    } else {
-      const gpu = hw.gpu || {};
-      const npu = hw.npu || {};
-      const vram = gpu.vram_gb ? `${gpu.vram_gb} GB` : (gpu.shared_memory ? 'compartida' : 'N/A');
-      hwBody.innerHTML = `
-        <div class="row g-2">
-          <div class="col-md-4"><span class="text-secondary">OS:</span> ${escapeHtml(hw.os)}</div>
-          <div class="col-md-4"><span class="text-secondary">CPU:</span> ${escapeHtml(hw.cpu?.vendor || '')} ${escapeHtml(String(hw.cpu?.cores_physical || '?'))} núcleos</div>
-          <div class="col-md-4"><span class="text-secondary">RAM:</span> ${escapeHtml(String(hw.ram_gb))} GB</div>
-          ${gpu.detected ? `<div class="col-md-6"><span class="text-secondary">GPU:</span> ${escapeHtml(gpu.name)} — VRAM ${escapeHtml(vram)}</div>` : '<div class="col-md-6 text-secondary">Sin GPU dedicada</div>'}
-          ${npu.detected ? `<div class="col-md-6"><span class="text-info">NPU:</span> ${escapeHtml(npu.vendor)} ${escapeHtml(npu.type)}</div>` : ''}
-          <div class="col-12"><span class="text-secondary">Backend óptimo:</span> <strong style="color:rgb(var(--tone-cyan))">${escapeHtml(hw.best_backend)}</strong></div>
-        </div>`;
-    }
-  } catch(e) {
-    hwBody.innerHTML = `<span class="text-danger">Error al cargar hardware: ${e.message}</span>`;
-  }
-
-  await Promise.all([loadCachedModels(), loadRecommended(false)]);
-}
-
-async function loadCachedModels() {
-  const listEl = document.getElementById('cached-models-list');
-  if (!listEl) return;
-  listEl.innerHTML = '<div class="text-secondary small"><div class="spinner-border spinner-border-sm me-2"></div>Cargando…</div>';
-  try {
-    const models = await fetch('/api/local/cached').then(r => r.json());
-    if (models.error) throw new Error(models.error);
-    if (!models.length) {
-      listEl.innerHTML = '<div class="text-secondary small">No hay modelos descargados aún.</div>';
-      return;
-    }
-    listEl.innerHTML = models.map(m => {
-      const sizeStr = m.size_gb ? `${m.size_gb} GB` : '—';
-      const layers  = m.n_layers ? ` · ${m.n_layers} capas` : '';
-      return `
-      <div class="d-flex align-items-center gap-2 p-2 mb-1 rounded" style="background:#12141e;border:1px solid #2d3148">
-        <div class="flex-grow-1 min-width-0">
-          <div class="small fw-semibold" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.filename}</div>
-          <div class="text-secondary" style="font-size:.72rem">${sizeStr}${layers}</div>
-        </div>
-        <button class="btn btn-sm btn-outline-danger flex-shrink-0"
-                onclick="deleteModel('${escapeHtml(m.filename)}', this)"
-                title="Eliminar modelo del disco">
-          <i class="bi bi-trash3"></i>
-        </button>
-        <button class="btn btn-sm btn-outline-secondary flex-shrink-0"
-                onclick="redownloadModel('${escapeHtml(m.repo_id || '')}','${escapeHtml(m.filename)}', this)"
-                title="Volver a descargar (actualizar)">
-          <i class="bi bi-arrow-clockwise"></i>
-        </button>
-      </div>`;
-    }).join('');
-  } catch(e) {
-    listEl.innerHTML = `<div class="text-danger small">${e.message}</div>`;
-  }
-}
-
-async function deleteModel(filename, btn) {
-  if (!confirm(`¿Eliminar ${filename}?`)) return;
-  btn.disabled = true;
-  try {
-    const res = await fetch(`/api/local/model/${encodeURIComponent(filename)}`, {method: 'DELETE'});
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Error al eliminar');
-    await loadCachedModels();
-    await loadModels(); // refresca grid de modelos en el modal principal si está abierto
-  } catch(e) {
-    alert(e.message);
-    btn.disabled = false;
-  }
-}
-
-async function redownloadModel(repoId, filename, btn) {
-  if (!repoId) {
-    alert('Este modelo no tiene repo_id guardado. Usa "Descargar por nombre" para re-descargarlo.');
-    return;
-  }
-  btn.disabled = true;
-  await startDownload(repoId, filename, btn);
-}
-
-async function startCustomDownload(btn) {
-  const repoId   = document.getElementById('custom-repo-id').value.trim();
-  const filename = document.getElementById('custom-filename').value.trim();
-  if (!repoId || !filename) {
-    alert('Completa el repositorio y el nombre del archivo .gguf');
-    return;
-  }
-  if (!filename.endsWith('.gguf')) {
-    alert('El nombre del archivo debe terminar en .gguf');
-    return;
-  }
-  await startDownload(repoId, filename, btn);
-  document.getElementById('custom-repo-id').value  = '';
-  document.getElementById('custom-filename').value = '';
-}
-
-async function loadRecommended(forceRefresh) {
-  const listEl   = document.getElementById('recommended-models-list');
-  const sourceEl = document.getElementById('recommended-source');
-  if (!listEl) return;
-
-  listEl.innerHTML = `<div class="text-secondary small">
-    <div class="spinner-border spinner-border-sm me-2"></div>
-    ${forceRefresh ? 'Consultando LLMs configurados…' : 'Cargando recomendaciones…'}
-  </div>`;
-  if (sourceEl) sourceEl.textContent = '';
-
-  try {
-    const url = '/api/local/recommended' + (forceRefresh ? '?refresh=1' : '');
-    const models = await fetch(url).then(r => r.json());
-    if (models.error) throw new Error(models.error);
-    if (!models.length) {
-      listEl.innerHTML = '<div class="text-secondary small">No hay modelos recomendados disponibles.</div>';
-      return;
-    }
-
-    // Mostrar fuente (¿catálogo dinámico o fallback?)
-    const hasVotes = models.some(m => m.consensus_votes > 0);
-    if (sourceEl) {
-      const maxVotes = hasVotes ? Math.max(...models.map(m => m.consensus_votes || 0)) : 0;
-      sourceEl.innerHTML = hasVotes
-        ? `<i class="bi bi-stars me-1" style="color:#a78bfa"></i>Catálogo generado por ${maxVotes} LLM(s) — consenso entre Gemini, Claude y GPT`
-        : `<i class="bi bi-archive me-1"></i>Usando catálogo base (sin LLMs configurados o en caché)`;
-    }
-
-    const hwKnown = models.some(m => m.fits_in_memory !== null);
-    const compatible   = models.filter(m => m.fits_in_memory !== false);
-    const incompatible = models.filter(m => m.fits_in_memory === false);
-
-    function renderModel(m) {
-      const votes = m.consensus_votes || 0;
-      const votesBadge = votes > 1
-        ? `<span class="ms-1" style="font-size:.65rem;color:#a78bfa" title="${votes} LLMs lo recomendaron">★${votes}</span>`
-        : '';
-      const hwUnknown = m.fits_in_memory === null;
-      const border = hwUnknown ? '#3a3520' : '#2d3148';
-      const downloadBtn = `<button class="btn btn-sm btn-outline-info flex-shrink-0"
-          onclick="startDownload('${escapeHtml(m.repo_id)}','${escapeHtml(m.filename)}',this)">
-          <i class="bi bi-download me-1"></i>Descargar
-        </button>`;
-      const unknownBadge = hwUnknown
-        ? `<span class="small flex-shrink-0" style="color:#fbbf24" title="Perfil de HW no disponible — tamaño no verificado">HW ?</span>`
-        : '';
-      return `
-      <div class="d-flex align-items-center gap-2 p-2 mb-1 rounded" style="background:#12141e;border:1px solid ${border}">
-        <div class="flex-grow-1 min-width-0">
-          <div class="small fw-semibold" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-            ${m.filename}${votesBadge}
-          </div>
-          <div class="text-secondary" style="font-size:.72rem">${m.description || ''} — <strong>${m.size_gb} GB</strong></div>
-        </div>
-        ${unknownBadge}
-        ${downloadBtn}
-      </div>`;
-    }
-
-    function renderIncompatible(m) {
-      return `
-      <div class="d-flex align-items-center gap-2 p-2 mb-1 rounded" style="background:#12141e;border:1px solid #3a2020;opacity:.6">
-        <div class="flex-grow-1 min-width-0">
-          <div class="small fw-semibold text-secondary" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-            ${m.filename}
-          </div>
-          <div class="text-secondary" style="font-size:.72rem">${m.description || ''} — <strong>${m.size_gb} GB</strong></div>
-        </div>
-        <span class="small flex-shrink-0" style="color:#f87171" title="Requiere ${m.ram_min_gb} GB — excede la memoria disponible">
-          <i class="bi bi-x-circle me-1"></i>No cabe
-        </span>
-      </div>`;
-    }
-
-    let html = '';
-
-    if (!hwKnown) {
-      html += `<div class="small mb-2 p-2 rounded" style="background:#2a2415;border:1px solid #4a3f20;color:#fbbf24">
-        <i class="bi bi-exclamation-triangle me-1"></i>
-        Perfil de hardware no disponible. Ejecuta <code>python setup_env.py</code> para filtrar por tu HW.
-      </div>`;
-    }
-
-    if (compatible.length) {
-      if (hwKnown) {
-        html += `<div class="small text-secondary mb-1" style="font-size:.7rem">
-          <i class="bi bi-check-circle me-1" style="color:#34d399"></i>Compatibles con tu hardware (${compatible.length})
-        </div>`;
-      }
-      html += compatible.map(renderModel).join('');
-    } else if (hwKnown) {
-      html += `<div class="small text-secondary">Ningún modelo del catálogo cabe en tu memoria disponible.</div>`;
-    }
-
-    if (incompatible.length) {
-      html += `<details class="mt-2">
-        <summary class="small" style="cursor:pointer;color:#94a3b8;font-size:.72rem;list-style:none">
-          <i class="bi bi-chevron-down me-1"></i>Ver también (${incompatible.length} modelos que no caben en tu HW)
-        </summary>
-        <div class="mt-1">${incompatible.map(renderIncompatible).join('')}</div>
-      </details>`;
-    }
-
-    listEl.innerHTML = html;
-  } catch(e) {
-    listEl.innerHTML = `<div class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>${e.message}</div>`;
-  }
-}
-
-async function startDownload(repoId, filename, btn) {
-  btn.disabled = true;
-  btn.innerHTML = '<div class="spinner-border spinner-border-sm"></div>';
-
-  const progressArea = document.getElementById('download-progress-area');
-  const progressBar  = document.getElementById('download-progress-bar');
-  const statusMsg    = document.getElementById('download-status-msg');
-  progressArea.style.display = '';
-  statusMsg.textContent = `Iniciando descarga de ${filename}…`;
-  progressBar.style.width = '5%';
-
-  try {
-    const res = await fetch('/api/local/download', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({repo_id: repoId, filename}),
-    });
-    const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || 'Error iniciando descarga');
-
-    const jobId = data.job_id;
-    const es = new EventSource(`/api/local/download/${jobId}`);
-    es.onmessage = (e) => {
-      const d = JSON.parse(e.data);
-      if (d.status === 'done') {
-        progressBar.style.width = '100%';
-        progressBar.classList.remove('progress-bar-animated');
-        statusMsg.innerHTML = `<span style="color:#34d399"><i class="bi bi-check2-circle me-1"></i>${filename} descargado correctamente</span>`;
-        btn.innerHTML = '<i class="bi bi-check2"></i>';
-        es.close();
-        setTimeout(() => { loadModels(); loadCachedModels(); }, 500);
-      } else if (d.status === 'error') {
-        statusMsg.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>${d.error}</span>`;
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-download me-1"></i>Reintentar';
-        es.close();
-      } else {
-        statusMsg.textContent = `Descargando ${filename}… (${d.progress || 0}%)`;
-        progressBar.style.width = `${Math.max(5, d.progress || 10)}%`;
-      }
-    };
-    es.onerror = () => {
-      es.close();
-      statusMsg.innerHTML = '<span class="text-danger">Conexión perdida con el servidor de descarga.</span>';
-    };
-  } catch(e) {
-    statusMsg.innerHTML = `<span class="text-danger">${e.message}</span>`;
-    btn.disabled = false;
-    btn.innerHTML = '<i class="bi bi-download me-1"></i>Reintentar';
-  }
-}
-// ---------------------------------------------------------------------------
-// Modal GGUF v2: tarjetas gestionables, progreso por modelo y descargas paralelas
+// Modal GGUF: tarjetas gestionables, progreso por modelo y descargas paralelas
 // ---------------------------------------------------------------------------
 const ggufActiveDownloads = new Map();
 
@@ -1605,7 +1333,7 @@ function ggufCard(model, kind, options = {}) {
     model.quant ? `Quant: ${escapeHtml(model.quant)}` : '',
     model.variant ? `Variante: ${escapeHtml(model.variant)}` : '',
     model.n_layers ? `${escapeHtml(String(model.n_layers))} capas` : '',
-  ].filter(Boolean).join(' · ');
+  ].filter(Boolean).join('  -  ');
   const description = String(model.description || options.description || '');
   const location = String(model.path || model.abs_path || '');
   const border = options.border || '#2d3148';
@@ -1629,7 +1357,7 @@ function ggufCard(model, kind, options = {}) {
       <div class="d-flex align-items-start gap-2">
         <div class="flex-grow-1 min-width-0">
           <div class="small fw-semibold mb-1" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(filename)}</div>
-          <div class="text-secondary" style="font-size:.72rem">${ggufSize(model)}${details ? ` · ${details}` : ''}</div>
+          <div class="text-secondary" style="font-size:.72rem">${ggufSize(model)}${details ? `  -  ${details}` : ''}</div>
           ${description ? `<div class="text-secondary mt-1" style="font-size:.72rem">${escapeHtml(description)}</div>` : ''}
           <div class="text-secondary mt-1" style="font-size:.68rem">
             ${creator ? `<span>Creador: ${escapeHtml(creator)}</span>` : ''}

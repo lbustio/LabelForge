@@ -1,17 +1,17 @@
-﻿"""
+"""
 cuda_init.py
 ------------
-Pre-carga las DLLs de CUDA en Windows ANTES de que cualquier módulo importe llama_cpp.
+Pre-carga las DLLs de CUDA en Windows ANTES de que cualquier modulo importe llama_cpp.
 
-En CUDA 13.x las DLLs (cublas64_13.dll, etc.) están en bin\\x64, no en bin.
+En CUDA 13.x las DLLs (cublas64_13.dll, etc.) estan en bin\\x64, no en bin.
 
 Dos mecanismos complementarios:
 1. os.add_dll_directory()  -  funciona para cargas con LOAD_LIBRARY_SEARCH_DEFAULT_DIRS
 2. PATH  -  necesario para LoadLibrary con winmode=0 (que usa llama_cpp en Windows)
-   Las dependencias de llama.dll/ggml-cuda.dll se resuelven vía PATH.
+   Las dependencias de llama.dll/ggml-cuda.dll se resuelven via PATH.
 
 Los handles de os.add_dll_directory() DEBEN guardarse: si el GC los destruye,
-el directorio se elimina del search path. Por eso mantenemos _handles a nivel módulo.
+el directorio se elimina del search path. Por eso mantenemos _handles a nivel modulo.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ def _ensure_cuda_ready() -> bool:
             try:
                 _handles.append(os.add_dll_directory(str(d)))
             except Exception as exc:
-                log.debug("[cuda_init] add_dll_directory falló para %s: %s", d, exc)
+                log.debug("[cuda_init] add_dll_directory fallo para %s: %s", d, exc)
 
             # Mecanismo 2: PATH (para LoadLibrary winmode=0, que usa llama_cpp)
             current_path = os.environ.get("PATH", "")

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Procesamiento — LabelForge{% endblock %}
+{% block title %}Procesamiento - LabelForge{% endblock %}
 {% block content %}
 <style>
   .field-label-row {
@@ -116,7 +116,7 @@
       </div>
       <div style="min-width:0;flex:1">
         <div class="ds-ready-title">Archivo listo para procesar</div>
-        <div class="ds-ready-path" id="ds-ready-path">—</div>
+        <div class="ds-ready-path" id="ds-ready-path">-</div>
         <div class="ds-ready-meta mt-1" id="ds-ready-meta"></div>
       </div>
       <button type="button" class="btn btn-outline-info btn-sm flex-shrink-0"
@@ -134,23 +134,23 @@
   <div class="ds-dropzone" id="ds-dropzone"
        ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
     <div class="ds-dropzone-icon mb-2"><i class="bi bi-cloud-upload"></i></div>
-    <div class="fw-semibold text-light mb-1">Arrastra tu archivo aquí</div>
+    <div class="fw-semibold text-light mb-1">Arrastra tu archivo aqui</div>
     <div class="text-secondary small mb-3">o haz clic para abrir el explorador</div>
     <button type="button" class="btn btn-outline-info btn-sm px-3"
             onclick="document.getElementById('ds-file-input').click()">
       <i class="bi bi-folder2-open me-1"></i>Seleccionar archivo
     </button>
     <div class="text-secondary mt-2" style="font-size:.75rem">
-      Formatos soportados: .csv &nbsp;·&nbsp; .xlsx &nbsp;·&nbsp; .xls
+      Formatos soportados: .csv &nbsp; - &nbsp; .xlsx &nbsp; - &nbsp; .xls
     </div>
   </div>
 
-  <!-- Información del archivo seleccionado -->
+  <!-- Informacion del archivo seleccionado -->
   <div class="ds-file-info" id="ds-file-info">
     <div class="d-flex align-items-center gap-2">
       <i class="bi bi-file-earmark-spreadsheet text-info fs-5"></i>
       <div>
-        <div class="ds-fname" id="ds-fname">—</div>
+        <div class="ds-fname" id="ds-fname">-</div>
         <div class="ds-fsize" id="ds-fsize"></div>
       </div>
       <div class="ms-auto" id="ds-upload-status">
@@ -165,7 +165,7 @@
   <div class="row g-3 mt-1 align-items-end" id="ds-selectors" style="display:none!important">
 
     <div class="col-md-5" id="ds-sheet-group" style="display:none">
-      <label class="form-label small text-secondary" for="ds-sheet">Hoja de cálculo</label>
+      <label class="form-label small text-secondary" for="ds-sheet">Hoja de calculo</label>
       <select class="form-select" id="ds-sheet" onchange="onSheetChange()">
         <option value="">(primera hoja)</option>
       </select>
@@ -196,7 +196,7 @@
 </div>
 
 <div class="card-dark accent-panel accent-amber">
-  <div class="card-header-label">Configuración del proceso</div>
+  <div class="card-header-label">Configuracion del proceso</div>
   <form id="proc-form" onsubmit="saveProcessing(event)">
     <div class="row g-4">
 
@@ -207,7 +207,7 @@
             <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
                     data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="right"
                     data-bs-title="Punto de control cada N entradas"
-                    data-bs-content="El estado recuperable se guarda por entrada. Este valor define cada cuántas entradas se informa el avance en los registros y en la interfaz."
+                    data-bs-content="El estado recuperable se guarda por entrada. Este valor define cada cuantas entradas se informa el avance en los registros y en la interfaz."
                     aria-label="Ayuda: punto de control cada N entradas">
               <i class="bi bi-question-circle"></i>
             </button>
@@ -217,31 +217,31 @@
         </div>
         <div class="mb-3">
           <div class="field-label-row">
-            <label class="form-label small text-secondary" for="claim_max_chars">Longitud máxima de la entrada (caracteres)</label>
+            <label class="form-label small text-secondary" for="claim_max_chars">Longitud maxima de la entrada (caracteres)</label>
             <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
                     data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="right"
-                    data-bs-title="Longitud máxima de la entrada"
-                    data-bs-content="Límite de caracteres que se envían al modelo de lenguaje. Ayuda a controlar tokens y tiempo; si es muy bajo puede cortar contexto útil."
-                    aria-label="Ayuda: longitud máxima de la entrada">
+                    data-bs-title="Longitud maxima de la entrada"
+                    data-bs-content="Limite de caracteres que se envian al modelo de lenguaje. Ayuda a controlar tokens y tiempo; si es muy bajo puede cortar contexto util."
+                    aria-label="Ayuda: longitud maxima de la entrada">
               <i class="bi bi-question-circle"></i>
             </button>
           </div>
           <input type="number" class="form-control" id="claim_max_chars" min="100" step="100">
-          <div class="form-text text-secondary">Las entradas más largas se recortan a este límite antes de enviarlas.</div>
+          <div class="form-text text-secondary">Las entradas mas largas se recortan a este limite antes de enviarlas.</div>
         </div>
         <div class="mb-3">
           <div class="field-label-row">
-            <label class="form-label small text-secondary" for="recovery_threshold_successes">Umbral de recuperación (éxitos consecutivos)</label>
+            <label class="form-label small text-secondary" for="recovery_threshold_successes">Umbral de recuperacion (exitos consecutivos)</label>
             <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
                     data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="right"
-                    data-bs-title="Umbral de recuperación"
-                    data-bs-content="Número de llamadas exitosas seguidas necesarias para empezar a reducir la espera después de una falla o de alcanzar un límite de peticiones."
-                    aria-label="Ayuda: umbral de recuperación">
+                    data-bs-title="Umbral de recuperacion"
+                    data-bs-content="Numero de llamadas exitosas seguidas necesarias para empezar a reducir la espera despues de una falla o de alcanzar un limite de peticiones."
+                    aria-label="Ayuda: umbral de recuperacion">
               <i class="bi bi-question-circle"></i>
             </button>
           </div>
           <input type="number" class="form-control" id="recovery_threshold_successes" min="1" step="1">
-          <div class="form-text text-secondary">Número de éxitos consecutivos para reducir la espera.</div>
+          <div class="form-text text-secondary">Numero de exitos consecutivos para reducir la espera.</div>
         </div>
       </div>
 
@@ -252,22 +252,22 @@
             <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
                     data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="left"
                     data-bs-title="Espera base entre peticiones"
-                    data-bs-content="Espera inicial entre llamadas. Debe respetar el proveedor más restrictivo; para cuotas gratuitas conviene usar la espera segura."
+                    data-bs-content="Espera inicial entre llamadas. Debe respetar el proveedor mas restrictivo; para cuotas gratuitas conviene usar la espera segura."
                     aria-label="Ayuda: espera base entre peticiones">
               <i class="bi bi-question-circle"></i>
             </button>
           </div>
           <input type="number" class="form-control" id="base_delay_seconds" min="0" step="0.1" oninput="validateDelayInput()">
-          <div id="rate-limit-summary" class="form-text text-secondary mt-2">Cargando límites de peticiones...</div>
+          <div id="rate-limit-summary" class="form-text text-secondary mt-2">Cargando limites de peticiones...</div>
         </div>
         <div class="mb-3">
           <div class="field-label-row">
-            <label class="form-label small text-secondary" for="min_delay_seconds">Espera mínima (segundos)</label>
+            <label class="form-label small text-secondary" for="min_delay_seconds">Espera minima (segundos)</label>
             <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
                     data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="left"
-                    data-bs-title="Espera mínima"
-                    data-bs-content="Piso al que puede bajar la espera cuando la ejecución se recupera. Evita acelerar demasiado y volver a chocar con límites."
-                    aria-label="Ayuda: espera mínima">
+                    data-bs-title="Espera minima"
+                    data-bs-content="Piso al que puede bajar la espera cuando la ejecucion se recupera. Evita acelerar demasiado y volver a chocar con limites."
+                    aria-label="Ayuda: espera minima">
               <i class="bi bi-question-circle"></i>
             </button>
           </div>
@@ -275,12 +275,12 @@
         </div>
         <div class="mb-3">
           <div class="field-label-row">
-            <label class="form-label small text-secondary" for="max_delay_seconds">Espera máxima (segundos)</label>
+            <label class="form-label small text-secondary" for="max_delay_seconds">Espera maxima (segundos)</label>
             <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
                     data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="left"
-                    data-bs-title="Espera máxima"
-                    data-bs-content="Techo de espera después de aplicar aumento progresivo. Evita que fallas temporales generen esperas cada vez más largas."
-                    aria-label="Ayuda: espera máxima">
+                    data-bs-title="Espera maxima"
+                    data-bs-content="Techo de espera despues de aplicar aumento progresivo. Evita que fallas temporales generen esperas cada vez mas largas."
+                    aria-label="Ayuda: espera maxima">
               <i class="bi bi-question-circle"></i>
             </button>
           </div>
@@ -291,12 +291,12 @@
       <div class="col-md-6">
         <div class="mb-3">
           <div class="field-label-row">
-            <label class="form-label small text-secondary" for="rate_limit_backoff_multiplier">Multiplicador por límite de peticiones (429)</label>
+            <label class="form-label small text-secondary" for="rate_limit_backoff_multiplier">Multiplicador por limite de peticiones (429)</label>
             <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
                     data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="right"
-                    data-bs-title="Aumento por límite de peticiones (429)"
-                    data-bs-content="Factor por el que se multiplica la espera cuando el proveedor responde 429 o alcanza una cuota temporal. Un valor más alto significa más espera y menos choques."
-                    aria-label="Ayuda: aumento por límite de peticiones">
+                    data-bs-title="Aumento por limite de peticiones (429)"
+                    data-bs-content="Factor por el que se multiplica la espera cuando el proveedor responde 429 o alcanza una cuota temporal. Un valor mas alto significa mas espera y menos choques."
+                    aria-label="Ayuda: aumento por limite de peticiones">
               <i class="bi bi-question-circle"></i>
             </button>
           </div>
@@ -312,7 +312,7 @@
             <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
                     data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="left"
                     data-bs-title="Aumento por error del servidor"
-                    data-bs-content="Factor por el que se multiplica la espera ante tiempos de espera agotados o errores 5xx. Da margen cuando el proveedor o la red están inestables."
+                    data-bs-content="Factor por el que se multiplica la espera ante tiempos de espera agotados o errores 5xx. Da margen cuando el proveedor o la red estan inestables."
                     aria-label="Ayuda: aumento por error del servidor">
               <i class="bi bi-question-circle"></i>
             </button>
@@ -322,23 +322,23 @@
         </div>
         <div class="mb-3">
           <div class="field-label-row">
-            <label class="form-label small text-secondary" for="recovery_delay_multiplier">Multiplicador de recuperación de la espera</label>
+            <label class="form-label small text-secondary" for="recovery_delay_multiplier">Multiplicador de recuperacion de la espera</label>
             <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
                     data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="left"
-                    data-bs-title="Recuperación de la espera"
-                    data-bs-content="Factor para reducir la espera cuando ya hubo suficientes éxitos. Debe ser menor que 1; 0.8 reduce la espera 20%."
-                    aria-label="Ayuda: recuperación de la espera">
+                    data-bs-title="Recuperacion de la espera"
+                    data-bs-content="Factor para reducir la espera cuando ya hubo suficientes exitos. Debe ser menor que 1; 0.8 reduce la espera 20%."
+                    aria-label="Ayuda: recuperacion de la espera">
               <i class="bi bi-question-circle"></i>
             </button>
           </div>
           <input type="number" class="form-control" id="recovery_delay_multiplier" min="0.1" max="1" step="0.05">
-          <div class="form-text text-secondary">Factor por el que se reduce la espera al alcanzar el umbral de recuperación. Debe ser &lt; 1.</div>
+          <div class="form-text text-secondary">Factor por el que se reduce la espera al alcanzar el umbral de recuperacion. Debe ser &lt; 1.</div>
         </div>
       </div>
 
     </div>
     <button type="submit" class="btn btn-primary btn-sm mt-2">
-      <i class="bi bi-floppy me-1"></i>Guardar parámetros
+      <i class="bi bi-floppy me-1"></i>Guardar parametros
     </button>
   </form>
 </div>
@@ -382,7 +382,7 @@ function renderRateLimitSummary() {
   if (!el) return;
   if (!rateLimitSummary || rateLimitSummary.error) {
     el.className = 'form-text text-warning mt-2';
-    el.textContent = 'No se pudieron cargar los límites de peticiones. Revisa la configuración de árbitros.';
+    el.textContent = 'No se pudieron cargar los limites de peticiones. Revisa la configuracion de arbitros.';
     return;
   }
   const tone = rateLimitSummary.global_alert === 'danger' ? 'text-danger' : (rateLimitSummary.global_alert === 'warning' ? 'text-warning' : 'text-info');
@@ -409,7 +409,7 @@ function validateDelayInput() {
 async function saveProcessing(e) {
   e.preventDefault();
   if (!validateDelayInput()) {
-    showToast(`La espera base es demasiado baja. Mínimo recomendado: ${rateLimitSummary.global_min_delay}s`, 'error');
+    showToast(`La espera base es demasiado baja. Minimo recomendado: ${rateLimitSummary.global_min_delay}s`, 'error');
     return;
   }
   const payload = {};
@@ -423,10 +423,10 @@ async function saveProcessing(e) {
   });
   const data = await res.json();
   if (!res.ok) { showToast(data.error || 'Error al guardar', 'error'); return; }
-  showToast('Parámetros guardados');
+  showToast('Parametros guardados');
 }
 
-/* Inicializar cuando el DOM esté listo */
+/* Inicializar cuando el DOM este listo */
 document.addEventListener('DOMContentLoaded', function() {
   try { initProcessingHelpPopovers(); } catch(e) { console.warn('Popovers no disponibles:', e); }
   loadProcessing();
@@ -464,14 +464,14 @@ document.addEventListener('DOMContentLoaded', function() {
   const dropzone = document.getElementById('ds-dropzone');
   if (dropzone) {
     dropzone.addEventListener('click', function(e) {
-      // Evita abrir dos veces el selector al pulsar el botón o sus hijos.
+      // Evita abrir dos veces el selector al pulsar el boton o sus hijos.
       if (e.target.closest('button')) return;
       document.getElementById('ds-file-input').click();
     });
   }
 });
 
-/* --- Selección de archivo ---------------------------------------------- */
+/* --- Seleccion de archivo ---------------------------------------------- */
 function onFileSelected(files) {
   if (!files || files.length === 0) return;
   const file = files[0];
@@ -542,7 +542,7 @@ async function uploadAndInspect(file) {
     }
 
     _currentServerPath = data.path;
-    setUploadStatus('✓ Listo', false);
+    setUploadStatus('OK Listo', false);
     setFeedback(
       `${data.columns.length} columnas detectadas` +
       (data.is_excel ? ` &mdash; ${data.sheets.length} hoja(s)` : '') +
@@ -565,7 +565,7 @@ async function uploadAndInspect(file) {
     // Lista de columnas
     populateColumnDropdown(data.columns, '');
 
-    // Mostrar sección de selects
+    // Mostrar seccion de selects
     selectors.style.removeProperty('display');
 
   } catch (e) {
@@ -597,7 +597,7 @@ function populateColumnDropdown(columns, current) {
     .join('');
 }
 
-/* --- Guardar configuración --------------------------------------------- */
+/* --- Guardar configuracion --------------------------------------------- */
 async function saveDatasetConfig() {
   const inputFile  = _currentServerPath || _savedDatasetConfig?.input_file || '';
   const sheet      = document.getElementById('ds-sheet').value;
@@ -614,12 +614,12 @@ async function saveDatasetConfig() {
   const data = await res.json();
   if (!res.ok) { showToast(data.error || 'Error al guardar', 'error'); return; }
   _savedDatasetConfig = data;
-  showToast('Configuración guardada ✓');
+  showToast('Configuracion guardada OK');
   renderDatasetBanner(data);
   renderDatasetReady(data);
 }
 
-/* --- Cargar configuración existente ------------------------------------ */
+/* --- Cargar configuracion existente ------------------------------------ */
 async function loadDatasetConfig() {
   try {
     const res = await fetch('/api/dataset/config');
@@ -630,7 +630,7 @@ async function loadDatasetConfig() {
     renderDatasetBanner(data);
     renderDatasetReady(data);
 
-    // Intenta inspeccionar el archivo ya configurado para mostrar información.
+    // Intenta inspeccionar el archivo ya configurado para mostrar informacion.
     const res2 = await fetch('/api/dataset/inspect', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -638,7 +638,7 @@ async function loadDatasetConfig() {
     });
     if (res2.ok) {
       const info = await res2.json();
-      // Muestra información del archivo previamente configurado.
+      // Muestra informacion del archivo previamente configurado.
       document.getElementById('ds-fname').textContent = basename(data.input_file);
       document.getElementById('ds-fsize').textContent = `ya configurado en el servidor`;
       document.getElementById('ds-file-info').style.display = '';
@@ -675,7 +675,7 @@ function renderDatasetReady(data) {
   const sheet = data.sheet ? `Hoja: ${escapeHtml(data.sheet)}` : 'Hoja: primera/disponible';
   const col = data.text_column ? `Columna: ${escapeHtml(data.text_column)}` : 'Columna: pendiente';
   path.innerHTML = `<i class="bi bi-file-earmark-spreadsheet me-1 text-info"></i>${escapeHtml(data.input_file)}`;
-  meta.innerHTML = `${sheet} <span class="mx-2">·</span> ${col} <span class="mx-2">·</span> Se usara en la proxima ejecucion`;
+  meta.innerHTML = `${sheet} <span class="mx-2"> - </span> ${col} <span class="mx-2"> - </span> Se usara en la proxima ejecucion`;
   card.style.display = '';
 }
 

@@ -1,4 +1,4 @@
-﻿"""
+"""
 main_webapp.py
 --------------
 Entrypoint principal para la webapp de configuracion y lanzamiento del etiquetado.
@@ -77,18 +77,10 @@ def main():
 
     print(f"  LabelForge   ->   http://{args.host}:{args.port}")
     status = auth_status()
-    if status["mode"] == "disabled":
-        print("  Auth        →  desactivado explicitamente con LABELFORGE_AUTH_DISABLED=1")
-    elif status["mode"] == "local-login":
-        if status["enabled"]:
-            print(f"  Auth        →  login local SQLite activo en http://{args.host}:{args.port}/login")
-        else:
-            print(f"  Auth        →  login local SQLite sin usuarios; crea el primero en http://{args.host}:{args.port}/login")
-    elif status["mode"] == "oauth2" and status["enabled"]:
-        providers = ", ".join(status["providers"]) or "OAuth2"
-        print(f"  Auth        →  OAuth2 activo ({providers}) en http://{args.host}:{args.port}/login")
+    if status["enabled"]:
+        print(f"  Auth        ->  login local SQLite activo en http://{args.host}:{args.port}/login")
     else:
-        print("  Auth        →  OAuth2 solicitado pero sin proveedores configurados")
+        print(f"  Auth        ->  login local SQLite sin usuarios; crea el primero en http://{args.host}:{args.port}/login")
     print("  Presiona Ctrl+C para detener.")
 
     app.run(
