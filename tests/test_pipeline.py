@@ -18,6 +18,16 @@ if str(ROOT) not in sys.path:
 
 from labelforge_core.utils import safe_int, safe_float, safe_binary_int, number
 from labelforge_core.agreement_metrics import compute_agreement_metrics, compute_consensus_metrics
+from labelforge_core import checkpoint_io
+from labelforge_core.dataset_io import DatasetError, inspect_dataset, load_dataset, resolve_dataset_path
+from labelforge_core.run_reporting import (
+    build_run_stats,
+    detect_arbiters,
+    detect_principles,
+    principle_counts_from_rows,
+    row_processing_status,
+)
+from labelforge_core.provider_preflight import validate_provider_preflight
 from labelforge_core.label_persuasion import should_reuse_run_state, validate_safety_policy
 from labelforge_core.arbiters_io import normalize_arbiter
 
@@ -152,6 +162,180 @@ class TestRunResume(unittest.TestCase):
         )
 
         self.assertFalse(should_reuse_run_state(state, args, 10))
+
+
+class TestProviderPreflight(unittest.TestCase):
+    def test_non_local_config_does_not_require_hw_profile(self):
+        cfg = {
+            "arbiters": [
+                {
+                    "id": "remote1",
+                    "provider": {
+                        "type": "openai_compat",
+                        "model": "local-server-model",
+                        "base_url": "http://localhost:11434/v1",
+                    },
+                }
+            ]
+        }
+
+        with mock.patch("labelforge_core.provider_preflight.HW_PROFILE_PATH", Path("missing-hw-profile.json")):
+            self.assertEqual(validate_provider_preflight(cfg), [])
+
+
+class TestCheckpointIO(unittest.TestCase):
+    def test_clear_runtime_checkpoints_can_include_run_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = {
+                "CHECKPOINT_PATH": root / "checkpoint.json",
+                "FAILED_QUEUE_PATH": root / "failed_queue.jsonl",
+                "CLAIM_RESULTS_PATH": root / "claim_results.jsonl",
+                "ARBITER_RESULTS_PATH": root / "arbiter_results.jsonl",
+                "RUN_STATE_PATH": root / "run_state.json",
+            }
+            for path in paths.values():
+                path.write_text("{}", encoding="utf-8")
+
+            with mock.patch.multiple(checkpoint_io, **paths):
+                cleared = checkpoint_io.clear_runtime_checkpoints(include_run_state=True)
+
+            self.assertEqual(set(cleared), {p.name for p in paths.values()})
+            self.assertFalse(any(path.exists() for path in paths.values()))
+
+    def test_load_checkpoint_merges_incremental_claim_results(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = {
+                "CHECKPOINT_PATH": root / "checkpoint.json",
+                "FAILED_QUEUE_PATH": root / "failed_queue.jsonl",
+                "CLAIM_RESULTS_PATH": root / "claim_results.jsonl",
+                "ARBITER_RESULTS_PATH": root / "arbiter_results.jsonl",
+                "RUN_STATE_PATH": root / "run_state.json",
+            }
+
+            with mock.patch.multiple(checkpoint_io, **paths):
+                checkpoint_io.save_checkpoint(0, {"0": {"AUTH_consensus": 0}})
+                checkpoint_io.append_claim_result(1, {"AUTH_consensus": 1}, "ok")
+                loaded = checkpoint_io.load_checkpoint()
+
+            self.assertEqual(loaded["last_index"], 1)
+            self.assertEqual(loaded["results"]["0"]["AUTH_consensus"], 0)
+            self.assertEqual(loaded["results"]["1"]["AUTH_consensus"], 1)
+
+
+class TestDatasetIO(unittest.TestCase):
+    def test_load_and_inspect_csv_dataset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sample.csv"
+            path.write_text("claim,class\nhello,ok\nbye,no\n", encoding="utf-8")
+
+            rows, fieldnames = load_dataset(path, text_column="claim")
+            info = inspect_dataset(path)
+
+            self.assertEqual(fieldnames, ["claim", "class"])
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["claim"], "hello")
+            self.assertEqual(info["columns"], ["claim", "class"])
+            self.assertFalse(info["is_excel"])
+
+    def test_load_dataset_requires_text_column(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sample.csv"
+            path.write_text("text\nhello\n", encoding="utf-8")
+
+            with self.assertRaises(DatasetError):
+                load_dataset(path, text_column="claim")
+
+    def test_resolve_dataset_path_restricts_allowed_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "data"
+            root.mkdir()
+            allowed = root / "ok.csv"
+            outside = Path(tmp) / "no.csv"
+            allowed.write_text("claim\nok\n", encoding="utf-8")
+            outside.write_text("claim\nno\n", encoding="utf-8")
+
+            self.assertEqual(resolve_dataset_path(allowed, allowed_root=root), allowed.resolve())
+            with self.assertRaises(PermissionError):
+                resolve_dataset_path(outside, allowed_root=root)
+
+
+class TestRunReporting(unittest.TestCase):
+    def test_detects_schema_and_counts_principles(self):
+        fieldnames = [
+            "claim",
+            "AUTH_arb1",
+            "AUTH_arb2",
+            "AUTH_consensus",
+            "SC_arb1",
+            "SC_arb2",
+            "SC_consensus",
+            "prompt_tokens_arb1",
+            "prompt_tokens_arb2",
+        ]
+        rows = [
+            {"AUTH_consensus": "1", "SC_consensus": "0"},
+            {"AUTH_consensus": "0", "SC_consensus": "1"},
+            {"AUTH_consensus": "-1", "SC_consensus": "-1"},
+            {},
+        ]
+
+        self.assertEqual(detect_principles(fieldnames), ["AUTH", "SC"])
+        self.assertEqual(detect_arbiters(fieldnames), ["arb1", "arb2"])
+        self.assertEqual(row_processing_status(rows[0], ["AUTH", "SC"]), "ok")
+        self.assertEqual(row_processing_status(rows[2], ["AUTH", "SC"]), "failed")
+        self.assertEqual(row_processing_status(rows[3], ["AUTH", "SC"]), "pending")
+        self.assertEqual(
+            principle_counts_from_rows(rows, ["AUTH", "SC"]),
+            {"AUTH": {"ones": 1, "zeros": 1}, "SC": {"ones": 1, "zeros": 1}},
+        )
+
+    def test_build_run_stats_matches_output_contract(self):
+        rows = [
+            {
+                "claim": "A",
+                "class": "fake",
+                "AUTH_arb1": "1",
+                "AUTH_arb2": "1",
+                "AUTH_consensus": "1",
+                "prompt_tokens_arb1": "10",
+                "completion_tokens_arb1": "2",
+                "total_tokens_arb1": "12",
+                "latency_s_arb1": "0.5",
+                "prompt_tokens_arb2": "9",
+                "completion_tokens_arb2": "1",
+                "total_tokens_arb2": "10",
+                "latency_s_arb2": "0.25",
+            },
+            {
+                "claim": "B",
+                "class": "true",
+                "AUTH_arb1": "0",
+                "AUTH_arb2": "1",
+                "AUTH_consensus": "1",
+                "prompt_tokens_arb1": "7",
+                "completion_tokens_arb1": "1",
+                "total_tokens_arb1": "8",
+                "latency_s_arb1": "0.4",
+                "prompt_tokens_arb2": "8",
+                "completion_tokens_arb2": "1",
+                "total_tokens_arb2": "9",
+                "latency_s_arb2": "0.3",
+            },
+        ]
+        fieldnames = list(rows[0].keys())
+
+        stats = build_run_stats(rows, fieldnames, "labeled_test.csv", result_limit=1)
+
+        self.assertEqual(stats["source_file"], "labeled_test.csv")
+        self.assertEqual(stats["total_rows"], 2)
+        self.assertEqual(stats["successful_rows"], 2)
+        self.assertEqual(stats["total_tokens_global"], 39)
+        self.assertEqual(stats["results_count"], 1)
+        self.assertEqual(stats["results"][0]["index"], 1)
+        self.assertEqual(stats["arbiters"]["arb1"]["total_tokens"], 20)
+        self.assertIn("paper_summary", stats)
 
 
 class TestArbiterConfigSafety(unittest.TestCase):

@@ -12,6 +12,8 @@ import os
 import shutil
 from pathlib import Path
 
+from labelforge_core.paths import BASE_DIR, HW_PROFILE_PATH
+
 
 def _provider_key(provider: dict) -> str:
     override = (provider.get("api_key_override") or "").strip()
@@ -82,8 +84,7 @@ def _check_llama_cpp(arb_id: str, provider: dict) -> list[str]:
     issues: list[str] = []
 
     # 1. hw_profile.json existe y setup_ok
-    hw_profile = Path(__file__).resolve().parent.parent / "models" / "hw_profile.json"
-    if not hw_profile.exists():
+    if not HW_PROFILE_PATH.exists():
         issues.append(
             f"{arb_id}: falta models/hw_profile.json. "
             "Ejecuta 'python setup_env.py' antes de usar modelos locales."
@@ -91,7 +92,7 @@ def _check_llama_cpp(arb_id: str, provider: dict) -> list[str]:
     else:
         try:
             import json
-            profile = json.loads(hw_profile.read_text(encoding="utf-8"))
+            profile = json.loads(HW_PROFILE_PATH.read_text(encoding="utf-8"))
             if not profile.get("setup_ok"):
                 issues.append(
                     f"{arb_id}: setup_ok=false en hw_profile.json. "
@@ -117,8 +118,7 @@ def _check_llama_cpp(arb_id: str, provider: dict) -> list[str]:
             "Descarga un modelo desde la webapp (Arbitros  ->  Descargar modelos)."
         )
     else:
-        base_dir = Path(__file__).resolve().parent.parent
-        full_path = Path(model_path) if Path(model_path).is_absolute() else base_dir / model_path
+        full_path = Path(model_path) if Path(model_path).is_absolute() else BASE_DIR / model_path
         if not full_path.exists():
             issues.append(
                 f"{arb_id}: modelo GGUF no encontrado: {model_path}. "
@@ -199,4 +199,3 @@ def require_provider_preflight(cfg: dict):
     issues = validate_provider_preflight(cfg)
     if issues:
         raise RuntimeError("Preflight de proveedores fallo: " + "; ".join(issues))
-

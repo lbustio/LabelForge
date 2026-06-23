@@ -27,31 +27,6 @@ Ultima revision: 2026-06-23.
   - mantener compatibilidad con CSV final, checkpoints existentes y `/run`;
   - cubrir con tests antes de quitar helpers duplicados.
 
-- [ ] Corregir duplicacion/riesgo de checkpoints:
-  - fuente actual en nucleo: `labelforge_core/label_persuasion.py`;
-  - fuente duplicada en webapp: `_clear_runtime_checkpoint_files()` y lectura
-    manual de `run_state.json`/`claim_results.jsonl`;
-  - objetivo: una unica autoridad para limpiar, cargar y describir checkpoints.
-
-- [ ] Corregir duplicacion/riesgo de dataset:
-  - nucleo carga CSV/Excel en `load_dataset()`;
-  - webapp inspecciona/sube/carga inputs con logica propia;
-  - objetivo: helper compartido para inspeccion, carga, sheet, columnas y
-    validacion de rutas permitidas.
-
-- [ ] Corregir duplicacion/riesgo de metricas/resultados:
-  - nucleo calcula consenso, usage y metricas agregadas;
-  - webapp reconstruye status, usage, resumen paper y resultados;
-  - objetivo: un contrato compartido para leer output/checkpoint y producir
-    stats de UI sin recalcular diferente.
-
-- [ ] Revisar preflight CLI:
-  - `main_cli.py` revisa `hw_profile.json` usando config canonica antes de
-    parsear `--config`;
-  - el nucleo tambien ejecuta `require_provider_preflight()`;
-  - objetivo: evitar que un `--config` alternativo falle por arbitros locales
-    presentes solo en la config default.
-
 - [ ] Probar flujo completo end-to-end desde la webapp con subconjunto pequeno:
   - configurar dataset desde `/processing`;
   - validar preflight en `/arbiters`;
@@ -122,6 +97,16 @@ Ultima revision: 2026-06-23.
 
 - [x] CLI probado con dataset de webapp, columna `claim`, tres arbitros locales
   y `--limit 10`; genero CSV, log, metricas y estado completed.
+- [x] Checkpoints centralizados en `labelforge_core/checkpoint_io.py`; el
+  pipeline y la webapp usan el helper compartido para limpieza/carga basica.
+- [x] Dataset centralizado en `labelforge_core/dataset_io.py`; CLI y webapp
+  comparten carga CSV/Excel, inspeccion de columnas/sheets y validacion de ruta
+  permitida para datasets de la UI.
+- [x] Reporting centralizado en `labelforge_core/run_reporting.py`; la webapp
+  delega metricas, filas de resultados, conteos por principio y resumen paper
+  al contrato del nucleo.
+- [x] Preflight CLI consolidado: `main_cli.py` ya no lee la config default ni
+  valida `hw_profile.json`; el preflight vive en el nucleo y usa la config real.
 - [x] Auditoria inicial de arquitectura: detectadas duplicaciones en preflight,
   checkpoints, dataset y reporting.
 - [x] Configuracion editable movida de `scripts/` a `config/`.

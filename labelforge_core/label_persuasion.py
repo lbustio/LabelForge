@@ -55,6 +55,20 @@ from labelforge_core.arbiters_io import (
     import_arbiters_from_file,
     merge_arbiters,
 )
+from labelforge_core.checkpoint_io import (
+    append_arbiter_result,
+    append_claim_result,
+    append_to_failed_queue,
+    clear_failed_queue,
+    clear_runtime_checkpoints,
+    load_arbiter_results,
+    load_checkpoint,
+    load_failed_queue,
+    load_run_state,
+    save_checkpoint,
+    save_run_state,
+)
+from labelforge_core.dataset_io import DatasetError, load_dataset
 from labelforge_core.secrets_io import provider_api_key_env, secrets_env_path, set_secret_value
 from labelforge_core.provider_preflight import require_provider_preflight
 from labelforge_core.utils import number as _number
@@ -78,11 +92,6 @@ LOGS_DIR.mkdir(exist_ok=True)
 CHECKPOINTS_DIR.mkdir(exist_ok=True)
 
 RUN_ID             = datetime.now().strftime("%Y%m%d_%H%M%S")
-CHECKPOINT_PATH    = CHECKPOINTS_DIR / "checkpoint.json"
-FAILED_QUEUE_PATH  = CHECKPOINTS_DIR / "failed_queue.jsonl"
-RUN_STATE_PATH     = CHECKPOINTS_DIR / "run_state.json"
-CLAIM_RESULTS_PATH = CHECKPOINTS_DIR / "claim_results.jsonl"
-ARBITER_RESULTS_PATH = CHECKPOINTS_DIR / "arbiter_results.jsonl"
 LOG_PATH           = LOGS_DIR / f"run_{RUN_ID}.log"
 
 # ---------------------------------------------------------------------------
@@ -153,28 +162,8 @@ def log_claim_start(row_index: int, claim: str, stage: str, position: int, total
     )
 
 
-def clear_resumable_checkpoint_files(include_run_state: bool = False):
-    paths = [CHECKPOINT_PATH, FAILED_QUEUE_PATH, CLAIM_RESULTS_PATH, ARBITER_RESULTS_PATH]
-    if include_run_state:
-        paths.append(RUN_STATE_PATH)
-    for path in paths:
-        try:
-            path.unlink(missing_ok=True)
-        except OSError as exc:
-            log.warning("No se pudo limpiar %s: %s", path.name, exc)
-
-
 def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
-
-
-def write_json_atomic(path: Path, data: dict):
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
-        f.flush()
-        os.fsync(f.fileno())
-    tmp.replace(path)
 
 
 def read_config_file(config_path: Path) -> dict:
@@ -222,153 +211,6 @@ def verify_provider_key(provider: str, api_key: str, base_url: str = "") -> int:
         client = OpenAI(api_key=api_key or "local", base_url=base_url)
         return len(client.models.list().data)
     raise ValueError(f"Proveedor sin verificacion de API key: {provider}")
-
-
-def append_jsonl_durable(path: Path, item: dict):
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(item, ensure_ascii=False) + "\n")
-        f.flush()
-        os.fsync(f.fileno())
-
-
-# ---------------------------------------------------------------------------
-# Carga de dataset (CSV y Excel)
-# ---------------------------------------------------------------------------
-def load_dataset(input_path: Path, sheet: str = "", text_column: str = "claim") -> tuple[list, list]:
-    """
-    Carga un dataset desde un archivo CSV o Excel.
-
-    Args:
-        input_path: ruta al archivo (.csv, .xlsx, .xls).
-        sheet: nombre o indice (str) de la hoja de calculo. Solo aplica a Excel.
-               Si es cadena vacia o None, se usa la primera hoja.
-        text_column: nombre de la columna que contiene el texto a etiquetar.
-                     Solo se valida existencia; no se filtra aqui.
-
-    Returns:
-        (rows, fieldnames) donde rows es lista de dicts y fieldnames es lista de str.
-
-    Raises:
-        SystemExit: si el archivo no existe, el formato no es soportado,
-                    el sheet no existe o la columna no existe.
-    """
-    suffix = input_path.suffix.lower()
-
-    if suffix in (".xlsx", ".xls"):
-        try:
-            import openpyxl  # noqa: PLC0415
-        except ImportError:
-            log.error("openpyxl no esta instalado. Ejecuta: pip install openpyxl")
-            raise SystemExit(1)
-
-        wb = openpyxl.load_workbook(str(input_path), read_only=True, data_only=True)
-        sheet_names = wb.sheetnames
-
-        # Resolver sheet
-        if sheet in ("", None):
-            ws = wb.active
-            resolved_sheet = ws.title
-        elif sheet in sheet_names:
-            ws = wb[sheet]
-            resolved_sheet = sheet
-        else:
-            # Intentar como indice numerico
-            try:
-                idx = int(sheet)
-                resolved_sheet = sheet_names[idx]
-                ws = wb[resolved_sheet]
-            except (ValueError, IndexError):
-                log.error(
-                    f"Sheet '{sheet}' no encontrado. Sheets disponibles: {sheet_names}"
-                )
-                raise SystemExit(1)
-
-        log.info(f"Leyendo Excel: sheet='{resolved_sheet}'")
-        rows_raw = list(ws.iter_rows(values_only=True))
-        wb.close()
-
-        if not rows_raw:
-            log.error("El archivo Excel esta vacio.")
-            raise SystemExit(1)
-
-        headers = [str(h) if h is not None else "" for h in rows_raw[0]]
-        rows = []
-        for row_vals in rows_raw[1:]:
-            row_dict = {}
-            for col_name, val in zip(headers, row_vals):
-                row_dict[col_name] = "" if val is None else str(val)
-            rows.append(row_dict)
-        fieldnames = headers
-
-    elif suffix == ".csv":
-        with open(input_path, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            fieldnames = list(reader.fieldnames or [])
-            rows = list(reader)
-    else:
-        log.error(f"Formato de archivo no soportado: '{suffix}'. Use .csv, .xlsx o .xls.")
-        raise SystemExit(1)
-
-    if text_column not in fieldnames:
-        log.error(
-            f"La columna '{text_column}' no existe en el dataset. "
-            f"Columnas disponibles: {fieldnames}"
-        )
-        raise SystemExit(1)
-
-    log.info(f"Dataset cargado: {len(rows)} filas, columna de texto='{text_column}'")
-    return rows, fieldnames
-
-
-def load_jsonl_latest(path: Path, key_fields: tuple) -> dict:
-    latest = {}
-    if not path.exists():
-        return latest
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                item = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            key = tuple(str(item.get(k, "")) for k in key_fields)
-            latest[key] = item
-    return latest
-
-
-def append_claim_result(row_index: int, record: dict, status: str = "ok"):
-    append_jsonl_durable(CLAIM_RESULTS_PATH, {
-        "row_index": row_index,
-        "status": status,
-        "updated_at": now_iso(),
-        "record": record,
-    })
-
-
-def load_claim_results() -> dict:
-    rows = {}
-    for key, item in load_jsonl_latest(CLAIM_RESULTS_PATH, ("row_index",)).items():
-        rows[key[0]] = item.get("record", {})
-    return rows
-
-
-def append_arbiter_result(row_index: int, arbiter_id: str, result: dict):
-    append_jsonl_durable(ARBITER_RESULTS_PATH, {
-        "row_index": row_index,
-        "arbiter_id": arbiter_id,
-        "updated_at": now_iso(),
-        "result": result,
-    })
-
-
-def load_arbiter_results() -> dict:
-    partial = {}
-    for key, item in load_jsonl_latest(ARBITER_RESULTS_PATH, ("row_index", "arbiter_id")).items():
-        row_index, arbiter_id = key
-        partial.setdefault(row_index, {})[arbiter_id] = item.get("result", {})
-    return partial
 
 
 # ---------------------------------------------------------------------------
@@ -1229,63 +1071,6 @@ def add_entry_usage_metrics(record: dict, arbiters: list) -> dict:
     return metrics
 
 
-# ---------------------------------------------------------------------------
-# Checkpoint
-# ---------------------------------------------------------------------------
-def load_checkpoint() -> dict:
-    results = {}
-    last_index = -1
-    if CHECKPOINT_PATH.exists():
-        with open(CHECKPOINT_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        results.update(data.get("results", {}))
-        last_index = int(data.get("last_index", -1))
-
-    incremental_results = load_claim_results()
-    if incremental_results:
-        results.update(incremental_results)
-        last_index = max(last_index, max(int(k) for k in incremental_results))
-
-    if last_index >= 0:
-        log.info(f"Checkpoint: hasta indice {last_index}, {len(results)} registros persistidos")
-    return {"last_index": last_index, "results": results}
-
-
-def save_checkpoint(last_index: int, results: dict):
-    write_json_atomic(CHECKPOINT_PATH, {
-        "last_index": last_index,
-        "updated_at": now_iso(),
-        "results": results,
-    })
-    log.debug(f"Checkpoint guardado en indice {last_index}")
-
-
-# ---------------------------------------------------------------------------
-# Cola de fallidos
-# ---------------------------------------------------------------------------
-def append_to_failed_queue(row_index: int, row: dict, reason: str = ""):
-    with open(FAILED_QUEUE_PATH, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"index": row_index, "row": row, "reason": reason}, ensure_ascii=False) + "\n")
-
-
-def load_failed_queue() -> list:
-    if not FAILED_QUEUE_PATH.exists():
-        return []
-    seen = {}
-    with open(FAILED_QUEUE_PATH, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                item = json.loads(line)
-                seen[item["index"]] = item
-    return list(seen.values())
-
-
-def clear_failed_queue():
-    if FAILED_QUEUE_PATH.exists():
-        FAILED_QUEUE_PATH.unlink()
-
-
 def make_failed_record(arbiters: list, principles: list) -> dict:
     record = {}
     for arb in arbiters:
@@ -1440,16 +1225,6 @@ def build_claim_metric(row_index: int, row: dict, record: dict, arbiters: list, 
     }
 
 
-def load_run_state() -> dict:
-    if not RUN_STATE_PATH.exists():
-        return {}
-    try:
-        with open(RUN_STATE_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return {}
-
-
 def save_progress_state(
     state: dict,
     results: dict,
@@ -1467,7 +1242,7 @@ def save_progress_state(
         "pause_reason": pause_reason,
         "summary": summary,
     })
-    write_json_atomic(RUN_STATE_PATH, state)
+    save_run_state(state)
 
 
 def should_reuse_run_state(state: dict, args, total: int) -> bool:
@@ -1696,13 +1471,18 @@ def main():
     text_column = args.column or dataset_cfg.get("text_column") or "claim"
 
     log.info("Leyendo dataset...")
-    rows, original_fieldnames = load_dataset(Path(input_file), sheet=sheet, text_column=text_column)
+    try:
+        rows, original_fieldnames = load_dataset(Path(input_file), sheet=sheet, text_column=text_column)
+    except DatasetError as exc:
+        log.error("%s", exc)
+        raise SystemExit(1) from exc
+    log.info(f"Dataset cargado: {len(rows)} filas, columna de texto='{text_column}'")
 
     total = len(rows) if args.limit is None else min(args.limit, len(rows))
     log.info(f"Total de entradas a procesar: {total}")
 
     if args.fresh:
-        clear_resumable_checkpoint_files(include_run_state=True)
+        clear_runtime_checkpoints(include_run_state=True)
         log.info("Modo --fresh: checkpoints reanudables previos limpiados")
 
     previous_state = load_run_state()
@@ -1993,7 +1773,7 @@ def main():
     log.info(f"  Salida   : {output_path}")
     log.info(f"  Log      : {LOG_PATH}")
     save_progress_state(state, results, arbiters, principles, "completed")
-    clear_resumable_checkpoint_files()
+    clear_runtime_checkpoints()
     emit_run_metric(
         "complete",
         run_id=run_id,

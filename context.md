@@ -72,11 +72,14 @@ labelforge_core/
   agreement_metrics.py
   arbiters_io.py
   hw_detection.py
+  checkpoint_io.py
+  dataset_io.py
   label_persuasion.py
   local_models.py
   paths.py
   provider_preflight.py
   rate_limits.py
+  run_reporting.py
   secrets_io.py
   utils.py
 webapp/
@@ -179,8 +182,13 @@ python main_cli.py
 2. carga `secrets/secrets.env`;
 3. resuelve credenciales GCP si aplica;
 4. crea directorios con `ensure_project_dirs()`;
-5. si hay arbitros `llama_cpp`, valida `models/hw_profile.json`;
-6. delega a `labelforge_core.label_persuasion.main()`.
+5. delega a `labelforge_core.label_persuasion.main()`.
+
+Regla actual: `main_cli.py` no debe leer config ni decidir preflight. La
+autoridad de preflight es `labelforge_core.provider_preflight`, llamada desde el
+pipeline despues de cargar la config real (`--config` incluido). Esto evita que
+una config alternativa falle por arbitros locales presentes solo en la config
+default.
 
 `labelforge_core/label_persuasion.py` hace el trabajo principal:
 
@@ -233,12 +241,35 @@ Estado durable:
 | `checkpoints/arbiter_results.jsonl` | resultado por entrada/arbitro |
 | `checkpoints/failed_queue.jsonl` | fallos pendientes |
 
+Autoridad actual:
+
+- `labelforge_core/checkpoint_io.py` define rutas y helpers de lectura/escritura
+  para checkpoints, JSONL incrementales, cola de fallidos y `run_state.json`;
+- `labelforge_core/label_persuasion.py` consume esos helpers;
+- `webapp/app.py` usa `clear_runtime_checkpoints()` para limpieza desde la UI.
+
 Salida final:
 
 - `output/labeled_YYYYMMDD_HHMMSS.csv`.
 
 El CSV conserva columnas originales y agrega votos por arbitro, consenso, tokens,
 latencias, metricas por entrada y metricas agregadas.
+
+## 7.1 Dataset
+
+Autoridad actual:
+
+- `labelforge_core/dataset_io.py` centraliza carga e inspeccion de CSV/Excel;
+- `load_dataset()` es usado por el pipeline CLI y por la webapp para reconstruir
+  filas de entrada desde `run_state`;
+- `inspect_dataset()` es usado por la webapp para upload/inspect de datasets;
+- `resolve_dataset_path()` concentra resolucion de rutas y, cuando la webapp lo
+  llama con `allowed_root=DATA_DIR`, evita salir de `data/`.
+
+La webapp conserva lo que si le corresponde como adaptador HTTP: permisos,
+uploads, formularios, SQLite/auth y respuestas JSON. No duplicar lectura de
+dataset input en `webapp/app.py`; si se agregan formatos, sheets o encoding,
+hacerlo en `dataset_io.py`.
 
 ## 8. Metricas
 
@@ -255,6 +286,16 @@ Regla arquitectonica:
 - los calculos viven en Python;
 - la UI renderiza datos y formatea;
 - evitar mover reglas de negocio a JavaScript.
+
+Autoridad actual de reporting:
+
+- `labelforge_core/run_reporting.py` interpreta filas de salida
+  CSV/checkpoint y produce estructuras de UI/reporte;
+- detecta principios y arbitros desde columnas;
+- calcula estado de fila, usage, conteos por principio, filas paginadas de
+  resultado, metricas de acuerdo y `paper_summary`;
+- `webapp/app.py` conserva lectura de archivos, permisos, auth, ownership y
+  respuestas HTTP, pero delega el calculo a `run_reporting.py`.
 
 ## 9. Webapp
 
@@ -454,45 +495,41 @@ print(c.post("/api/local/model/nope.gguf/move", json={"destination_dir": "C:\\Te
 Hallazgos detectados el 2026-06-23. No corregir automaticamente; proponer
 diseno y pedir aprobacion antes de tocar codigo.
 
-### Preflight CLI duplicado
+### Preflight CLI centralizado
 
-- `main_cli.py` revisa `models/hw_profile.json` antes de delegar al nucleo.
-- `labelforge_core.provider_preflight.require_provider_preflight()` vuelve a
-  validar proveedores dentro del pipeline.
-- Riesgo: `main_cli.py` lee la config canonica para decidir si hay `llama_cpp`,
-  no necesariamente el `--config` pasado al CLI.
-- Direccion recomendada: una sola autoridad de preflight en el nucleo, con CLI
-  como wrapper delgado.
+- Hecho: `main_cli.py` es wrapper delgado y no lee config ni `hw_profile.json`.
+- `labelforge_core.provider_preflight.require_provider_preflight()` es la unica
+  autoridad de preflight para corridas CLI y webapp.
+- `provider_preflight.py` usa rutas canonicas de `labelforge_core.paths`.
 
-### Checkpoints duplicados
+### Checkpoints centralizados
 
-- Nucleo: constantes y funciones en `labelforge_core/label_persuasion.py`.
-- Webapp: `_clear_runtime_checkpoint_files()`, `/api/checkpoint/status`,
-  `/api/checkpoint/clear`, y lectura manual de `run_state.json` /
-  `claim_results.jsonl`.
-- Riesgo: CLI y webapp pueden divergir sobre que significa limpiar, reanudar o
-  completar un run.
-- Direccion recomendada: modulo `labelforge_core/checkpoint_io.py` con contrato
-  compartido para limpiar, cargar, resumir y describir estado.
+- Hecho: `labelforge_core/checkpoint_io.py` es la autoridad de rutas y helpers
+  durables para checkpoints.
+- `label_persuasion.py` ya no mantiene copias locales de JSONL/checkpoint/cola.
+- `webapp/app.py` usa el helper compartido para limpiar runtime checkpoints.
+- Pendiente futuro: si se requiere mas detalle de checkpoint/status, agregar
+  helpers al nucleo sin volver a duplicar interpretacion en Flask.
 
-### Dataset duplicado
+### Dataset centralizado
 
-- Nucleo: `load_dataset()` en `label_persuasion.py`.
-- Webapp: upload/inspect/config y carga de input para reconstruir checkpoints.
-- Riesgo: diferencias de encoding, Excel sheets, columnas y validacion de rutas.
-- Direccion recomendada: modulo `labelforge_core/dataset_io.py` con helpers
-  para inspeccion, carga y validacion reusable.
+- Hecho: `labelforge_core/dataset_io.py` es la autoridad para carga e inspeccion
+  de datasets CSV/Excel.
+- `label_persuasion.py` ya no mantiene un `load_dataset()` local.
+- `webapp/app.py` usa helpers compartidos para upload/inspect y carga de filas
+  desde `run_state`.
+- Pendiente futuro: si se necesita soporte adicional de formatos o validacion
+  de columnas, agregarlo ahi y mantener la webapp como adaptador.
 
-### Reporting duplicado
+### Reporting centralizado
 
-- Nucleo: consenso, usage, resumen y CSV final.
-- Webapp: `_detect_principles()`, `_row_processing_status()`,
-  `_entry_usage_metrics_from_row()`, `_paper_reporting_summary()` y
-  `/api/run/stats`.
-- Riesgo: cambios de nombres o esquemas pueden producir resultados distintos
-  entre CSV, UI y paper summary.
-- Direccion recomendada: modulo `labelforge_core/run_reporting.py` para leer
-  CSV/checkpoint y producir stats consumibles por UI.
+- Hecho: `labelforge_core/run_reporting.py` concentra interpretacion de outputs
+  y checkpoints ya fusionados.
+- `webapp/app.py` ya no mantiene copias de `_detect_principles()`,
+  `_row_processing_status()`, `_entry_usage_metrics_from_row()`,
+  `_paper_reporting_summary()` ni calculo directo de `/api/run/stats`.
+- La webapp sigue encargada de permisos, ownership, lectura del ultimo CSV y
+  fallback a checkpoints; el calculo de dominio queda en el nucleo.
 
 ### Outputs generados por CLI
 
