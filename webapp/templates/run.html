@@ -20,6 +20,54 @@
     font-size: .74rem;
     font-weight: 700;
   }
+  .log-claim-start {
+    border: 1px solid rgba(34,211,238,.65);
+    border-left: 7px solid #22d3ee;
+    background:
+      linear-gradient(90deg, rgba(34,211,238,.24), rgba(14,165,233,.12) 58%, rgba(10,12,20,.88)),
+      #061018;
+    color: #e0f2fe;
+    padding: .62rem .7rem;
+    border-radius: .5rem;
+    margin: .75rem 0 .45rem;
+    box-shadow: 0 0 0 1px rgba(34,211,238,.12), 0 0 22px rgba(34,211,238,.16);
+    position: relative;
+  }
+  .log-claim-start::before {
+    content: "NUEVO ITEM";
+    display: block;
+    width: max-content;
+    margin-bottom: .35rem;
+    border-radius: 999px;
+    background: #22d3ee;
+    color: #03111d;
+    padding: .08rem .45rem;
+    font-size: .62rem;
+    font-weight: 900;
+    letter-spacing: .08em;
+  }
+  .log-claim-chip {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid rgba(186,230,253,.72);
+    background: rgba(8,47,73,.92);
+    color: #bae6fd;
+    border-radius: 999px;
+    padding: .08rem .5rem;
+    margin-right: .4rem;
+    font-size: .72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+  .log-claim-preview {
+    margin-top: .42rem;
+    color: #dbeafe;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .8rem;
+    line-height: 1.35;
+    word-break: break-word;
+  }
   .chart-box {
     background: #0a0c14;
     border: 1px solid #2d3148;
@@ -52,6 +100,41 @@
     z-index: 2;
   }
   .chart-pending-overlay .po-icon { font-size: 1.5rem; margin-bottom: .35rem; color: #1e293b; }
+  .health-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 4.7rem;
+    border-radius: 999px;
+    padding: .2rem .55rem;
+    font-size: .72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+  .health-ok { background: rgba(52,211,153,.12); color: #34d399; border: 1px solid rgba(52,211,153,.45); }
+  .health-warn { background: rgba(251,191,36,.12); color: #fbbf24; border: 1px solid rgba(251,191,36,.45); }
+  .health-bad { background: rgba(251,113,133,.12); color: #fb7185; border: 1px solid rgba(251,113,133,.45); }
+  .quality-details {
+    border: 1px solid #2d3148;
+    border-radius: .5rem;
+    background: #0a0c14;
+    margin-top: .75rem;
+    overflow: hidden;
+  }
+  .quality-details summary {
+    cursor: pointer;
+    padding: .75rem .9rem;
+    color: #94a3b8;
+    font-weight: 700;
+    list-style-position: inside;
+  }
+  .quality-details[open] summary {
+    border-bottom: 1px solid #2d3148;
+  }
+  .quality-details-body {
+    padding: .85rem;
+  }
 </style>
 
 <div class="page-title">
@@ -107,7 +190,7 @@
   </div>
   <div class="row g-3 align-items-end">
     <div class="col-md-4">
-      <button id="btn-start" class="btn btn-primary btn-lg w-100" onclick="startRun()">
+      <button id="btn-start" class="btn btn-primary btn-lg w-100" onclick="startRun().catch(e=>{appendLog('[ERROR interno] '+e.message,'error');showToast('Error interno: '+e.message,'error');})">
         <i class="bi bi-play-fill me-1"></i>Iniciar
       </button>
     </div>
@@ -180,14 +263,14 @@
   <div class="col-xl-5">
     <div class="card-dark accent-panel accent-blue mb-3" id="live-stats-panel">
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <div class="card-header-label mb-0"><i class="bi bi-graph-up me-1"></i>Metricas en vivo</div>
+        <div class="card-header-label mb-0"><i class="bi bi-speedometer2 me-1"></i>Estado en vivo</div>
         <span class="badge bg-primary-subtle text-primary border border-primary" id="live-source">Sin ejecucion activa</span>
       </div>
       <div class="row g-2 mb-3">
         <div class="col-sm-4 col-6">
-          <div class="metric-mini accent-violet text-center">
-            <div class="metric-value" id="live-total-tokens">-</div>
-            <div class="metric-label">Tokens ahora</div>
+          <div class="metric-mini accent-emerald text-center">
+            <div class="metric-value"><span id="live-health" class="health-pill health-warn">Listo</span></div>
+            <div class="metric-label" id="live-health-detail">Salud</div>
           </div>
         </div>
         <div class="col-sm-4 col-6">
@@ -197,42 +280,27 @@
           </div>
         </div>
         <div class="col-sm-4 col-6">
-          <div class="metric-mini accent-emerald text-center">
-            <div class="metric-value" id="live-successful-rows">-</div>
-            <div class="metric-label">Entradas OK</div>
+          <div class="metric-mini accent-cyan text-center">
+            <div class="metric-value" id="live-eta">-</div>
+            <div class="metric-label">ETA</div>
           </div>
         </div>
         <div class="col-sm-4 col-6">
-          <div class="metric-mini accent-rose text-center">
-            <div class="metric-value" id="live-failed-rows">-</div>
-            <div class="metric-label">Fallidos</div>
+          <div class="metric-mini accent-violet text-center">
+            <div class="metric-value" id="live-total-tokens">-</div>
+            <div class="metric-label">Tokens ahora</div>
           </div>
         </div>
         <div class="col-sm-4 col-6">
           <div class="metric-mini accent-amber text-center">
-            <div class="metric-value" id="live-tpr">-</div>
-            <div class="metric-label">Tokens / entrada</div>
+            <div class="metric-value" id="live-projected-tokens">-</div>
+            <div class="metric-label">Tokens estimados</div>
           </div>
         </div>
         <div class="col-sm-4 col-6">
-          <div class="metric-mini accent-cyan text-center">
-            <div class="metric-value" id="live-total-latency">-</div>
-            <div class="metric-label">Tiempo ahora</div>
-          </div>
-        </div>
-      </div>
-      <!-- Graficas en tiempo real -->
-      <div class="row g-2 mb-3" id="live-charts-row">
-        <div class="col-md-5">
-          <div style="background:#0a0c14;border:1px solid #2d3148;border-radius:.5rem;padding:.6rem">
-            <div style="font-size:.68rem;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.4rem">Distribucion OK / Fallidos / Pendientes</div>
-            <canvas id="chart-donut" height="150"></canvas>
-          </div>
-        </div>
-        <div class="col-md-7">
-          <div style="background:#0a0c14;border:1px solid #2d3148;border-radius:.5rem;padding:.6rem">
-            <div style="font-size:.68rem;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.4rem">Latencia media por arbitro (ultimas N muestras)</div>
-            <canvas id="chart-latency" height="150"></canvas>
+          <div class="metric-mini accent-rose text-center">
+            <div class="metric-value" id="live-attention">-</div>
+            <div class="metric-label">Fallos / reintentos</div>
           </div>
         </div>
       </div>
@@ -274,46 +342,20 @@
 <div class="card-dark accent-panel accent-violet mb-4" id="live-dashboard-panel">
   <div class="card-header-label"><i class="bi bi-graph-up-arrow me-1"></i>Dashboard en vivo</div>
   <div class="row g-3 mb-3">
-    <div class="col-lg-8">
+    <div class="col-lg-6">
       <div class="chart-box">
         <div class="chart-box-title" id="chart-speed-title">Velocidad de etiquetado (entradas/min)</div>
         <canvas id="chart-speed" height="120"></canvas>
       </div>
     </div>
-    <div class="col-lg-4">
-      <div class="chart-box">
-        <div class="chart-box-title">Tokens por arbitro</div>
-        <canvas id="chart-tokens" height="120"></canvas>
-      </div>
-    </div>
-  </div>
-  <div class="row g-3 mb-3">
-    <div class="col-lg-4">
-      <div class="chart-box">
-        <div class="chart-box-title">Tasa de exito por arbitro</div>
-        <div class="chart-pending-overlay" id="overlay-success">
-          <div class="po-icon"><i class="bi bi-hourglass-split"></i></div>
-          <div id="overlay-success-msg">Inicia un proceso para ver datos en vivo</div>
-        </div>
-        <canvas id="chart-success" height="120"></canvas>
-      </div>
-    </div>
-    <div class="col-lg-8">
-      <div class="chart-box">
-        <div class="chart-box-title">Latencia min / prom / max por arbitro (s)</div>
-        <canvas id="chart-latrange" height="120"></canvas>
-      </div>
-    </div>
-  </div>
-  <div class="row g-3">
-    <div class="col-12">
+    <div class="col-lg-6">
       <div class="chart-box">
         <div class="chart-box-title" id="chart-principles-title">Distribucion de principios (entradas etiquetadas hasta ahora)</div>
         <div class="chart-pending-overlay" id="overlay-principles">
           <div class="po-icon"><i class="bi bi-hourglass-split"></i></div>
           <div id="overlay-principles-msg">Inicia un proceso para ver datos en vivo</div>
         </div>
-        <canvas id="chart-principles" height="80"></canvas>
+        <canvas id="chart-principles" height="120"></canvas>
       </div>
     </div>
   </div>
@@ -366,6 +408,7 @@
     </div>
   </div>
   <div id="stats-arbiters-table"></div>
+  <div id="paper-summary-panel" class="mt-4"></div>
   <div id="agreement-panel" class="mt-4"></div>
 </div>
 
@@ -374,11 +417,11 @@
 <!-- ============================================================ -->
 <div class="card-dark accent-panel accent-cyan mb-4" id="results-panel" style="display:none">
   <div class="d-flex justify-content-between align-items-center mb-3">
-    <div class="card-header-label mb-0"><i class="bi bi-table me-1"></i>Resultados obtenidos</div>
+    <div class="card-header-label mb-0"><i class="bi bi-table me-1"></i>Resultados y calidad - tabla completa</div>
     <span class="badge bg-info-subtle text-info border border-info" id="stats-results-count"></span>
   </div>
   <div class="text-secondary small mb-2">
-    Mostrando entradas procesadas, con las mas recientes arriba.
+    Incluye consenso, acuerdo observado, unanimidad/division por principio, votos y justificaciones por arbitro, tokens de entrada/salida, llamadas y tiempos.
   </div>
   <div class="d-flex flex-wrap align-items-center gap-2 mb-3" id="results-controls"></div>
   <div id="stats-results-table"></div>
@@ -390,9 +433,11 @@
 <div class="card-dark accent-panel accent-violet mb-3">
   <div class="d-flex justify-content-between align-items-center mb-3">
     <div class="card-header-label mb-0"><i class="bi bi-folder me-1"></i>Archivos de salida generados</div>
+    {% if current_user and current_user.role == 'admin' %}
     <button class="btn btn-sm btn-outline-warning" id="btn-archive" onclick="archiveAllOutputs()">
       <i class="bi bi-archive me-1"></i>Archivar todo
     </button>
+    {% endif %}
   </div>
   <div id="outputs-table"><span class="text-secondary small">Cargando...</span></div>
 </div>
@@ -401,7 +446,6 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script>
-let sseSource = null;
 let statsOK = 0, statsFailed = 0, statsErrors = 0;
 let runErrors = [];
 let queuedClaims = [];
@@ -414,6 +458,8 @@ let chartTokens = null;
 let chartSuccess = null;
 let chartLatRange = null;
 let chartPrinciples = null;
+let chartAgreementQuality = null;
+let chartAgreementKappa = null;
 const latencyHistory = {};
 const speedHistory   = [];
 const LATENCY_MAX_POINTS = 60;
@@ -423,11 +469,20 @@ let checkpointTotalRows = 0;
 let resultsOffset = 0;
 let resultsPageSize = 'all';
 let statsRefreshTimer = null;
+let runSyncTimer = null;
+let runSyncSeq = 0;
+let runSyncBusy = false;
 let arbiterLogMeta = {};
 let itemLabel = 'entrada';
 let checkpointEvery = 10;
 let allArbiterConfigs = {};
 let hwProfile = null;
+let backendLogSeen = new Set();
+let runStartedAtMs = 0;
+let lastStatsActivitySnapshot = '';
+let runWasActive = false;
+let latestAgreementData = null;
+let currentRunLogActive = false;
 
 function configureArbiterLogColors(arbiters, maxArbs) {
   arbiterLogMeta = {};
@@ -704,11 +759,18 @@ async function loadFailedQueue() {
 
 // ---------- run ----------
 async function startRun() {
-  if (!Object.keys(arbiterLogMeta).length) {
-    await loadConfigSummary();
-  }
-  const limit = document.getElementById('limit-input').value.trim();
+  // Feedback inmediato: el usuario sabe que el click se registro
+  appendLog('[Iniciando...] Enviando solicitud al servidor...', 'ok');
+  showToast('Iniciando proceso...', 'info');
 
+  if (!Object.keys(arbiterLogMeta).length) {
+    try { await loadConfigSummary(); } catch(e) { /* silencio */ }
+  }
+
+  backendLogSeen = new Set();
+  lastStatsActivitySnapshot = '';
+  currentRunLogActive = false;
+  runStartedAtMs = Date.now();
   statsOK = 0; statsFailed = 0; statsErrors = 0;
   runErrors = [];
   queuedClaims = [];
@@ -718,20 +780,39 @@ async function startRun() {
   updateStats();
   renderRunLists();
   resetLiveStats();
-  clearLog();
+
+  const limitEl = document.getElementById('limit-input');
+  const limit = limitEl ? limitEl.value.trim() : '';
 
   const body = {};
   if (limit) body.limit = parseInt(limit);
 
-  const res = await fetch('/api/run/start', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
+  appendLog(`[Iniciando...] POST /api/run/start limit=${limit||'sin limite'}`, null);
+
+  let res, data;
+  try {
+    res = await fetch('/api/run/start', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    data = await res.json();
+  } catch (e) {
+    const msg = `Error de red al iniciar: ${e.message}`;
+    showToast(msg, 'error');
+    appendLog(`[ERROR RED] ${msg}`, 'error');
+    runErrors.push({kind: 'Red', detail: msg, time: new Date().toLocaleTimeString()});
+    renderRunLists();
+    return;
+  }
+
+  appendLog(`[Respuesta servidor] HTTP ${res.status}`, res.ok ? 'ok' : 'error');
+
   if (!res.ok) {
     const issues = Array.isArray(data.issues) ? data.issues : [];
-    showToast(data.error || 'Error al iniciar', 'error');
-    appendLog(`[ERROR] ${data.error || 'Error al iniciar'}`, 'error');
+    const errMsg = data.error || `Error HTTP ${res.status}`;
+    showToast(errMsg, 'error');
+    appendLog(`[ERROR] ${errMsg}`, 'error');
     issues.forEach(issue => {
       const line = `[preflight] ${issue}`;
       appendLog(line, 'error');
@@ -742,8 +823,9 @@ async function startRun() {
     return;
   }
 
+  appendLog('[OK] Proceso iniciado. Conectando...', 'ok');
   setRunning(true);
-  startSSE();
+  startRunSync();
 }
 
 async function stopRun() {
@@ -752,41 +834,91 @@ async function stopRun() {
   if (!res.ok) { showToast(data.error || 'Error al detener', 'error'); return; }
   showToast('Proceso detenido', 'warn');
   setRunning(false);
-  if (sseSource) { sseSource.close(); sseSource = null; }
+  stopRunSync();
+  await syncRunSnapshot();
 }
 
-function startSSE() {
-  if (sseSource) sseSource.close();
-  sseSource = new EventSource('/api/run/logs');
+function appendBackendLog(line, type = null) {
+  const text = String(line || '').trim();
+  if (!text) return;
+  if (backendLogSeen.has(text)) return;
+  backendLogSeen.add(text);
+  appendLog(text, type);
+  parseStats(text);
+}
 
-  sseSource.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-    if (msg.type === 'heartbeat') return;
-    if (msg.type === 'metric') {
-      renderLiveStats(msg.data);
-      return;
-    }
-    if (msg.type === 'exit') {
-      const code = msg.msg.replace('__EXIT__ ', '');
-      appendLog(`--- Proceso finalizado (${code}) ---`, code === '0' ? 'ok' : 'error');
-      setRunning(false);
-      sseSource.close(); sseSource = null;
-      loadCheckpoint();
-      loadOutputs();
-      loadCurrentRunStats();
-      loadRunStats();
-      return;
-    }
-    appendLog(msg.msg);
-    parseStats(msg.msg);
-  };
+function appendStatsActivity(data) {
+  const source = data.source_file || 'sin archivo';
+  const total = Number(data.total_rows || 0);
+  const ok = Number(data.successful_rows || 0);
+  const failed = Number(data.failed_rows || 0);
+  const pending = Number(data.pending_rows || 0);
+  const processed = ok + failed;
+  const tokens = Number(data.total_tokens_global || 0);
+  const snapshot = `${source}|${total}|${ok}|${failed}|${pending}|${tokens}`;
+  if (snapshot === lastStatsActivitySnapshot) return;
+  lastStatsActivitySnapshot = snapshot;
 
-  sseSource.onerror = () => {
-    if (!document.getElementById('btn-stop').disabled) {
-      appendLog('--- Conexion SSE perdida ---', 'warn');
-      setRunning(false);
-    }
-  };
+  appendBackendLog(
+    `[stats] ${processed} procesadas de ${total} (${ok} OK, ${failed} fallidas, ${pending} pendientes) desde ${source}`,
+    processed > 0 ? 'ok' : 'info'
+  );
+}
+
+function applyRunSnapshot(snapshot) {
+  if (!snapshot) return;
+  if (snapshot.run_log_available && !currentRunLogActive) {
+    currentRunLogActive = true;
+    appendBackendLog('[server-log] Bitacora local del servidor activada para esta ejecucion.', 'ok');
+  }
+  (snapshot.lines || []).forEach(line => appendBackendLog(line));
+  runSyncSeq = Number(snapshot.seq || runSyncSeq || 0);
+
+  if (snapshot.stats) {
+    renderLiveStats(snapshot.stats);
+  }
+
+  const running = Boolean(snapshot.running);
+  const justFinished = runWasActive && !running;
+  runWasActive = running;
+  setRunning(running);
+
+  if (justFinished) {
+    stopRunSync();
+    loadCheckpoint();
+    loadOutputs();
+    loadRunStats();
+  }
+}
+
+async function syncRunSnapshot() {
+  if (runSyncBusy) return null;
+  runSyncBusy = true;
+  try {
+    const res = await fetch(`/api/run/snapshot?since=${runSyncSeq}`);
+    if (!res.ok) return null;
+    const snapshot = await res.json();
+    applyRunSnapshot(snapshot);
+    return snapshot;
+  } catch (e) {
+    appendBackendLog(`[ui] No se pudo sincronizar estado: ${e.message}`, 'warn');
+    return null;
+  } finally {
+    runSyncBusy = false;
+  }
+}
+
+function startRunSync() {
+  if (runSyncTimer) return;
+  syncRunSnapshot();
+  runSyncTimer = setInterval(syncRunSnapshot, 1000);
+}
+
+function stopRunSync() {
+  if (runSyncTimer) {
+    clearInterval(runSyncTimer);
+    runSyncTimer = null;
+  }
 }
 
 // ---------- barras de progreso dual ----------
@@ -870,14 +1002,17 @@ function initCharts() {
   if (!chartSuccess) {
     const ctx = mkCtx('chart-success');
     if (ctx) chartSuccess = new Chart(ctx, {
-      type: 'bar', indexAxis: 'y',
+      type: 'bar',
       data: { labels: [], datasets: [{ label: '% exito', data: [], backgroundColor: '#34d39988', borderColor: '#34d399', borderWidth: 1 }] },
       options: { responsive: true, animation: { duration: 200 },
         scales: {
-          x: { ...scX, min: 0, max: 100, ticks: { ...scX.ticks, callback: v => v+'%' } },
-          y: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,.05)' } }
+          x: { ...scX, ticks: { ...scX.ticks, autoSkip: false, maxRotation: 35, minRotation: 0 } },
+          y: { ...scY(v => v + '%'), min: 0, max: 100 }
         },
-        plugins: { legend: leg }
+        plugins: {
+          legend: leg,
+          tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${c.parsed.y}%` } }
+        }
       }
     });
   }
@@ -1051,10 +1186,19 @@ async function archiveAllOutputs() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al archivar');
     if (data.archived === 0) {
-      showToast('No hay archivos para archivar', 'warn');
+      if ((data.cleared || []).length) {
+        resetExecutionUi('[archivo] No habia CSVs, pero se limpiaron temporales de ejecucion.');
+        await loadCheckpoint();
+        await loadOutputs();
+        showToast('Temporales de ejecucion limpiados', 'success');
+      } else {
+        showToast('No hay archivos para archivar', 'warn');
+      }
     } else {
       showToast(`${data.archived} archivos movidos a ${escapeHtml(data.archive_dir)}`, 'success');
-      loadOutputs();
+      resetExecutionUi(`[archivo] ${data.archived} archivos archivados. Interfaz lista para una nueva ejecucion.`);
+      await loadCheckpoint();
+      await loadOutputs();
     }
   } catch (err) {
     showToast(`Error: ${err.message}`, 'error');
@@ -1067,14 +1211,22 @@ function appendLog(line, type = null) {
   const box = document.getElementById('log-box');
   const div = document.createElement('div');
   const arbMeta = detectArbiterInLog(line);
+  const claimStart = String(line || '').match(/^\[entrada\s+(\d+)\]\s+Procesando\s+(\d+)\/(\d+)\s+-\s+etapa=([^\s]+)\s+-\s+texto="(.*)"$/);
   if (!type) {
-    if (line.includes('[WARNING]') || line.includes('Fallo') || line.includes('fallido')) type = 'warn';
+    if (claimStart) type = 'claim-start';
+    else if (line.includes('[WARNING]') || line.includes('Fallo') || line.includes('fallido')) type = 'warn';
     else if (line.includes('[ERROR]') || line.includes('Error') || line.includes('FAILED')) type = 'error';
     else if (line.includes('OK') || line.includes('completad') || line.includes('guardado')) type = 'ok';
     else type = 'info';
   }
   div.className = `log-${type}`;
-  if (arbMeta) {
+  if (type === 'claim-start' && claimStart) {
+    const [, idx, pos, total, stage, preview] = claimStart;
+    div.innerHTML = `<span class="log-claim-chip">entrada ${escapeHtml(idx)}</span>`
+      + `<span class="fw-semibold">Procesando ${escapeHtml(pos)} de ${escapeHtml(total)}</span>`
+      + `<span style="color:#7dd3fc"> / etapa ${escapeHtml(stage)}</span>`
+      + `<div class="log-claim-preview">${escapeHtml(preview)}</div>`;
+  } else if (arbMeta) {
     div.classList.add('log-arbiter-line');
     div.style.setProperty('--arb-color', arbMeta.color);
     div.title = arbMeta.name;
@@ -1131,14 +1283,19 @@ function updateStats() {
 }
 
 function resetLiveStats() {
-  document.getElementById('live-source').textContent = 'Iniciando ejecucion...';
+  document.getElementById('live-source').textContent = 'Sin ejecucion activa';
+  const health = document.getElementById('live-health');
+  if (health) {
+    health.textContent = 'Listo';
+    health.className = 'health-pill health-warn';
+  }
+  document.getElementById('live-health-detail').textContent = 'Salud';
   document.getElementById('live-total-tokens').textContent = '0';
   document.getElementById('live-progress').textContent = '0/-';
   document.getElementById('live-progress-pct').textContent = 'Progreso';
-  document.getElementById('live-successful-rows').textContent = '0';
-  document.getElementById('live-failed-rows').textContent = '0';
-  document.getElementById('live-tpr').textContent = '0';
-  document.getElementById('live-total-latency').textContent = '0.000s';
+  document.getElementById('live-eta').textContent = '-';
+  document.getElementById('live-projected-tokens').textContent = '0';
+  document.getElementById('live-attention').textContent = '0 / 0';
   document.getElementById('live-arbiters-table').innerHTML = '<span class="text-secondary small">Esperando metricas del pipeline...</span>';
   document.getElementById('live-last-claim').innerHTML = '';
   Object.keys(latencyHistory).forEach(k => delete latencyHistory[k]);
@@ -1150,17 +1307,60 @@ function resetLiveStats() {
   if (chartSuccess)    { chartSuccess.data.labels = []; chartSuccess.data.datasets[0].data = []; chartSuccess.update('none'); }
   if (chartLatRange)   { chartLatRange.data.labels = []; chartLatRange.data.datasets.forEach(d => d.data = []); chartLatRange.update('none'); }
   if (chartPrinciples) { chartPrinciples.data.labels = []; chartPrinciples.data.datasets.forEach(d => d.data = []); chartPrinciples.update('none'); }
-  showChartOverlay('success',    'Iniciando proceso...');
-  showChartOverlay('principles', 'Iniciando proceso...');
+  showChartOverlay('principles', 'Inicia un proceso para ver datos en vivo');
 }
 
-async function loadCurrentRunStats() {
-  const res = await fetch('/api/run/current-stats').catch(() => null);
-  if (!res || !res.ok) return;
-  const data = await res.json();
-  if (data.run_id || data.active || data.finished) {
-    renderLiveStats(data);
-  }
+function resetExecutionUi(message = '') {
+  statsOK = 0;
+  statsFailed = 0;
+  statsErrors = 0;
+  runErrors = [];
+  queuedClaims = [];
+  lastArbErrors = {};
+  latestLiveStats = null;
+  checkpointProcessedRows = 0;
+  checkpointTotalRows = 0;
+  resultsOffset = 0;
+  backendLogSeen = new Set();
+  lastStatsActivitySnapshot = '';
+  currentRunLogActive = false;
+  latestAgreementData = null;
+  if (chartAgreementQuality) { chartAgreementQuality.destroy(); chartAgreementQuality = null; }
+  if (chartAgreementKappa) { chartAgreementKappa.destroy(); chartAgreementKappa = null; }
+
+  setRunning(false);
+  stopRunSync();
+  updateStats();
+  renderRunLists();
+  resetLiveStats();
+  clearLog();
+
+  const progressBars = document.getElementById('progress-bars');
+  if (progressBars) progressBars.style.display = 'none';
+  const limitBar = document.getElementById('pb-limit-bar');
+  const totalBar = document.getElementById('pb-total-bar');
+  const limitText = document.getElementById('pb-limit-text');
+  const totalText = document.getElementById('pb-total-text');
+  if (limitBar) limitBar.style.width = '0%';
+  if (totalBar) totalBar.style.width = '0%';
+  if (limitText) limitText.textContent = '-';
+  if (totalText) totalText.textContent = '-';
+
+  const statsPanel = document.getElementById('stats-panel');
+  const resultsPanel = document.getElementById('results-panel');
+  const arbitersTable = document.getElementById('stats-arbiters-table');
+  const paperSummaryPanel = document.getElementById('paper-summary-panel');
+  const resultsTable = document.getElementById('stats-results-table');
+  if (statsPanel) statsPanel.style.display = 'none';
+  if (resultsPanel) resultsPanel.style.display = 'none';
+  if (arbitersTable) arbitersTable.innerHTML = '';
+  if (paperSummaryPanel) paperSummaryPanel.innerHTML = '';
+  if (resultsTable) resultsTable.innerHTML = '';
+
+  const outputs = document.getElementById('outputs-table');
+  if (outputs) outputs.innerHTML = '<span class="text-secondary small">Sin resultados todavia.</span>';
+  updateLimitExplanation();
+  if (message) appendLog(message, 'ok');
 }
 
 function renderLiveStats(data) {
@@ -1176,6 +1376,14 @@ function renderLiveStats(data) {
   const ok = Number(data.successful_rows || 0);
   const failed = Number(data.failed_rows || 0);
   const totalTokens = Number(data.total_tokens_global || 0);
+  const queued = Number(data.queued_rows || queuedClaims.length || 0);
+  const tokensPerProcessed = Number(data.tokens_per_processed_row || 0);
+  const speed = recentItemsPerMinute(processed);
+  const remaining = Math.max(0, total - processed);
+  const eta = speed > 0 && remaining > 0 ? remaining / speed : null;
+  const projectedTokens = processed > 0 && total > 0
+    ? Math.round(tokensPerProcessed * total)
+    : totalTokens;
 
   const datasetTotal = Number(data.dataset_total_rows || 0);
   const pctLimit   = total > 0 ? ((processed / total) * 100).toFixed(1) : null;
@@ -1186,10 +1394,30 @@ function renderLiveStats(data) {
   document.getElementById('live-progress-pct').textContent =
     (pctLimit !== null ? `${pctLimit}% limite` : 'Progreso') +
     (pctDataset !== null ? `  -  ${pctDataset}% total` : '');
-  document.getElementById('live-successful-rows').textContent = formatNumber(ok);
-  document.getElementById('live-failed-rows').textContent = formatNumber(failed);
-  document.getElementById('live-tpr').textContent = formatNumber(data.tokens_per_processed_row || 0);
-  document.getElementById('live-total-latency').textContent = formatSeconds(data.total_latency_s);
+  document.getElementById('live-eta').textContent = eta === null ? '-' : formatDurationFromMinutes(eta);
+  document.getElementById('live-projected-tokens').textContent = formatNumber(projectedTokens);
+  document.getElementById('live-attention').textContent = `${formatNumber(failed)} / ${formatNumber(queued)}`;
+
+  const health = document.getElementById('live-health');
+  const healthDetail = document.getElementById('live-health-detail');
+  if (health && healthDetail) {
+    const failedRate = processed > 0 ? failed / processed : 0;
+    let label = 'OK';
+    let cls = 'health-pill health-ok';
+    let detail = `${formatNumber(ok)} OK`;
+    if (data.pause_kind || failedRate >= 0.1 || queued > 0) {
+      label = 'Atencion';
+      cls = 'health-pill health-bad';
+      detail = queued > 0 ? `${formatNumber(queued)} reintentos` : `${formatPercent(failedRate * 100)} fallos`;
+    } else if (failed > 0 || !data.active) {
+      label = 'Vigilar';
+      cls = 'health-pill health-warn';
+      detail = failed > 0 ? `${formatNumber(failed)} fallos` : state;
+    }
+    health.textContent = label;
+    health.className = cls;
+    healthDetail.textContent = detail;
+  }
   updateProgressBars(processed, total, datasetTotal);
   updateCharts(data);
 
@@ -1205,13 +1433,10 @@ function renderLiveStats(data) {
         ${s.name && s.name !== id ? `<div class="small text-secondary">${escapeHtml(s.name)}</div>` : ''}
       </td>
       <td>${hwBadge(id)}</td>
-      <td>${formatNumber(s.prompt_tokens)}</td>
-      <td>${formatNumber(s.completion_tokens)}</td>
       <td class="fw-semibold">${formatNumber(s.total_tokens)}</td>
       <td>${formatNumber(s.calls)}</td>
       <td>${formatSeconds(s.latency_avg_s)}</td>
-      <td>${formatSeconds(s.latency_min_s)} / ${formatSeconds(s.latency_max_s)}</td>
-      <td>${formatSeconds(s.latency_total_s)}</td>
+      <td>${formatNumber(s.calls ? Math.round(Number(s.total_tokens || 0) / Number(s.calls || 1)) : 0)}</td>
     </tr>
   `).join('');
 
@@ -1221,15 +1446,12 @@ function renderLiveStats(data) {
         <thead><tr>
           <th class="text-secondary">Arbitro</th>
           <th class="text-secondary">SW/HW</th>
-          <th class="text-secondary">Entrada</th>
-          <th class="text-secondary">Salida</th>
-          <th class="text-secondary">Total</th>
+          <th class="text-secondary">Tokens</th>
           <th class="text-secondary">Llamadas</th>
           <th class="text-secondary">Tiempo prom.</th>
-          <th class="text-secondary">Min / Max</th>
-          <th class="text-secondary">Tiempo total</th>
+          <th class="text-secondary">Tokens / llamada</th>
         </tr></thead>
-        <tbody>${tbody || '<tr><td colspan="9" class="text-secondary">Sin metricas por arbitro todavia.</td></tr>'}</tbody>
+        <tbody>${tbody || '<tr><td colspan="6" class="text-secondary">Sin metricas por arbitro todavia.</td></tr>'}</tbody>
       </table>
     </div>`;
 
@@ -1246,18 +1468,22 @@ function renderLiveStats(data) {
     document.getElementById('live-last-claim').innerHTML = '';
     return;
   }
-  const status = last.event === 'claim_ok' ? 'OK' : last.event === 'claim_failed' ? 'Fallido' : 'Saltado';
-  const statusClass = last.event === 'claim_ok' ? 'text-success' : last.event === 'claim_failed' ? 'text-danger' : 'text-warning';
+  const isProcessing = last.event === 'claim_start';
+  const status = last.event === 'claim_ok' ? 'OK' : last.event === 'claim_failed' ? 'Fallido' : isProcessing ? 'Procesando' : 'Saltado';
+  const statusClass = last.event === 'claim_ok' ? 'text-success' : last.event === 'claim_failed' ? 'text-danger' : isProcessing ? 'text-info' : 'text-warning';
   const consensus = last.consensus && data.principles ? renderConsensus(last.consensus, data.principles) : '';
   const consensusMetrics = last.consensus_metrics ? renderEntryConsensusMetrics(last.consensus_metrics, data.principles || []) : '';
   const agreedPct = last.consensus_metrics ? parseFloat(last.consensus_metrics.observed_agreement_percent) : null;
+  const cardBg = isProcessing ? '#061018' : consensusBg(agreedPct);
+  const cardBorder = isProcessing ? 'rgba(34,211,238,.42)' : consensusBorder(agreedPct);
+  const claimText = last.claim || last.claim_preview || last.reason || '';
   document.getElementById('live-last-claim').innerHTML = `
-    <div class="p-3 rounded" style="background:${consensusBg(agreedPct)};border:1px solid ${consensusBorder(agreedPct)}">
+    <div class="p-3 rounded" style="background:${cardBg};border:1px solid ${cardBorder}">
       <div class="d-flex justify-content-between gap-3 mb-2">
-        <div class="fw-semibold">Ultima entrada procesada</div>
+        <div class="fw-semibold">${isProcessing ? 'Entrada en proceso' : 'Ultima entrada procesada'}</div>
         <div class="${statusClass} small text-nowrap">#${escapeHtml(last.row_index)} / ${status}</div>
       </div>
-      <div class="small">${escapeHtml(last.claim || last.reason || '')}</div>
+      <div class="small">${escapeHtml(claimText)}</div>
       <div class="mt-2">${consensus}</div>
       ${consensusMetrics}
       <div class="text-secondary small mt-2">
@@ -1297,6 +1523,27 @@ function formatSeconds(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n < 0) return '-';
   return `${n >= 10 ? n.toFixed(1) : n.toFixed(3)}s`;
+}
+
+function formatDurationFromMinutes(minutes) {
+  const n = Number(minutes);
+  if (!Number.isFinite(n) || n < 0) return '-';
+  if (n < 1) return '<1 min';
+  if (n < 60) return `${Math.round(n)} min`;
+  const hours = Math.floor(n / 60);
+  const mins = Math.round(n % 60);
+  return mins ? `${hours}h ${mins}m` : `${hours}h`;
+}
+
+function recentItemsPerMinute(currentProcessed = null) {
+  const points = speedHistory.slice();
+  if (currentProcessed !== null) points.push({ t: Date.now(), p: Number(currentProcessed || 0) });
+  if (points.length < 2) return 0;
+  const first = points[0];
+  const last = points[points.length - 1];
+  const dt = (last.t - first.t) / 60000;
+  const dp = last.p - first.p;
+  return dt > 0 ? Math.max(0, dp / dt) : 0;
 }
 
 function formatMetric(value, decimals = 3) {
@@ -1347,6 +1594,7 @@ function renderEntryConsensusMetrics(metrics, principles) {
 function renderAgreementMetrics(agreement) {
   const target = document.getElementById('agreement-panel');
   if (!target || !agreement) return;
+  latestAgreementData = agreement;
   const global = agreement.global || {};
   const rows = Object.entries(agreement.per_principle || {}).map(([principle, m]) => `
     <tr>
@@ -1377,24 +1625,247 @@ function renderAgreementMetrics(agreement) {
         <div class="col-md-3 col-6"><div class="metric-mini accent-cyan text-center"><div class="metric-value"><span class="badge bg-${global.pairwise_cohen_kappa_avg_tone || 'secondary'}-subtle text-${global.pairwise_cohen_kappa_avg_tone || 'secondary'} border border-${global.pairwise_cohen_kappa_avg_tone || 'secondary'} fs-6 px-2 py-1">${formatMetric(global.pairwise_cohen_kappa_avg)}</span></div><div class="metric-label">Cohen kappa prom.</div></div></div>
         <div class="col-md-3 col-6"><div class="metric-mini accent-amber text-center"><div class="metric-value"><span class="badge bg-${global.krippendorff_alpha_nominal_tone || 'secondary'}-subtle text-${global.krippendorff_alpha_nominal_tone || 'secondary'} border border-${global.krippendorff_alpha_nominal_tone || 'secondary'} fs-6 px-2 py-1">${formatMetric(global.krippendorff_alpha_nominal)}</span></div><div class="metric-label">Krippendorff alpha</div></div></div>
       </div>
-      <div style="overflow-x:auto">
-        <table class="table table-dark table-sm mb-2" style="border-color:#2d3148;font-size:.8rem">
-          <thead><tr>
-            <th class="text-secondary">Principio</th>
-            <th class="text-secondary">Elementos</th>
-            <th class="text-secondary">Acuerdo obs.</th>
-            <th class="text-secondary">Fleiss kappa</th>
-            <th class="text-secondary">Cohen prom.</th>
-            <th class="text-secondary">Krippendorff alpha</th>
-            <th class="text-secondary">Tasa positiva</th>
-          </tr></thead>
-          <tbody>${rows || '<tr><td colspan="7" class="text-secondary">Sin datos de acuerdo.</td></tr>'}</tbody>
-        </table>
-      </div>
-      <div class="small text-secondary">
-        Metricas metodologicas para el articulo: acuerdo observado agregado, kappa de Fleiss multiarbitro, kappa de Cohen promedio por pares y alfa nominal de Krippendorff. El diagnostico por entrada es solo para auditoria.
-      </div>
+      <details class="quality-details" id="quality-charts-details" ontoggle="if(this.open) renderAgreementCharts(latestAgreementData)">
+        <summary>
+          <i class="bi bi-bar-chart-line me-1"></i>Graficas de calidad y acuerdo
+          <span class="text-secondary small ms-2">acuerdo, tasa positiva y kappas por principio</span>
+        </summary>
+        <div class="quality-details-body">
+          <div class="row g-3">
+            <div class="col-lg-7">
+              <div class="chart-box">
+                <div class="chart-box-title">Acuerdo observado vs tasa positiva por principio</div>
+                <canvas id="chart-agreement-quality" height="150"></canvas>
+              </div>
+            </div>
+            <div class="col-lg-5">
+              <div class="chart-box">
+                <div class="chart-box-title">Kappas por principio</div>
+                <canvas id="chart-agreement-kappa" height="150"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+      </details>
+      <details class="quality-details">
+        <summary>
+          <i class="bi bi-table me-1"></i>Tabla metodologica completa
+          <span class="text-secondary small ms-2">valores listos para auditoria o paper</span>
+        </summary>
+        <div class="quality-details-body">
+          <div style="overflow-x:auto">
+            <table class="table table-dark table-sm mb-2" style="border-color:#2d3148;font-size:.8rem">
+              <thead><tr>
+                <th class="text-secondary">Principio</th>
+                <th class="text-secondary">Elementos</th>
+                <th class="text-secondary">Acuerdo obs.</th>
+                <th class="text-secondary">Fleiss kappa</th>
+                <th class="text-secondary">Cohen prom.</th>
+                <th class="text-secondary">Krippendorff alpha</th>
+                <th class="text-secondary">Tasa positiva</th>
+              </tr></thead>
+              <tbody>${rows || '<tr><td colspan="7" class="text-secondary">Sin datos de acuerdo.</td></tr>'}</tbody>
+            </table>
+          </div>
+          <div class="small text-secondary">
+            Metricas metodologicas para el articulo: acuerdo observado agregado, kappa de Fleiss multiarbitro, kappa de Cohen promedio por pares y alfa nominal de Krippendorff. El diagnostico por entrada es solo para auditoria.
+          </div>
+        </div>
+      </details>
     </div>`;
+}
+
+function renderSummaryStats(stats, suffix = '') {
+  if (!stats) return '-';
+  const parts = [
+    `n=${formatNumber(stats.n)}`,
+    `media=${formatMetric(stats.mean, 2)}${suffix}`,
+    `mediana=${formatMetric(stats.median, 2)}${suffix}`,
+    `p95=${formatMetric(stats.p95, 2)}${suffix}`,
+    `rango=${formatMetric(stats.min, 2)}-${formatMetric(stats.max, 2)}${suffix}`,
+  ];
+  return parts.join(' / ');
+}
+
+function renderDistribution(dist) {
+  const entries = Object.entries(dist || {});
+  if (!entries.length) return '<span class="text-secondary">Sin datos.</span>';
+  return entries.map(([key, count]) => `<span class="badge bg-dark text-secondary border border-secondary me-1 mb-1">${escapeHtml(key)}: ${formatNumber(count)}</span>`).join('');
+}
+
+function renderPaperSummary(summary) {
+  const target = document.getElementById('paper-summary-panel');
+  if (!target || !summary) return;
+  const dataset = summary.dataset || {};
+  const quality = summary.consensus_quality || {};
+  const resources = summary.resources || {};
+  const principleRows = Object.entries(summary.principles || {}).map(([principle, p]) => `
+    <tr>
+      <td class="fw-semibold">${escapeHtml(principle)}</td>
+      <td>${formatNumber(p.n)}</td>
+      <td>${formatNumber(p.positive)} / ${formatNumber(p.negative)}</td>
+      <td>${formatPercent(p.positive_rate_percent)}</td>
+      <td>${formatPercent(p.mean_majority_support_percent)}</td>
+      <td>${formatPercent(p.agreement?.observed_agreement_percent)}</td>
+      <td>${formatMetric(p.agreement?.fleiss_kappa)}</td>
+      <td>${formatMetric(p.agreement?.krippendorff_alpha_nominal)}</td>
+      <td>${formatNumber(p.missing)} / ${formatNumber(p.errors)}</td>
+    </tr>
+  `).join('');
+  const arbiterRows = Object.entries(summary.arbiters || {}).map(([arbId, a]) => `
+    <tr>
+      <td class="fw-semibold">${escapeHtml(arbId)}</td>
+      <td>${formatNumber(a.calls)}</td>
+      <td>${formatNumber(a.vote_count)}</td>
+      <td>${formatPercent(a.positive_vote_rate_percent)}</td>
+      <td>${renderSummaryStats(a.total_tokens)}</td>
+      <td>${renderSummaryStats(a.latency_s, 's')}</td>
+      <td>${formatNumber(a.missing_votes)}</td>
+    </tr>
+  `).join('');
+  const pairwiseRows = (summary.pairwise_arbiters || []).map(p => `
+    <tr>
+      <td>${escapeHtml(p.arbiter_a)}</td>
+      <td>${escapeHtml(p.arbiter_b)}</td>
+      <td>${formatNumber(p.n)}</td>
+      <td>${formatPercent(p.observed_agreement_percent)}</td>
+      <td>${formatMetric(p.cohen_kappa)}</td>
+      <td>${formatNumber(p.disagreements)}</td>
+    </tr>
+  `).join('');
+
+  target.innerHTML = `
+    <details class="quality-details">
+      <summary>
+        <i class="bi bi-journal-text me-1"></i>Resumen para paper y reporte metodologico
+        <span class="text-secondary small ms-2">agregados exhaustivos del etiquetado</span>
+      </summary>
+      <div class="quality-details-body">
+        <div class="row g-2 mb-3">
+          <div class="col-md-3 col-6"><div class="metric-mini accent-blue text-center"><div class="metric-value">${formatNumber(dataset.processed_rows)}</div><div class="metric-label">Procesadas / ${formatNumber(dataset.total_rows)}</div></div></div>
+          <div class="col-md-3 col-6"><div class="metric-mini accent-emerald text-center"><div class="metric-value">${formatNumber(dataset.successful_rows)}</div><div class="metric-label">Validas</div></div></div>
+          <div class="col-md-3 col-6"><div class="metric-mini accent-violet text-center"><div class="metric-value">${formatNumber(dataset.principle_count)}</div><div class="metric-label">Principios</div></div></div>
+          <div class="col-md-3 col-6"><div class="metric-mini accent-cyan text-center"><div class="metric-value">${formatNumber(dataset.arbiter_count)}</div><div class="metric-label">Arbitros</div></div></div>
+        </div>
+        <div class="small text-secondary mb-3">
+          <div><strong>Distribucion dataset:</strong> ${renderDistribution(dataset.dataset_distribution)}</div>
+          <div class="mt-1"><strong>Distribucion clase:</strong> ${renderDistribution(dataset.class_distribution)}</div>
+        </div>
+        <div class="row g-3 mb-3">
+          <div class="col-lg-6">
+            <div class="chart-box">
+              <div class="chart-box-title">Recursos computacionales</div>
+              <div class="small">
+                <div>Tokens entrada: <strong>${formatNumber(resources.prompt_tokens_total)}</strong></div>
+                <div>Tokens salida: <strong>${formatNumber(resources.completion_tokens_total)}</strong></div>
+                <div>Tokens total: <strong>${formatNumber(resources.tokens_total)}</strong></div>
+                <div>Tokens por entrada: ${renderSummaryStats(resources.tokens_per_entry)}</div>
+                <div>Latencia por entrada: ${renderSummaryStats(resources.latency_s_per_entry, 's')}</div>
+                <div>Llamadas por entrada: ${renderSummaryStats(resources.arbiter_calls_per_entry)}</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="chart-box">
+              <div class="chart-box-title">Calidad del consenso por entrada</div>
+              <div class="small">
+                <div>Acuerdo observado: ${renderSummaryStats(quality.entry_observed_agreement_percent, '%')}</div>
+                <div>Soporte medio de mayoria: ${renderSummaryStats(quality.entry_mean_support_percent, '%')}</div>
+                <div>Principios divididos por entrada: ${renderSummaryStats(quality.split_principles_per_entry)}</div>
+                <div>Principios unanimes por entrada: ${renderSummaryStats(quality.unanimous_principles_per_entry)}</div>
+                <div>Entradas con algun principio dividido: <strong>${formatNumber(quality.entries_with_any_split_principle)}</strong></div>
+                <div>Entradas bajo 80% acuerdo: <strong>${formatNumber(quality.entries_below_80_agreement)}</strong> / bajo 60%: <strong>${formatNumber(quality.entries_below_60_agreement)}</strong></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <details class="quality-details">
+          <summary>Principios: prevalencia, soporte y acuerdo</summary>
+          <div class="quality-details-body" style="overflow-x:auto">
+            <table class="table table-dark table-sm mb-0" style="border-color:#2d3148;font-size:.8rem">
+              <thead><tr><th>Principio</th><th>N</th><th>Pos / Neg</th><th>% positivo</th><th>Soporte medio</th><th>Acuerdo obs.</th><th>Fleiss</th><th>Kripp.</th><th>Missing / ERR</th></tr></thead>
+              <tbody>${principleRows || '<tr><td colspan="9" class="text-secondary">Sin datos por principio.</td></tr>'}</tbody>
+            </table>
+          </div>
+        </details>
+        <details class="quality-details">
+          <summary>Arbitros: uso, tendencia y latencia</summary>
+          <div class="quality-details-body" style="overflow-x:auto">
+            <table class="table table-dark table-sm mb-0" style="border-color:#2d3148;font-size:.8rem">
+              <thead><tr><th>Arbitro</th><th>Llamadas</th><th>Votos</th><th>% votos positivos</th><th>Tokens/llamada</th><th>Latencia</th><th>Missing</th></tr></thead>
+              <tbody>${arbiterRows || '<tr><td colspan="7" class="text-secondary">Sin datos por arbitro.</td></tr>'}</tbody>
+            </table>
+          </div>
+        </details>
+        <details class="quality-details">
+          <summary>Acuerdo par-a-par entre arbitros</summary>
+          <div class="quality-details-body" style="overflow-x:auto">
+            <table class="table table-dark table-sm mb-0" style="border-color:#2d3148;font-size:.8rem">
+              <thead><tr><th>Arbitro A</th><th>Arbitro B</th><th>N votos comparados</th><th>Acuerdo observado</th><th>Cohen kappa</th><th>Desacuerdos</th></tr></thead>
+              <tbody>${pairwiseRows || '<tr><td colspan="6" class="text-secondary">Sin pares de arbitros.</td></tr>'}</tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+    </details>`;
+}
+
+function renderAgreementCharts(agreement) {
+  if (!agreement || typeof Chart === 'undefined') return;
+  const entries = Object.entries(agreement.per_principle || {});
+  const qualityCanvas = document.getElementById('chart-agreement-quality');
+  const kappaCanvas = document.getElementById('chart-agreement-kappa');
+  if (!entries.length || !qualityCanvas || !kappaCanvas) return;
+
+  const labels = entries.map(([principle]) => principle);
+  const observed = entries.map(([, m]) => Number(m.observed_agreement_percent || 0));
+  const positive = entries.map(([, m]) => Number(m.positive_rate_percent || 0));
+  const fleiss = entries.map(([, m]) => Number(m.fleiss_kappa || 0));
+  const cohen = entries.map(([, m]) => Number(m.pairwise_cohen_kappa_avg || 0));
+  const alpha = entries.map(([, m]) => Number(m.krippendorff_alpha_nominal || 0));
+
+  if (chartAgreementQuality) chartAgreementQuality.destroy();
+  chartAgreementQuality = new Chart(qualityCanvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Acuerdo observado', data: observed, backgroundColor: '#34d39988', borderColor: '#34d399', borderWidth: 1 },
+        { label: 'Tasa positiva', data: positive, backgroundColor: '#60a5fa77', borderColor: '#60a5fa', borderWidth: 1 },
+      ],
+    },
+    options: {
+      responsive: true,
+      animation: { duration: 180 },
+      scales: {
+        x: { ticks: { color: '#64748b', autoSkip: false, maxRotation: 35, minRotation: 0, font: { size: 10 } }, grid: { color: 'rgba(255,255,255,.05)' } },
+        y: { min: 0, max: 100, ticks: { color: '#64748b', callback: v => v + '%', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,.05)' } },
+      },
+      plugins: { legend: { labels: { color: '#94a3b8', boxWidth: 12, font: { size: 11 } } } },
+    },
+  });
+
+  if (chartAgreementKappa) chartAgreementKappa.destroy();
+  chartAgreementKappa = new Chart(kappaCanvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Fleiss', data: fleiss, backgroundColor: '#8b5cf688' },
+        { label: 'Cohen prom.', data: cohen, backgroundColor: '#22d3ee88' },
+        { label: 'Krippendorff', data: alpha, backgroundColor: '#fbbf2488' },
+      ],
+    },
+    options: {
+      responsive: true,
+      animation: { duration: 180 },
+      scales: {
+        x: { ticks: { color: '#64748b', autoSkip: false, maxRotation: 35, minRotation: 0, font: { size: 10 } }, grid: { color: 'rgba(255,255,255,.05)' } },
+        y: { min: -1, max: 1, ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,.05)' } },
+      },
+      plugins: { legend: { labels: { color: '#94a3b8', boxWidth: 12, font: { size: 11 } } } },
+    },
+  });
 }
 
 function renderArbiterResult(arb, principles) {
@@ -1405,7 +1876,12 @@ function renderArbiterResult(arb, principles) {
     if (!why) return '';
     return `<div class="mt-1"><span class="text-secondary">${escapeHtml(p)}</span>: ${escapeHtml(why)}</div>`;
   }).join('');
-  const usage = `${formatNumber(arb.total_tokens)} tokens / ${formatSeconds(arb.latency_s)}`;
+  const usage = [
+    `in ${formatNumber(arb.prompt_tokens)}`,
+    `out ${formatNumber(arb.completion_tokens)}`,
+    `total ${formatNumber(arb.total_tokens)}`,
+    formatSeconds(arb.latency_s),
+  ].join(' / ');
   return `
     <div class="pb-2 mb-2" style="border-bottom:1px solid #2d3148">
       <div class="d-flex justify-content-between gap-3">
@@ -1497,6 +1973,7 @@ function renderResultsTable(data) {
     : `${formatNumber(data.results_total)} entradas`;
 
   const body = rows.map(row => {
+    const usage = row.usage_metrics || {};
     const meta = [row.dataset, row.class ? `clase ${row.class}` : ''].filter(Boolean).join(' / ');
     const claimEs = row.claim_es && row.claim_es !== row.claim
       ? `<div class="text-secondary small mt-2">${escapeHtml(row.claim_es)}</div>`
@@ -1523,8 +2000,14 @@ function renderResultsTable(data) {
           ${row.consensus_metrics ? renderEntryConsensusMetrics(row.consensus_metrics, principles) : ''}
         </td>
         <td style="min-width:420px">${(row.arbiters || []).map(arb => renderArbiterResult(arb, principles)).join('')}</td>
+        <td class="text-nowrap">${formatNumber(usage.prompt_tokens)}</td>
+        <td class="text-nowrap">${formatNumber(usage.completion_tokens)}</td>
         <td class="text-nowrap fw-semibold">${formatNumber(row.total_tokens)}</td>
-        <td class="text-nowrap">${formatSeconds(row.total_latency_s)}</td>
+        <td class="text-nowrap">${formatNumber(row.arbiter_calls || usage.arbiter_calls || 0)}</td>
+        <td class="text-nowrap">
+          ${formatSeconds(row.total_latency_s)}
+          <div class="text-secondary small">prom ${formatSeconds(row.latency_avg_s || usage.latency_avg_s)}</div>
+        </td>
       </tr>`;
   }).join('');
 
@@ -1537,7 +2020,10 @@ function renderResultsTable(data) {
             <th class="text-secondary">Entrada</th>
             <th class="text-secondary">Consenso final</th>
             <th class="text-secondary">Arbitros</th>
-            <th class="text-secondary">Tokens</th>
+            <th class="text-secondary">Tok. entrada</th>
+            <th class="text-secondary">Tok. salida</th>
+            <th class="text-secondary">Tok. total</th>
+            <th class="text-secondary">Llamadas</th>
             <th class="text-secondary">Tiempo</th>
           </tr>
         </thead>
@@ -1658,11 +2144,9 @@ function setRunning(running) {
   const clearBtn = document.querySelector('#checkpoint-area button');
   if (clearBtn) clearBtn.disabled = running;
 
-  if (running) {
-    if (!statsRefreshTimer) {
-      statsRefreshTimer = setInterval(() => loadRunStats(true), 8000);
-    }
-  } else if (statsRefreshTimer) {
+  if (running && !statsRefreshTimer) {
+    statsRefreshTimer = setInterval(() => loadRunStats(true), 8000);
+  } else if (!running && statsRefreshTimer) {
     clearInterval(statsRefreshTimer);
     statsRefreshTimer = null;
   }
@@ -1682,6 +2166,7 @@ async function loadRunStats(keepPosition = false) {
   const data = await res.json();
   if (data.error) return;
   resultsOffset = Number(data.results_offset || 0);
+  appendStatsActivity(data);
 
   const panel = document.getElementById('stats-panel');
   panel.style.display = '';
@@ -1726,6 +2211,7 @@ async function loadRunStats(keepPosition = false) {
     </table>
     </div>`;
 
+  renderPaperSummary(data.paper_summary);
   renderAgreementMetrics(data.agreement);
   renderResultsTable(data);
 }
@@ -1740,11 +2226,11 @@ loadConfigSummary();
 loadCheckpoint();
 loadOutputs();
 loadFailedQueue();
-loadCurrentRunStats();
 loadRunStats();
-
-fetch('/api/run/status').then(r => r.json()).then(s => {
-  if (s.running) { setRunning(true); startSSE(); }
+syncRunSnapshot().then(snapshot => {
+  if (snapshot?.running) {
+    startRunSync();
+  }
 });
 </script>
 

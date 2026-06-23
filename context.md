@@ -1,10 +1,23 @@
 # LabelForge - contexto tecnico de transferencia
 
-Ultima actualizacion: 2026-06-19.
+Ultima actualizacion: 2026-06-23.
 
 Este documento es para retomar desarrollo rapido. El README explica uso general; esta
 nota explica como esta organizado el sistema, que decisiones importan y donde estan
 los riesgos.
+
+## 0. Regla operativa para agentes
+
+Antes de modificar codigo:
+
+1. revisar arquitectura afectada;
+2. identificar fuente canonica existente;
+3. detectar duplicaciones, paths especiales, dead code o rutas subutilizadas;
+4. proponer solucion y esperar aprobacion del usuario.
+
+No aplicar parches directos para cambios de arquitectura, persistencia, seguridad
+o ejecucion del pipeline sin confirmacion. La prioridad es no romper CLI, webapp,
+checkpoints, outputs ni contratos de datos existentes.
 
 ## 1. Proposito
 
@@ -31,6 +44,10 @@ Cambios recientes no necesariamente pusheados:
 - configuracion movida a `config/`;
 - `labelforge_core/paths.py` agregado;
 - gestion GGUF expandida con cancelar descarga, archivo, restauracion y mover fuera del cache;
+- prueba CLI con dataset de webapp, columna `claim`, tres arbitros locales y
+  `--limit 10`;
+- auditoria de arquitectura con duplicaciones detectadas en preflight,
+  checkpoints, dataset y reporting;
 - docs actualizadas.
 
 Siempre revisar:
@@ -120,9 +137,9 @@ Arbitros actuales:
 
 | ID | Nombre | Persona | Proveedor | Modelo |
 |---|---|---|---|---|
-| `arb1` | Psicologo Clinico | Germinio | `vertex_gemini` | `gemini-2.5-pro` |
-| `arb3` | Investigador Forense | Gepetencio | `openai` | `gpt-4o` |
-| `arb4` | Psicologo Forense | Claudio | `anthropic` | `claude-sonnet-4-6` |
+| `arb1` | Psicologo Clinico | Germinio | `llama_cpp` | `Qwen2.5-7B-Instruct-Q4_K_M.gguf` |
+| `arb3` | Investigador Forense | Gepetencio | `llama_cpp` | `Mistral-7B-Instruct-v0.3-Q4_K_M.gguf` |
+| `arb4` | Psicologo Forense | Claudio | `llama_cpp` | `Llama-3.2-3B-Instruct-Q4_K_M.gguf` |
 
 Dataset actual:
 
@@ -134,7 +151,7 @@ Processing actual:
 
 - `checkpoint_every`: 10;
 - `claim_max_chars`: 3000;
-- `base_delay_seconds`: 6.0;
+- `base_delay_seconds`: 1.0;
 - `min_delay_seconds`: 0.5;
 - `max_delay_seconds`: 120.0;
 - backoff 429: 2.0;
@@ -190,6 +207,19 @@ Proveedores en `PROVIDER_CALLERS`:
 
 `llama_cpp` usa `_call_local()`, que decide entre llama-cpp y OpenVINO segun
 `models/hw_profile.json`.
+
+Validacion reciente del CLI:
+
+- comando usado: `python main_cli.py --limit 10`;
+- dataset: `data/uploads/all_datasets_en_es.csv`;
+- columna: `claim`;
+- arbitros: `arb1`, `arb3`, `arb4`;
+- resultado: 10/10 filas, 0 fallos, CSV en `output/`, log en `logs/`,
+  metricas globales y por principio generadas.
+
+Nota: existe bandera CLI `--fresh` para limpiar checkpoints reanudables antes
+de iniciar una corrida nueva. No extender esta idea a otros casos sin revisar
+primero el contrato de checkpoints.
 
 ## 7. Checkpoints y salida
 
@@ -419,20 +449,81 @@ print(c.post("/api/local/download/nope/cancel").status_code)
 print(c.post("/api/local/model/nope.gguf/move", json={"destination_dir": "C:\\Temp"}).status_code)
 ```
 
-## 15. Pendientes vivos
+## 15. Auditoria arquitectonica reciente
+
+Hallazgos detectados el 2026-06-23. No corregir automaticamente; proponer
+diseno y pedir aprobacion antes de tocar codigo.
+
+### Preflight CLI duplicado
+
+- `main_cli.py` revisa `models/hw_profile.json` antes de delegar al nucleo.
+- `labelforge_core.provider_preflight.require_provider_preflight()` vuelve a
+  validar proveedores dentro del pipeline.
+- Riesgo: `main_cli.py` lee la config canonica para decidir si hay `llama_cpp`,
+  no necesariamente el `--config` pasado al CLI.
+- Direccion recomendada: una sola autoridad de preflight en el nucleo, con CLI
+  como wrapper delgado.
+
+### Checkpoints duplicados
+
+- Nucleo: constantes y funciones en `labelforge_core/label_persuasion.py`.
+- Webapp: `_clear_runtime_checkpoint_files()`, `/api/checkpoint/status`,
+  `/api/checkpoint/clear`, y lectura manual de `run_state.json` /
+  `claim_results.jsonl`.
+- Riesgo: CLI y webapp pueden divergir sobre que significa limpiar, reanudar o
+  completar un run.
+- Direccion recomendada: modulo `labelforge_core/checkpoint_io.py` con contrato
+  compartido para limpiar, cargar, resumir y describir estado.
+
+### Dataset duplicado
+
+- Nucleo: `load_dataset()` en `label_persuasion.py`.
+- Webapp: upload/inspect/config y carga de input para reconstruir checkpoints.
+- Riesgo: diferencias de encoding, Excel sheets, columnas y validacion de rutas.
+- Direccion recomendada: modulo `labelforge_core/dataset_io.py` con helpers
+  para inspeccion, carga y validacion reusable.
+
+### Reporting duplicado
+
+- Nucleo: consenso, usage, resumen y CSV final.
+- Webapp: `_detect_principles()`, `_row_processing_status()`,
+  `_entry_usage_metrics_from_row()`, `_paper_reporting_summary()` y
+  `/api/run/stats`.
+- Riesgo: cambios de nombres o esquemas pueden producir resultados distintos
+  entre CSV, UI y paper summary.
+- Direccion recomendada: modulo `labelforge_core/run_reporting.py` para leer
+  CSV/checkpoint y producir stats consumibles por UI.
+
+### Outputs generados por CLI
+
+- Webapp registra ownership solo cuando el run nace desde `/api/run/start`.
+- CSVs creados manualmente por CLI pueden quedar sin owner para usuarios no-admin.
+- Direccion recomendada: decidir politica antes de cambiar: admin-only,
+  importacion de ownership, o visibilidad controlada.
+
+### OpenVINO/NPU
+
+- Existe ruta `_call_openvino()` activada desde `_call_local()` si
+  `best_backend == "npu"`.
+- Por decision actual, no atender ahora. Mantener como ruta futura.
+- Cuando se reactive, validar explicitamente que no trate un GGUF como modelo
+  Transformers/OpenVINO.
+
+## 16. Pendientes vivos
 
 Ver `todos.md` para backlog actualizado.
 
 Los puntos mas importantes ahora:
 
-- prueba end-to-end con dataset pequeno;
+- consolidar arquitectura sin romper CLI/webapp;
+- prueba end-to-end desde webapp con dataset pequeno;
 - ejecutar pipeline completo para resultados del paper;
-- validar descarga/cancelacion GGUF con archivos reales.
+- validar descarga/cancelacion GGUF con archivos reales;
+- dejar OpenVINO/NPU para una fase futura.
 
-## 16. Documentos
+## 17. Documentos
 
 - `README.md`: manual de uso y arquitectura.
 - `context.md`: este contexto tecnico.
 - `todos.md`: backlog real.
 - `bitacora.md`: historico de decisiones.
-

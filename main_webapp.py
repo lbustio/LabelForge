@@ -54,6 +54,7 @@ if _created:
 else:
     print("  [setup] Directorios del proyecto verificados OK")
 
+import logging
 from webapp.app import app, auth_status
 
 
@@ -82,6 +83,9 @@ def main():
     else:
         print(f"  Auth        ->  login local SQLite sin usuarios; crea el primero en http://{args.host}:{args.port}/login")
     print("  Presiona Ctrl+C para detener.")
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    app.logger.setLevel(logging.INFO)
 
     app.run(
         host=args.host,

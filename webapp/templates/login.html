@@ -7,10 +7,11 @@
     <div class="card-header-label">Acceso seguro</div>
     <h1 class="h4 mb-3">Entrar a LabelForge</h1>
     <form method="post" action="{{ url_for('login') }}" class="d-grid gap-3">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="next" value="{{ next_url }}">
       {% if first_setup %}
       <div class="alert alert-info py-2 mb-0">
-        Crea el primer usuario local de LabelForge.
+        Crea el primer usuario local de LabelForge. Este usuario sera el admin unico.
       </div>
       {% endif %}
       <div>

@@ -85,13 +85,13 @@
   "processing": {
     "checkpoint_every": 10,
     "claim_max_chars": 3000,
-    "base_delay_seconds": 6.0,
+    "base_delay_seconds": 1.0,
     "min_delay_seconds": 0.5,
     "max_delay_seconds": 120.0,
     "rate_limit_backoff_multiplier": 2.0,
     "server_error_backoff_multiplier": 1.5,
     "recovery_threshold_successes": 5,
-    "recovery_delay_multiplier": 0.8
+    "recovery_delay_multiplier": 0.5
   },
   "safety": {
     "free_only_mode": false,

@@ -89,13 +89,15 @@ LOG_PATH           = LOGS_DIR / f"run_{RUN_ID}.log"
 # Logging
 # ---------------------------------------------------------------------------
 if hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stdout.reconfigure(encoding='utf-8', line_buffering=True)
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', line_buffering=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.FileHandler(LOG_PATH, encoding="utf-8"),
-        logging.StreamHandler(),
+        logging.StreamHandler(sys.stdout),
     ],
 )
 log = logging.getLogger(__name__)
@@ -120,6 +122,46 @@ def emit_run_metric(event: str, **payload):
         **payload,
     }
     print(METRIC_PREFIX + json.dumps(message, ensure_ascii=False), flush=True)
+
+
+def claim_preview(text: str, limit: int = 180) -> str:
+    clean = " ".join(str(text or "").split())
+    if len(clean) <= limit:
+        return clean
+    return clean[: max(0, limit - 3)].rstrip() + "..."
+
+
+def log_claim_start(row_index: int, claim: str, stage: str, position: int, total: int, run_id: str):
+    stage_label = "reintento" if stage == "retry" else "principal"
+    preview = claim_preview(claim)
+    log.info(
+        "[entrada %s] Procesando %s/%s - etapa=%s - texto=\"%s\"",
+        row_index,
+        position,
+        total,
+        stage_label,
+        preview,
+    )
+    emit_run_metric(
+        "claim_start",
+        run_id=run_id,
+        row_index=row_index,
+        stage=stage,
+        position=position,
+        total_rows=total,
+        claim_preview=preview,
+    )
+
+
+def clear_resumable_checkpoint_files(include_run_state: bool = False):
+    paths = [CHECKPOINT_PATH, FAILED_QUEUE_PATH, CLAIM_RESULTS_PATH, ARBITER_RESULTS_PATH]
+    if include_run_state:
+        paths.append(RUN_STATE_PATH)
+    for path in paths:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            log.warning("No se pudo limpiar %s: %s", path.name, exc)
 
 
 def now_iso() -> str:
@@ -1429,6 +1471,8 @@ def save_progress_state(
 
 
 def should_reuse_run_state(state: dict, args, total: int) -> bool:
+    if getattr(args, "fresh", False):
+        return False
     if not state:
         return False
     if state.get("status") not in {"running", "paused"}:
@@ -1572,6 +1616,8 @@ def main():
                         help="Nombre de la columna con el texto a etiquetar. Si no se indica, se usa el valor del config.")
     parser.add_argument("--limit",  type=int, default=None,
                         help="Limitar el numero de entradas (para pruebas)")
+    parser.add_argument("--fresh", action="store_true",
+                        help="Arrancar una corrida limpia ignorando checkpoints reanudables previos")
     parser.add_argument("--export-arbiters", default=None,
                         help="Exportar los arbitros a un archivo .lfarb cifrado y salir")
     parser.add_argument("--import-arbiters", default=None,
@@ -1654,6 +1700,10 @@ def main():
 
     total = len(rows) if args.limit is None else min(args.limit, len(rows))
     log.info(f"Total de entradas a procesar: {total}")
+
+    if args.fresh:
+        clear_resumable_checkpoint_files(include_run_state=True)
+        log.info("Modo --fresh: checkpoints reanudables previos limpiados")
 
     previous_state = load_run_state()
     if should_reuse_run_state(previous_state, args, total):
@@ -1777,6 +1827,7 @@ def main():
             continue
 
         cfg.pop("_pause_requested", None)
+        log_claim_start(i, claim, "main", i + 1, total, run_id)
         record = process_claim(i, claim, cfg, rate_limiters, partial_arbiter_results)
         if record is None:
             append_to_failed_queue(i, row, cfg.get("_last_failure_reason", "sin detalle"))
@@ -1836,7 +1887,7 @@ def main():
             rl.delay = min(rl.max_delay, rl.delay * rl.srv_mult)
 
         still_failed = []
-        for item in failed_items:
+        for retry_pos, item in enumerate(failed_items, start=1):
             idx    = item["index"]
             existing = results.get(str(idx))
             if existing and is_record_final(existing, principles):
@@ -1844,6 +1895,7 @@ def main():
                 continue
             claim  = item["row"].get(text_column, "").strip()
             cfg.pop("_pause_requested", None)
+            log_claim_start(idx, claim, "retry", retry_pos, len(failed_items), run_id)
             record = process_claim(idx, claim, cfg, rate_limiters, partial_arbiter_results)
             if record is None:
                 reason = cfg.get("_last_failure_reason", "sin detalle")
@@ -1941,6 +1993,7 @@ def main():
     log.info(f"  Salida   : {output_path}")
     log.info(f"  Log      : {LOG_PATH}")
     save_progress_state(state, results, arbiters, principles, "completed")
+    clear_resumable_checkpoint_files()
     emit_run_metric(
         "complete",
         run_id=run_id,
@@ -1954,4 +2007,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -5,7 +5,6 @@ de principios de persuasion de Ana Ferreira.
 
 import json
 import os
-import queue
 import re
 import sqlite3
 import subprocess
@@ -13,10 +12,13 @@ import sys
 import threading
 import time
 import uuid
+from collections import Counter
+from datetime import timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
 from flask import Flask, Response, g, jsonify, redirect, render_template, request, send_from_directory, session, stream_with_context, url_for
+from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
 
 # ---------------------------------------------------------------------------
@@ -53,6 +55,7 @@ from labelforge_core.paths import (
     ARBITERS_CONFIG_PATH,
     CHECKPOINTS_DIR,
     CONFIG_DIR,
+    DATA_DIR,
     HW_PROFILE_PATH,
     LOGS_DIR,
     MODELS_DIR,
@@ -115,6 +118,9 @@ _log = _logging.getLogger(__name__)
 _configure_logger(_log)
 _configure_logger(app.logger)
 
+_run_log = _logging.getLogger("labelforge.run")
+_configure_logger(_run_log)
+
 _HTTP_SKIP       = frozenset({"/favicon.ico"})
 _HTTP_SKIP_PREFX = ("/static/",)
 
@@ -154,7 +160,7 @@ def _log_http(response):
     status  = response.status_code
     if status == 304:
         return response
-    user = (session.get("user") or {}).get("email", "-")
+    user = (session.get("user") or {}).get("username", "-")
     msg = (
         f"rid={request_id} ip={_client_ip()} user={user} "
         f"{request.method} {_request_target()} status={status} "
@@ -168,7 +174,17 @@ def _log_http(response):
         _req_log.warning(msg)
     else:
         _req_log.info(msg)
-    # Cabeceras de seguridad en todas las respuestas HTML
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if request.is_secure or app.config.get("SESSION_COOKIE_SECURE"):
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    # Cabeceras de seguridad: las paginas y APIs autenticadas no deben quedar
+    # reutilizables por cache/back-forward cache despues de logout.
+    if "text/html" in response.content_type or path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0, private"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
     if "text/html" in response.content_type:
         response.headers.setdefault(
             "Content-Security-Policy",
@@ -178,7 +194,6 @@ def _log_http(response):
             "img-src 'self' data:; connect-src 'self'"
         )
         response.headers.setdefault("X-Frame-Options", "DENY")
-        response.headers.setdefault("X-Content-Type-Options", "nosniff")
     return response
 
 
@@ -212,18 +227,101 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 # Secret key para sesiones Flask (necesaria para cookies seguras)
 app.secret_key = os.environ.get("LABELFORGE_SECRET_KEY") or _sec.token_hex(32)
-app.config["CSRF_TOKEN"] = os.environ.get("LABELFORGE_CSRF_TOKEN") or _sec.token_urlsafe(32)
+_SESSION_IDLE_SECONDS = int(os.environ.get("LABELFORGE_SESSION_IDLE_SECONDS", "3600"))
+_SESSION_ABSOLUTE_SECONDS = int(os.environ.get("LABELFORGE_SESSION_ABSOLUTE_SECONDS", "28800"))
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE=os.environ.get("LABELFORGE_COOKIE_SAMESITE", "Lax"),
     SESSION_COOKIE_SECURE=_env_bool("LABELFORGE_COOKIE_SECURE", False),
+    PERMANENT_SESSION_LIFETIME=timedelta(seconds=_SESSION_ABSOLUTE_SECONDS),
+    SESSION_REFRESH_EACH_REQUEST=True,
+    TEMPLATES_AUTO_RELOAD=True,
 )
 
 _AUTH_EXEMPT = frozenset({"/favicon.ico", "/login", "/logout"})
 _AUTH_EXEMPT_PREFIX = ("/static/", "/login/")
 _CSRF_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+_LOGIN_FAIL_WINDOW_SECONDS = 900
+_LOGIN_FAIL_MAX = 8
+_login_failures: dict[str, list[float]] = {}
+_ADMIN_PAGE_PATHS = frozenset({"/arbiters", "/principles", "/processing", "/run", "/users"})
+_ADMIN_API_EXACT = frozenset({
+    "/api/config",
+    "/api/models",
+    "/api/provider-key",
+    "/api/rate-limits",
+    "/api/rate-limits/summary",
+    "/api/dataset/config",
+    "/api/dataset/inspect",
+    "/api/dataset/upload",
+    "/api/prompt-template",
+    "/api/processing",
+    "/api/run/start",
+    "/api/run/stop",
+    "/api/run/status",
+    "/api/run/snapshot",
+    "/api/run/stats",
+    "/api/run/principle-counts",
+    "/api/checkpoint/status",
+    "/api/checkpoint/clear",
+    "/api/failed-queue",
+})
+_ADMIN_API_PREFIXES = (
+    "/api/arbiters",
+    "/api/principles",
+    "/api/local",
+    "/api/users",
+)
 
 AUTH_DB_PATH = Path(os.environ.get("LABELFORGE_AUTH_DB", SECRETS_ENV_PATH.parent / "auth.db"))
+APP_STATE_DIR = BASE_DIR / "app_state"
+AVATARS_DIR = APP_STATE_DIR / "avatars"
+LEGACY_AVATARS_DIR = DATA_DIR / "avatars"
+AVATAR_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+ADMIN_ROLE = "admin"
+USER_ROLE = "user"
+
+
+def _migrate_legacy_avatars() -> None:
+    if not LEGACY_AVATARS_DIR.exists():
+        return
+    AVATARS_DIR.mkdir(parents=True, exist_ok=True)
+    for src in LEGACY_AVATARS_DIR.iterdir():
+        if not src.is_file():
+            continue
+        dest = AVATARS_DIR / src.name
+        if not dest.exists():
+            src.replace(dest)
+    try:
+        LEGACY_AVATARS_DIR.rmdir()
+    except OSError:
+        pass
+
+
+_migrate_legacy_avatars()
+
+
+def _is_within_path(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _resolve_allowed_dataset_path(raw_path: str) -> Path:
+    raw_path = (raw_path or "").strip()
+    if not raw_path:
+        raise ValueError("El archivo de entrada es obligatorio")
+    path = Path(raw_path)
+    if not path.is_absolute():
+        path = BASE_DIR / path
+    path = path.resolve()
+    if not _is_within_path(path, DATA_DIR):
+        raise PermissionError("La ruta del dataset debe estar dentro de data/")
+    if path.suffix.lower() not in {".csv", ".xlsx", ".xls"}:
+        raise ValueError("Formato no soportado. Usa .csv, .xlsx o .xls.")
+    return path
 
 
 def _auth_db() -> sqlite3.Connection:
@@ -236,12 +334,141 @@ def _auth_db() -> sqlite3.Connection:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
+            email TEXT NOT NULL DEFAULT '',
+            avatar_filename TEXT NOT NULL DEFAULT '',
+            role TEXT NOT NULL DEFAULT 'user',
+            active INTEGER NOT NULL DEFAULT 1,
+            session_version TEXT NOT NULL DEFAULT '',
+            last_login_at TEXT,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    _migrate_auth_db(conn)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS run_ownership (
+            output_file TEXT PRIMARY KEY,
+            run_id TEXT,
+            user_id INTEGER NOT NULL,
+            username TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(id)
         )
         """
     )
     conn.commit()
     return conn
+
+
+def _migrate_auth_db(conn: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    migrations = {
+        "email": "ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''",
+        "avatar_filename": "ALTER TABLE users ADD COLUMN avatar_filename TEXT NOT NULL DEFAULT ''",
+        "role": "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'",
+        "active": "ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1",
+        "session_version": "ALTER TABLE users ADD COLUMN session_version TEXT NOT NULL DEFAULT ''",
+        "last_login_at": "ALTER TABLE users ADD COLUMN last_login_at TEXT",
+        "updated_at": "ALTER TABLE users ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
+    }
+    for column, sql in migrations.items():
+        if column not in columns:
+            conn.execute(sql)
+    admin_count = conn.execute("SELECT COUNT(*) AS n FROM users WHERE role = ?", (ADMIN_ROLE,)).fetchone()["n"]
+    if admin_count == 0:
+        first = conn.execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()
+        if first:
+            conn.execute("UPDATE users SET role = ? WHERE id = ?", (ADMIN_ROLE, first["id"]))
+    elif admin_count > 1:
+        first_admin = conn.execute("SELECT id FROM users WHERE role = ? ORDER BY id LIMIT 1", (ADMIN_ROLE,)).fetchone()
+        conn.execute("UPDATE users SET role = ? WHERE role = ? AND id <> ?", (USER_ROLE, ADMIN_ROLE, first_admin["id"]))
+    conn.execute("UPDATE users SET session_version = lower(hex(randomblob(16))) WHERE session_version = '' OR session_version IS NULL")
+
+
+def _row_to_user(row: sqlite3.Row | None) -> dict | None:
+    if not row:
+        return None
+    avatar_filename = row["avatar_filename"] or ""
+    return {
+        "id": int(row["id"]),
+        "username": row["username"],
+        "email": row["email"] or "",
+        "avatar_filename": avatar_filename,
+        "avatar_url": f"/avatars/{avatar_filename}" if avatar_filename else "",
+        "role": row["role"] or USER_ROLE,
+        "active": bool(row["active"]),
+        "session_version": row["session_version"],
+        "provider": "local",
+        "provider_label": "Local",
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "last_login_at": row["last_login_at"],
+    }
+
+
+def _get_user_by_id(user_id: int) -> dict | None:
+    with _auth_db() as conn:
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    return _row_to_user(row)
+
+
+def _get_user_by_username(username: str) -> dict | None:
+    with _auth_db() as conn:
+        row = conn.execute("SELECT * FROM users WHERE username = ?", ((username or "").strip(),)).fetchone()
+    return _row_to_user(row)
+
+
+def _session_user() -> dict | None:
+    now = int(time.time())
+    auth_at = int(session.get("auth_at") or 0)
+    last_seen = int(session.get("last_seen") or 0)
+    if auth_at and now - auth_at > _SESSION_ABSOLUTE_SECONDS:
+        session.clear()
+        return None
+    if last_seen and now - last_seen > _SESSION_IDLE_SECONDS:
+        session.clear()
+        return None
+
+    user_id = (session.get("user") or {}).get("id")
+    if not user_id:
+        return None
+    user = _get_user_by_id(int(user_id))
+    if not user or not user["active"]:
+        session.clear()
+        return None
+    if session.get("session_version") != user.get("session_version"):
+        session.clear()
+        return None
+    session["user"] = user
+    session["last_seen"] = now
+    session.setdefault("csrf_token", _sec.token_urlsafe(32))
+    return user
+
+
+def _current_user_id() -> int | None:
+    user = _session_user()
+    return int(user["id"]) if user else None
+
+
+def _current_user_is_admin() -> bool:
+    user = _session_user()
+    return bool(user and user.get("role") == ADMIN_ROLE)
+
+
+def _require_admin():
+    if _current_user_is_admin():
+        return None
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "Permiso de admin requerido."}), 403
+    return redirect(url_for("index"))
+
+
+def _admin_required_response():
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "Permiso de admin requerido."}), 403
+    return redirect(url_for("index"))
 
 
 def _local_user_count() -> int:
@@ -250,34 +477,99 @@ def _local_user_count() -> int:
         return int(row["n"])
 
 
-def _create_local_user(username: str, password: str) -> tuple[bool, str]:
+def _active_user_count() -> int:
+    with _auth_db() as conn:
+        row = conn.execute("SELECT COUNT(*) AS n FROM users WHERE active = 1").fetchone()
+        return int(row["n"])
+
+
+def _admin_user_count() -> int:
+    with _auth_db() as conn:
+        row = conn.execute("SELECT COUNT(*) AS n FROM users WHERE role = ? AND active = 1", (ADMIN_ROLE,)).fetchone()
+        return int(row["n"])
+
+
+def _validate_username(username: str) -> tuple[bool, str]:
     username = (username or "").strip()
     if not username:
         return False, "Usuario requerido."
-    if len(password or "") < 8:
-        return False, "La contrasena debe tener al menos 8 caracteres."
+    if not re.match(r"^[A-Za-z0-9_.-]{3,40}$", username):
+        return False, "Usuario invalido. Usa 3-40 caracteres: letras, numeros, punto, guion o guion bajo."
+    return True, ""
+
+
+def _validate_password_strength(password: str) -> tuple[bool, str]:
+    password = password or ""
+    if len(password) < 12:
+        return False, "La contrasena debe tener al menos 12 caracteres."
+    classes = [
+        any(ch.islower() for ch in password),
+        any(ch.isupper() for ch in password),
+        any(ch.isdigit() for ch in password),
+        any(not ch.isalnum() for ch in password),
+    ]
+    if sum(classes) < 3:
+        return False, "La contrasena debe combinar al menos 3 tipos: minusculas, mayusculas, numeros o simbolos."
+    return True, ""
+
+
+def _create_local_user(username: str, password: str, email: str = "", role: str = USER_ROLE) -> tuple[bool, str, dict | None]:
+    username = (username or "").strip()
+    ok, error = _validate_username(username)
+    if not ok:
+        return False, error, None
+    ok, error = _validate_password_strength(password)
+    if not ok:
+        return False, error, None
+    role = role if role in {ADMIN_ROLE, USER_ROLE} else USER_ROLE
+    if role == ADMIN_ROLE and _admin_user_count() > 0:
+        return False, "Ya existe un admin. Usa transferencia de admin.", None
     try:
         with _auth_db() as conn:
-            conn.execute(
-                "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-                (username, generate_password_hash(password)),
+            cur = conn.execute(
+                "INSERT INTO users (username, password_hash, email, role, session_version) VALUES (?, ?, ?, ?, lower(hex(randomblob(16))))",
+                (username, generate_password_hash(password), (email or "").strip(), role),
             )
             conn.commit()
-        return True, ""
+            user_id = cur.lastrowid
+        return True, "", _get_user_by_id(user_id)
     except sqlite3.IntegrityError:
-        return False, "Ese usuario ya existe."
+        return False, "Ese usuario ya existe.", None
 
 
-def _local_credentials_ok(username: str, password: str) -> bool:
+def _local_credentials_user(username: str, password: str) -> dict | None:
     username = (username or "").strip()
     if not username or not password:
-        return False
+        return None
     with _auth_db() as conn:
         row = conn.execute(
-            "SELECT username, password_hash FROM users WHERE username = ?",
+            "SELECT * FROM users WHERE username = ? AND active = 1",
             (username,),
         ).fetchone()
-    return bool(row and check_password_hash(row["password_hash"], password))
+        if row and check_password_hash(row["password_hash"], password):
+            conn.execute("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?", (row["id"],))
+            conn.commit()
+            return _row_to_user(row)
+    return None
+
+
+def _set_session_user(user: dict) -> None:
+    session.clear()
+    session.permanent = True
+    session["user"] = user
+    now = int(time.time())
+    session["auth_at"] = now
+    session["last_seen"] = now
+    session["session_version"] = user.get("session_version")
+    session["csrf_token"] = _sec.token_urlsafe(32)
+
+
+def _csrf_token() -> str:
+    token = session.get("csrf_token")
+    if not token:
+        token = _sec.token_urlsafe(32)
+        session["csrf_token"] = token
+    return token
 
 
 def _is_localhost() -> bool:
@@ -292,10 +584,32 @@ def _safe_next_url(next_url: str | None) -> str:
 
 
 def _login_required_response(message: str):
+    session.clear()
     login_url = url_for("login", next=request.full_path if request.query_string else request.path)
     if request.path.startswith("/api/"):
         return jsonify({"error": message, "login_url": url_for("login")}), 401
     return redirect(login_url)
+
+
+def _login_throttle_key(username: str) -> str:
+    return f"{_client_ip()}:{(username or '').strip().lower()}"
+
+
+def _login_is_throttled(username: str) -> bool:
+    now = time.time()
+    key = _login_throttle_key(username)
+    attempts = [t for t in _login_failures.get(key, []) if now - t < _LOGIN_FAIL_WINDOW_SECONDS]
+    _login_failures[key] = attempts
+    return len(attempts) >= _LOGIN_FAIL_MAX
+
+
+def _record_login_failure(username: str):
+    key = _login_throttle_key(username)
+    _login_failures.setdefault(key, []).append(time.time())
+
+
+def _clear_login_failures(username: str):
+    _login_failures.pop(_login_throttle_key(username), None)
 
 
 def auth_status() -> dict:
@@ -313,33 +627,29 @@ def login():
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
-        if first_setup:
+        provided_csrf = request.form.get("csrf_token", "")
+        if not provided_csrf or not _sec.compare_digest(provided_csrf, _csrf_token()):
+            error = "Sesion expirada o formulario invalido. Recarga la pagina e intenta de nuevo."
+        elif _login_is_throttled(username):
+            error = "Demasiados intentos fallidos. Espera unos minutos e intenta de nuevo."
+            _log.warning("login_throttled ip=%s username=%s", _client_ip(), username)
+        elif first_setup:
             confirm = request.form.get("password_confirm", "")
             if password != confirm:
                 error = "Las contrasenas no coinciden."
             else:
-                ok, error = _create_local_user(username, password)
+                ok, error, user = _create_local_user(username, password, role=ADMIN_ROLE)
                 if ok:
-                    session.clear()
-                    session["user"] = {
-                        "email": username,
-                        "name": username,
-                        "sub": username,
-                        "provider": "local",
-                        "provider_label": "Local",
-                    }
+                    _clear_login_failures(username)
+                    _set_session_user(user)
                     return redirect(next_url)
-        elif _local_credentials_ok(username, password):
-            session.clear()
-            session["user"] = {
-                "email": username or "local",
-                "name": username or "Local user",
-                "sub": username or "local",
-                "provider": "local",
-                "provider_label": "Local",
-            }
+        elif (user := _local_credentials_user(username, password)):
+            _clear_login_failures(username)
+            _set_session_user(user)
             return redirect(next_url)
         elif not error:
+            _record_login_failure(username)
+            _log.warning("login_failed ip=%s username=%s", _client_ip(), username)
             error = "Usuario o contrasena incorrectos."
     return render_template(
         "login.html",
@@ -349,17 +659,325 @@ def login():
     )
 
 
-@app.route("/logout")
+@app.route("/logout", methods=["GET", "POST"])
 def logout():
-    session.clear()
+    if request.method == "POST":
+        provided = request.form.get("csrf_token", "") or request.headers.get("X-CSRF-Token", "")
+        expected = session.get("csrf_token", "")
+        if expected and (not provided or not _sec.compare_digest(provided, expected)):
+            return jsonify({"error": "Token CSRF faltante o invalido."}), 403
+        session.clear()
+    else:
+        # Evita logout por navegacion/preload GET. El boton real usa POST.
+        if _session_user():
+            return redirect(url_for("index"))
     return redirect(url_for("login"))
+
+
+@app.route("/avatars/<filename>")
+def avatar_file(filename: str):
+    if not re.match(r"^[A-Za-z0-9_.-]+$", filename or ""):
+        return "Nombre de archivo invalido", 400
+    path = AVATARS_DIR / filename
+    if path.exists():
+        response = send_from_directory(AVATARS_DIR, filename, conditional=False)
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        return response
+    legacy_path = LEGACY_AVATARS_DIR / filename
+    if legacy_path.exists():
+        response = send_from_directory(LEGACY_AVATARS_DIR, filename, conditional=False)
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        return response
+    return "Avatar no encontrado", 404
+
+
+def _public_user(user: dict) -> dict:
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "email": user.get("email", ""),
+        "avatar_url": user.get("avatar_url", ""),
+        "role": user.get("role", USER_ROLE),
+        "active": bool(user.get("active", True)),
+        "created_at": user.get("created_at"),
+        "updated_at": user.get("updated_at"),
+        "last_login_at": user.get("last_login_at"),
+    }
+
+
+def _record_run_owner(output_file: str, run_id: str | None, user: dict | None) -> None:
+    if not output_file or not user:
+        return
+    with _auth_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO run_ownership (output_file, run_id, user_id, username)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(output_file) DO UPDATE SET
+                run_id = excluded.run_id,
+                user_id = excluded.user_id,
+                username = excluded.username
+            """,
+            (Path(output_file).name, run_id or "", user["id"], user["username"]),
+        )
+        conn.commit()
+
+
+def _clear_runtime_checkpoint_files() -> list[str]:
+    cleared = []
+    for name in ["checkpoint.json", "failed_queue.jsonl", "claim_results.jsonl", "arbiter_results.jsonl"]:
+        path = CHECKPOINTS_DIR / name
+        if path.exists():
+            path.unlink()
+            cleared.append(name)
+    return cleared
+
+
+def _output_owner(name: str) -> dict | None:
+    with _auth_db() as conn:
+        row = conn.execute(
+            """
+            SELECT ro.output_file, ro.run_id, ro.username, u.id, u.email, u.avatar_filename, u.role, u.active,
+                   u.created_at, u.updated_at, u.last_login_at
+            FROM run_ownership ro
+            LEFT JOIN users u ON u.id = ro.user_id
+            WHERE ro.output_file = ?
+            """,
+            (name,),
+        ).fetchone()
+    if not row:
+        return None
+    avatar_filename = row["avatar_filename"] or ""
+    return {
+        "id": int(row["id"]) if row["id"] is not None else None,
+        "username": row["username"],
+        "email": row["email"] or "",
+        "avatar_filename": avatar_filename,
+        "avatar_url": f"/avatars/{avatar_filename}" if avatar_filename else "",
+        "role": row["role"] or USER_ROLE,
+        "active": bool(row["active"]) if row["active"] is not None else False,
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "last_login_at": row["last_login_at"],
+    }
+
+
+def _can_access_output(name: str) -> bool:
+    if _current_user_is_admin():
+        return True
+    owner = _output_owner(name)
+    return bool(owner and owner.get("id") == _current_user_id())
+
+
+def _save_avatar_upload(file_storage, user_id: int) -> tuple[bool, str, str]:
+    if not file_storage or not file_storage.filename:
+        return True, "", ""
+    original = secure_filename(file_storage.filename)
+    ext = Path(original).suffix.lower()
+    if ext not in AVATAR_EXTENSIONS:
+        return False, "Formato de imagen no permitido.", ""
+    file_storage.stream.seek(0, os.SEEK_END)
+    size = file_storage.stream.tell()
+    file_storage.stream.seek(0)
+    if size > 2 * 1024 * 1024:
+        return False, "La imagen no debe exceder 2 MB.", ""
+    AVATARS_DIR.mkdir(parents=True, exist_ok=True)
+    filename = f"user_{user_id}_{uuid.uuid4().hex[:12]}{ext}"
+    file_storage.save(AVATARS_DIR / filename)
+    return True, "", filename
+
+
+@app.route("/profile")
+def page_profile():
+    return render_template("profile.html")
+
+
+@app.route("/users")
+def page_users():
+    denied = _require_admin()
+    if denied:
+        return denied
+    return render_template("users.html")
+
+
+@app.route("/api/profile", methods=["GET"])
+def api_profile_get():
+    user = _session_user()
+    return jsonify(_public_user(user))
+
+
+@app.route("/api/profile", methods=["PUT"])
+def api_profile_update():
+    user = _session_user()
+    data = request.get_json() or {}
+    username = (data.get("username") or user["username"]).strip()
+    email = (data.get("email") or "").strip()
+    ok, error = _validate_username(username)
+    if not ok:
+        return jsonify({"error": error}), 400
+    current_password = data.get("current_password") or ""
+    new_password = data.get("new_password") or ""
+    try:
+        with _auth_db() as conn:
+            row = conn.execute("SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone()
+            if new_password:
+                ok, error = _validate_password_strength(new_password)
+                if not ok:
+                    return jsonify({"error": error}), 400
+                if not current_password or not check_password_hash(row["password_hash"], current_password):
+                    return jsonify({"error": "Contrasena actual incorrecta."}), 400
+                conn.execute(
+                    "UPDATE users SET username = ?, email = ?, password_hash = ?, session_version = lower(hex(randomblob(16))), updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (username, email, generate_password_hash(new_password), user["id"]),
+                )
+            else:
+                conn.execute(
+                    "UPDATE users SET username = ?, email = ?, session_version = lower(hex(randomblob(16))), updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (username, email, user["id"]),
+                )
+            conn.commit()
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "Ese usuario ya existe."}), 400
+    updated = _get_user_by_id(user["id"])
+    _set_session_user(updated)
+    return jsonify(_public_user(updated))
+
+
+@app.route("/api/profile/avatar", methods=["POST"])
+def api_profile_avatar():
+    user = _session_user()
+    ok, error, filename = _save_avatar_upload(request.files.get("avatar"), user["id"])
+    if not ok:
+        return jsonify({"error": error}), 400
+    if not filename:
+        return jsonify({"error": "Archivo de imagen requerido."}), 400
+    with _auth_db() as conn:
+        old = conn.execute("SELECT avatar_filename FROM users WHERE id = ?", (user["id"],)).fetchone()
+        conn.execute(
+            "UPDATE users SET avatar_filename = ?, session_version = lower(hex(randomblob(16))), updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (filename, user["id"]),
+        )
+        conn.commit()
+    if old and old["avatar_filename"]:
+        old_path = AVATARS_DIR / old["avatar_filename"]
+        if old_path.exists():
+            old_path.unlink()
+    updated = _get_user_by_id(user["id"])
+    _set_session_user(updated)
+    return jsonify(_public_user(updated))
+
+
+@app.route("/api/users", methods=["GET"])
+def api_users_list():
+    denied = _require_admin()
+    if denied:
+        return denied
+    with _auth_db() as conn:
+        rows = conn.execute("SELECT * FROM users ORDER BY active DESC, role ASC, username ASC").fetchall()
+    return jsonify([_public_user(_row_to_user(row)) for row in rows])
+
+
+@app.route("/api/users", methods=["POST"])
+def api_users_create():
+    denied = _require_admin()
+    if denied:
+        return denied
+    data = request.get_json() or {}
+    ok, error, user = _create_local_user(
+        data.get("username", ""),
+        data.get("password", ""),
+        email=data.get("email", ""),
+        role=USER_ROLE,
+    )
+    if not ok:
+        return jsonify({"error": error}), 400
+    _log.info("user_created admin=%s user=%s", _session_user()["username"], user["username"])
+    return jsonify(_public_user(user)), 201
+
+
+@app.route("/api/users/<int:user_id>", methods=["PUT"])
+def api_users_update(user_id: int):
+    denied = _require_admin()
+    if denied:
+        return denied
+    data = request.get_json() or {}
+    user = _get_user_by_id(user_id)
+    if not user:
+        return jsonify({"error": "Usuario no encontrado."}), 404
+    username = (data.get("username") or user["username"]).strip()
+    email = (data.get("email") or "").strip()
+    ok, error = _validate_username(username)
+    if not ok:
+        return jsonify({"error": error}), 400
+    password = data.get("password") or ""
+    active = 1 if bool(data.get("active", user["active"])) else 0
+    if user["role"] == ADMIN_ROLE and active == 0:
+        return jsonify({"error": "No puedes desactivar al admin. Transfiere admin primero."}), 400
+    try:
+        with _auth_db() as conn:
+            if password:
+                ok, error = _validate_password_strength(password)
+                if not ok:
+                    return jsonify({"error": error}), 400
+                conn.execute(
+                    "UPDATE users SET username = ?, email = ?, active = ?, password_hash = ?, session_version = lower(hex(randomblob(16))), updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (username, email, active, generate_password_hash(password), user_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE users SET username = ?, email = ?, active = ?, session_version = lower(hex(randomblob(16))), updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (username, email, active, user_id),
+                )
+            conn.commit()
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "Ese usuario ya existe."}), 400
+    if user_id == _current_user_id():
+        _set_session_user(_get_user_by_id(user_id))
+    return jsonify(_public_user(_get_user_by_id(user_id)))
+
+
+@app.route("/api/users/<int:user_id>/transfer-admin", methods=["POST"])
+def api_users_transfer_admin(user_id: int):
+    denied = _require_admin()
+    if denied:
+        return denied
+    current = _session_user()
+    target = _get_user_by_id(user_id)
+    if not target or not target["active"]:
+        return jsonify({"error": "El nuevo admin debe existir y estar activo."}), 400
+    if target["id"] == current["id"]:
+        return jsonify({"error": "Ese usuario ya es el admin actual."}), 400
+    with _auth_db() as conn:
+        conn.execute("UPDATE users SET role = ?, session_version = lower(hex(randomblob(16))), updated_at = CURRENT_TIMESTAMP WHERE id = ?", (USER_ROLE, current["id"]))
+        conn.execute("UPDATE users SET role = ?, session_version = lower(hex(randomblob(16))), updated_at = CURRENT_TIMESTAMP WHERE id = ?", (ADMIN_ROLE, target["id"]))
+        conn.commit()
+    _set_session_user(_get_user_by_id(current["id"]))
+    _log.info("admin_transferred from=%s to=%s", current["username"], target["username"])
+    return jsonify({"ok": True, "admin": _public_user(_get_user_by_id(target["id"]))})
+
+
+@app.route("/api/users/<int:user_id>", methods=["DELETE"])
+def api_users_disable(user_id: int):
+    denied = _require_admin()
+    if denied:
+        return denied
+    user = _get_user_by_id(user_id)
+    if not user:
+        return jsonify({"error": "Usuario no encontrado."}), 404
+    if user["role"] == ADMIN_ROLE:
+        return jsonify({"error": "No puedes eliminar/desactivar al admin. Transfiere admin primero."}), 400
+    with _auth_db() as conn:
+        conn.execute("UPDATE users SET active = 0, session_version = lower(hex(randomblob(16))), updated_at = CURRENT_TIMESTAMP WHERE id = ?", (user_id,))
+        conn.commit()
+    _log.info("user_disabled admin=%s user=%s", _session_user()["username"], user["username"])
+    return jsonify({"ok": True})
 
 
 @app.context_processor
 def _inject_csrf_token():
     return {
-        "csrf_token": app.config["CSRF_TOKEN"],
-        "current_user": session.get("user"),
+        "csrf_token": _csrf_token(),
+        "current_user": _session_user(),
         "setup_values": {},
     }
 
@@ -370,10 +988,20 @@ def _require_auth():
     if path in _AUTH_EXEMPT or any(path.startswith(p) for p in _AUTH_EXEMPT_PREFIX):
         return
 
-    if session.get("user"):
+    if _session_user():
         return
 
     return _login_required_response("Autenticacion requerida.")
+
+
+@app.before_request
+def _require_admin_for_project_management():
+    path = request.path
+    if path in _AUTH_EXEMPT or any(path.startswith(p) for p in _AUTH_EXEMPT_PREFIX):
+        return
+    if path in _ADMIN_PAGE_PATHS or path in _ADMIN_API_EXACT or any(path.startswith(p) for p in _ADMIN_API_PREFIXES):
+        if not _current_user_is_admin():
+            return _admin_required_response()
 
 
 # ---------------------------------------------------------------------------
@@ -384,10 +1012,12 @@ def _require_auth():
 def _require_csrf_token():
     if request.method not in _CSRF_METHODS:
         return
+    if request.path in {"/login", "/logout"}:
+        return
     if request.path in _AUTH_EXEMPT or any(request.path.startswith(p) for p in _AUTH_EXEMPT_PREFIX):
         return
     provided = request.headers.get("X-CSRF-Token", "")
-    expected = app.config["CSRF_TOKEN"]
+    expected = session.get("csrf_token", "")
     if not provided or not _sec.compare_digest(provided, expected):
         return jsonify({"error": "Token CSRF faltante o invalido."}), 403
 
@@ -507,10 +1137,15 @@ def _empty_current_run_stats() -> dict:
 _process_state = {
     "running":   False,
     "pid":       None,
-    "log_queue": queue.Queue(),
+    "log_lines": [],
+    "log_seq":   0,
+    "run_log_path": None,
     "proc":      None,
     "current_stats": _empty_current_run_stats(),
     "stats_lock": threading.Lock(),
+    "state_lock": threading.RLock(),
+    "exit_code": None,
+    "last_error": "",
 }
 
 
@@ -547,9 +1182,103 @@ def _public_current_stats(stats: dict = None) -> dict:
     return public
 
 
+def _new_web_run_log_path() -> Path:
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    suffix = uuid.uuid4().hex[:8]
+    return LOGS_DIR / f"web_run_{stamp}_{suffix}.log"
+
+
+def _append_web_run_log_file(line: str):
+    with _process_state["state_lock"]:
+        path_value = _process_state.get("run_log_path")
+    if not path_value:
+        return
+    try:
+        path = Path(path_value)
+        path.parent.mkdir(exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(line.rstrip("\n") + "\n")
+    except Exception as exc:
+        _run_log.warning("No se pudo escribir log de ejecucion %s: %s", path_value, exc)
+
+
+_SENSITIVE_LOG_PATTERNS = [
+    re.compile(r"(?i)\b(authorization)(\s*:\s*)(?:bearer|basic)?\s*[^\s,;]+"),
+    re.compile(r"(?i)\b(api[_-]?key|token|secret|password|passwd|pwd|csrf)[\w .:-]*([=:]\s*)([^\s,;]+)"),
+    re.compile(r"(?i)\b(OPENAI_API_KEY|ANTHROPIC_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY|LABELFORGE_SECRET_KEY|LABELFORGE_CSRF_TOKEN)\b\s*=\s*[^\s,;]+"),
+    re.compile(r"(?i)\b(Bearer|Basic)\s+[A-Za-z0-9._~+/\-]+=*"),
+]
+
+
+def _sanitize_run_log_for_ui(line: str) -> str:
+    """Redacta detalles operativos que no deben salir al navegador."""
+    text = str(line or "")
+    if text.startswith("Comando:"):
+        return "Comando preparado. Detalles omitidos en la pantalla; quedan en la bitacora local del servidor."
+    if text.startswith("Subprocess PID="):
+        return "Subproceso de etiquetado iniciado."
+    if text.startswith("[server-log]"):
+        return "[server-log] Bitacora local del servidor activada para esta ejecucion."
+
+    for pattern in _SENSITIVE_LOG_PATTERNS:
+        text = pattern.sub(lambda m: f"{m.group(1)}{m.group(2) if len(m.groups()) >= 2 else ' '}[REDACTADO]", text)
+
+    base = re.escape(str(BASE_DIR))
+    text = re.sub(base + r"[\\/][^\s\"']*", "[ruta-proyecto]", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b[A-Za-z]:\\[^\s\"']+", "[ruta-servidor]", text)
+    text = re.sub(r"(?<!:)//?[A-Za-z0-9_.-]+(?:/[^\s\"']*)?", lambda m: m.group(0) if m.group(0).startswith(("http://", "https://")) else "[ruta-servidor]", text)
+    return text
+
+
+def _push_run_log(line: str, *, expose_ui: bool = True):
+    line = str(line or "").strip()
+    if not line:
+        return
+    _run_log.info(line)
+    _append_web_run_log_file(line)
+    if not expose_ui:
+        return
+    with _process_state["state_lock"]:
+        _process_state.setdefault("log_lines", []).append(_sanitize_run_log_for_ui(line))
+        _process_state["log_seq"] = int(_process_state.get("log_seq", 0) or 0) + 1
+        if len(_process_state["log_lines"]) > 500:
+            _process_state["log_lines"] = _process_state["log_lines"][-500:]
+
+
 def _reset_current_stats():
     with _process_state["stats_lock"]:
         _process_state["current_stats"] = _empty_current_run_stats()
+
+
+def _reset_runtime_state_for_new_run():
+    with _process_state["state_lock"]:
+        _process_state["run_log_path"] = str(_new_web_run_log_path())
+        _process_state["log_lines"] = []
+        _process_state["log_seq"] = 0
+        _process_state["exit_code"] = None
+        _process_state["last_error"] = ""
+    _reset_current_stats()
+
+
+def _runtime_snapshot(since: int = 0) -> dict:
+    with _process_state["state_lock"]:
+        seq = int(_process_state.get("log_seq", 0) or 0)
+        lines = list(_process_state.get("log_lines", []))
+        base_seq = max(0, seq - len(lines))
+        start = max(0, int(since or 0) - base_seq)
+        payload_lines = lines[start:]
+        runtime = {
+            "running": bool(_process_state.get("running")),
+            "pid": _process_state.get("pid"),
+            "seq": seq,
+            "lines": payload_lines,
+            "exit_code": _process_state.get("exit_code"),
+            "last_error": _process_state.get("last_error", ""),
+            "run_log_available": bool(_process_state.get("run_log_path")),
+        }
+    with _process_state["stats_lock"]:
+        runtime["stats"] = _public_current_stats(_process_state["current_stats"])
+    return runtime
 
 
 def _ensure_live_arbiter(stats: dict, arb_id: str, name: str = None) -> dict:
@@ -663,6 +1392,9 @@ def _apply_run_metric_event(event: dict) -> dict:
                     pc[p]["ones"] += 1
                 elif val == 0:
                     pc[p]["zeros"] += 1
+
+        elif kind == "claim_start":
+            stats["last_claim"] = event
 
         elif kind == "claim_failed":
             _set_live_claim_status(stats, event.get("row_index"), "failed")
@@ -1050,8 +1782,13 @@ def api_rate_limits_summary():
                 "alert_msg":   f"Proveedor '{ptype}': sin modelo configurado.",
             })
 
-    # Delay global recomendado = el mayor de todos los delays minimos
-    provider_results = [r for r in results if r.get("min_delay_s") is not None]
+    # Delay global recomendado = el mayor de los delays remotos. Los modelos
+    # locales no tienen RPM de API; su cuello de botella es hardware/VRAM.
+    provider_results = [
+        r for r in results
+        if r.get("min_delay_s") is not None and r.get("limit_kind") != "local"
+    ]
+    local_results = [r for r in results if r.get("limit_kind") == "local"]
     if provider_results:
         global_min_delay  = max(r["min_delay_s"]  for r in provider_results)
         global_safe_delay = max(r["safe_delay_s"] for r in provider_results)
@@ -1060,6 +1797,17 @@ def api_rate_limits_summary():
         global_msg        = (f"Espera minima global: {global_min_delay}s "
                              f"(limitado por {worst.get('provider')} / {worst['model']} a {worst['rpm']} RPM). "
                              f"Espera segura para produccion: {global_safe_delay}s.")
+        if local_results:
+            global_msg += " Los modelos locales no tienen limite RPM de API; dependen del hardware local."
+    elif local_results:
+        global_min_delay  = 0
+        global_safe_delay = 0
+        global_alert      = "info"
+        names = ", ".join(f"{r.get('arb_id')} ({r.get('model')})" for r in local_results)
+        global_msg        = (
+            f"Procesamiento local GPU/CPU: sin limite RPM de API para {names}. "
+            "La espera entre peticiones puede ser 0s; el rendimiento real depende de VRAM, capas offload, temperatura, contexto y concurrencia."
+        )
     else:
         global_min_delay  = 1.5
         global_safe_delay = 3.0
@@ -1405,13 +2153,14 @@ def api_update_dataset_config():
         return jsonify({"error": "; ".join(errors)}), 400
 
     raw_input = updated.get("input_file", cfg.get("dataset", {}).get("input_file", ""))
-    if not raw_input:
-        return jsonify({"error": "El archivo de entrada es obligatorio"}), 400
-    resolved = Path(raw_input)
-    if not resolved.is_absolute():
-        resolved = BASE_DIR / resolved
-    if not str(resolved.resolve()).startswith(str(BASE_DIR.resolve())):
-        return jsonify({"error": "La ruta del dataset debe estar dentro del directorio del proyecto"}), 400
+    try:
+        resolved = _resolve_allowed_dataset_path(raw_input)
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 403
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if "input_file" in updated:
+        updated["input_file"] = str(resolved.relative_to(BASE_DIR)).replace("\\", "/")
 
     if "dataset" not in cfg:
         cfg["dataset"] = {}
@@ -1432,15 +2181,15 @@ def api_dataset_inspect():
     if not raw_path:
         return jsonify({"error": "El campo de archivo es obligatorio"}), 400
 
-    path = Path(raw_path)
-    if not path.is_absolute():
-        path = BASE_DIR / path
-    path = path.resolve()
-    if not str(path).startswith(str(BASE_DIR.resolve())):
-        return jsonify({"error": "Ruta fuera del directorio del proyecto"}), 403
+    try:
+        path = _resolve_allowed_dataset_path(raw_path)
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 403
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     if not path.exists():
-        return jsonify({"error": f"Archivo no encontrado: {raw_path}"}), 404
+        return jsonify({"error": "Archivo no encontrado."}), 404
 
     suffix = path.suffix.lower()
 
@@ -1819,14 +2568,14 @@ def api_update_processing():
         for arb in cfg.get("arbiters", []):
             provider = arb.get("provider", {})
             if provider.get("model"):
-                provider_delays.append(
-                    compute_min_delay(
-                        provider.get("type", "gemini"),
-                        provider["model"],
-                        "free",
-                        n_arbiters,
-                    )
+                delay_info = compute_min_delay(
+                    provider.get("type", "gemini"),
+                    provider["model"],
+                    "free",
+                    n_arbiters,
                 )
+                if delay_info.get("limit_kind") != "local":
+                    provider_delays.append(delay_info)
         if provider_delays:
             min_delay = max(r["min_delay_s"] for r in provider_delays)
             if updated["base_delay_seconds"] < min_delay:
@@ -1849,16 +2598,31 @@ def api_update_processing():
 # ---------------------------------------------------------------------------
 @app.route("/api/run/start", methods=["POST"])
 def api_run_start():
+    app.logger.info("[run/start] Solicitud recibida")
+
     if _process_state["running"]:
+        app.logger.info("[run/start] Ya hay un proceso corriendo -> 409")
         return jsonify({"error": "Ya hay un proceso corriendo"}), 409
 
     data  = request.get_json() or {}
     limit = data.get("limit")
+    run_user = _session_user()
+    app.logger.info("[run/start] Usuario: %s | limit: %s", run_user, limit)
 
-    # Leer configuracion de dataset desde el config central
-    cfg_data    = read_config()
-    preflight_issues = validate_provider_preflight(cfg_data)
+    try:
+        cfg_data = read_config()
+    except Exception as exc:
+        app.logger.error("[run/start] Error leyendo config: %s", exc)
+        return jsonify({"error": f"Error leyendo configuracion: {exc}"}), 500
+
+    try:
+        preflight_issues = validate_provider_preflight(cfg_data)
+    except Exception as exc:
+        app.logger.error("[run/start] Error en preflight: %s", exc)
+        return jsonify({"error": f"Error en preflight: {exc}"}), 500
+
     if preflight_issues:
+        app.logger.info("[run/start] Preflight fallo: %s", preflight_issues)
         return jsonify({
             "error": "No se puede iniciar: hay problemas de credenciales o proveedores.",
             "issues": preflight_issues,
@@ -1869,7 +2633,7 @@ def api_run_start():
     sheet       = dataset_cfg.get("sheet", "")
     text_column = dataset_cfg.get("text_column", "claim")
 
-    cmd = [sys.executable, str(BASE_DIR / "main_cli.py")]
+    cmd = [sys.executable, "-u", str(BASE_DIR / "main_cli.py")]
     if input_file:
         cmd += ["--input", input_file]
     if sheet:
@@ -1879,43 +2643,72 @@ def api_run_start():
     if limit:
         cmd += ["--limit", str(int(limit))]
 
-    _process_state["log_queue"] = queue.Queue()
-    _reset_current_stats()
+    app.logger.info("[run/start] CMD: %s", " ".join(cmd))
+
+    _reset_runtime_state_for_new_run()
+    _push_run_log("--- Solicitud recibida: preparando ejecucion ---")
+    _push_run_log(f"Usuario: {run_user.get('username') if run_user else '-'}")
+    _push_run_log(f"Comando: {' '.join(cmd)}")
+    with _process_state["state_lock"]:
+        _process_state["running"] = True
 
     def run_and_capture():
-        _process_state["running"] = True
+        with _process_state["state_lock"]:
+            _process_state["running"] = True
         try:
             env = os.environ.copy()
             env["DATA_LABELING_WEBAPP_METRICS"] = "1"
+            env["PYTHONUNBUFFERED"] = "1"
+            app.logger.info("[run/start] Lanzando subprocess...")
+            _push_run_log("--- Lanzando proceso de etiquetado ---")
             proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, bufsize=1, cwd=str(BASE_DIR), env=env,
             )
-            _process_state["proc"] = proc
-            _process_state["pid"]  = proc.pid
+            with _process_state["state_lock"]:
+                _process_state["proc"] = proc
+                _process_state["pid"]  = proc.pid
+            app.logger.info("[run/start] Subprocess PID=%s", proc.pid)
+            _push_run_log(f"Subprocess PID={proc.pid}")
             for line in iter(proc.stdout.readline, ""):
-                line = line.rstrip("\n")
+                line = line.rstrip("\r\n")
                 if not line:
                     continue
                 if line.startswith(METRIC_PREFIX):
                     try:
                         event = json.loads(line[len(METRIC_PREFIX):])
-                        snapshot = _apply_run_metric_event(event)
-                        _process_state["log_queue"].put({"type": "metric", "data": snapshot})
+                        metric_line = json.dumps(event, ensure_ascii=False, sort_keys=True)
+                        _push_run_log(f"[metric] {metric_line}", expose_ui=False)
+                        if event.get("event") in {"start", "claim_start", "claim_ok", "claim_failed", "claim_skipped", "pause", "complete", "output_written"}:
+                            _push_run_log(f"[metric:{event.get('event')}] row={event.get('row_index', '-')} stage={event.get('stage', '-')} tokens={event.get('total_tokens', '-')} latency={event.get('total_latency_s', '-')}")
+                        if event.get("event") in {"output_written", "completed"}:
+                            _record_run_owner(event.get("output_file"), event.get("run_id"), run_user)
+                        _apply_run_metric_event(event)
                     except json.JSONDecodeError:
-                        _process_state["log_queue"].put(line)
+                        _push_run_log(line)
                     continue
-                _process_state["log_queue"].put(line)
+                _push_run_log(line)
             proc.stdout.close()
             proc.wait()
-            _process_state["log_queue"].put(f"__EXIT__ {proc.returncode}")
+            exit_msg = f"--- Proceso finalizado (codigo {proc.returncode}) ---"
+            app.logger.info("[run/start] %s", exit_msg)
+            _push_run_log(exit_msg)
+            with _process_state["state_lock"]:
+                _process_state["exit_code"] = proc.returncode
         except Exception as e:
-            _process_state["log_queue"].put(f"__EXIT__ ERROR: {e}")
+            app.logger.error("[run/start] Excepcion en subprocess: %s", e)
+            err_msg = f"--- Error en proceso: {e} ---"
+            _push_run_log(err_msg)
+            with _process_state["state_lock"]:
+                _process_state["exit_code"] = "ERROR"
+                _process_state["last_error"] = str(e)
         finally:
-            _process_state["running"] = False
-            _process_state["proc"]    = None
+            with _process_state["state_lock"]:
+                _process_state["running"] = False
+                _process_state["proc"]    = None
 
     threading.Thread(target=run_and_capture, daemon=True).start()
+    app.logger.info("[run/start] Thread iniciado -> respondiendo OK")
     return jsonify({"ok": True})
 
 
@@ -1924,45 +2717,32 @@ def api_run_stop():
     proc = _process_state.get("proc")
     if proc and _process_state["running"]:
         proc.terminate()
-        _process_state["running"] = False
+        with _process_state["state_lock"]:
+            _process_state["running"] = False
+            _process_state["exit_code"] = "STOPPED"
+        _push_run_log("--- Proceso detenido por el usuario ---")
         return jsonify({"ok": True})
     return jsonify({"error": "No hay proceso activo"}), 400
 
 
 @app.route("/api/run/status", methods=["GET"])
 def api_run_status():
-    return jsonify({"running": _process_state["running"], "pid": _process_state["pid"]})
+    snapshot = _runtime_snapshot(0)
+    return jsonify({
+        "running": snapshot["running"],
+        "pid": snapshot["pid"],
+        "exit_code": snapshot["exit_code"],
+        "last_error": snapshot["last_error"],
+    })
 
 
-@app.route("/api/run/current-stats", methods=["GET"])
-def api_run_current_stats():
-    with _process_state["stats_lock"]:
-        return jsonify(_public_current_stats(_process_state["current_stats"]))
-
-
-# ---------------------------------------------------------------------------
-# SSE: Streaming de logs
-# ---------------------------------------------------------------------------
-@app.route("/api/run/logs")
-def api_run_logs():
-    def generate():
-        while True:
-            try:
-                item = _process_state["log_queue"].get(timeout=30)
-                if isinstance(item, dict):
-                    yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
-                    continue
-                line = item
-                if line.startswith("__EXIT__"):
-                    yield f"data: {json.dumps({'type':'exit','msg':line})}\n\n"
-                    break
-                yield f"data: {json.dumps({'type':'log','msg':line})}\n\n"
-            except queue.Empty:
-                yield "data: {\"type\":\"heartbeat\"}\n\n"
-                if not _process_state["running"]:
-                    break
-    return Response(stream_with_context(generate()), mimetype="text/event-stream",
-                    headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
+@app.route("/api/run/snapshot", methods=["GET"])
+def api_run_snapshot():
+    try:
+        since = int(request.args.get("since", 0) or 0)
+    except (TypeError, ValueError):
+        since = 0
+    return jsonify(_runtime_snapshot(since))
 
 
 # ---------------------------------------------------------------------------
@@ -2049,8 +2829,12 @@ def api_outputs():
     files = []
     if OUTPUT_DIR.exists():
         for f in sorted(OUTPUT_DIR.glob("labeled_*.csv"), reverse=True):
+            owner = _output_owner(f.name)
+            if not _current_user_is_admin() and (not owner or owner.get("id") != _current_user_id()):
+                continue
             files.append({
                 "name": f.name,
+                "owner": _public_user(owner) if owner else None,
                 "size_kb": round(f.stat().st_size / 1024, 1),
                 "modified": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(f.stat().st_mtime)),
                 **_describe_output_csv(f),
@@ -2063,10 +2847,12 @@ def api_serve_output(name):
     import re
     if not re.match(r"^labeled_\d{8}_\d{6}\.csv$", name):
         return "Nombre de archivo invalido", 400
+    if not _can_access_output(name):
+        return "No autorizado", 403
     path = OUTPUT_DIR / name
     if not path.exists():
         return "Archivo no encontrado", 404
-    return path.read_bytes(), 200, {"Content-Type": "text/csv; charset=utf-8", "Content-Disposition": f'inline; filename="{name}"'}
+    return path.read_bytes(), 200, {"Content-Type": "text/csv; charset=utf-8", "Content-Disposition": f'attachment; filename="{name}"'}
 
 
 @app.route("/api/outputs/<name>", methods=["DELETE"])
@@ -2074,21 +2860,31 @@ def api_delete_output(name):
     import re
     if not re.match(r"^labeled_\d{8}_\d{6}\.csv$", name):
         return jsonify({"error": "Nombre de archivo invalido"}), 400
+    if not _can_access_output(name):
+        return jsonify({"error": "No autorizado"}), 403
     path = OUTPUT_DIR / name
     if not path.exists():
         return jsonify({"error": "Archivo no encontrado"}), 404
     path.unlink()
+    with _auth_db() as conn:
+        conn.execute("DELETE FROM run_ownership WHERE output_file = ?", (name,))
+        conn.commit()
     return jsonify({"ok": True})
 
 
 @app.route("/api/outputs/archive-all", methods=["POST"])
 def api_archive_all_outputs():
+    denied = _require_admin()
+    if denied:
+        return denied
     import re
     from datetime import datetime
     files = list(OUTPUT_DIR.glob("labeled_*.csv")) if OUTPUT_DIR.exists() else []
     files = [f for f in files if re.match(r"^labeled_\d{8}_\d{6}\.csv$", f.name)]
     if not files:
-        return jsonify({"ok": True, "archived": 0, "archive_dir": None})
+        cleared = _clear_runtime_checkpoint_files()
+        _reset_current_stats()
+        return jsonify({"ok": True, "archived": 0, "archive_dir": None, "cleared": cleared})
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     archive_dir = BASE_DIR / "archive" / f"partial_{stamp}"
     archive_dir.mkdir(parents=True, exist_ok=True)
@@ -2097,7 +2893,17 @@ def api_archive_all_outputs():
         dest = archive_dir / f.name
         f.rename(dest)
         count += 1
-    return jsonify({"ok": True, "archived": count, "archive_dir": f"archive/partial_{stamp}"})
+    cleared = _clear_runtime_checkpoint_files()
+    _reset_current_stats()
+    with _auth_db() as conn:
+        conn.executemany("DELETE FROM run_ownership WHERE output_file = ?", [(f.name,) for f in files])
+        conn.commit()
+    return jsonify({
+        "ok": True,
+        "archived": count,
+        "archive_dir": f"archive/partial_{stamp}",
+        "cleared": cleared,
+    })
 
 
 @app.route("/api/run/principle-counts", methods=["GET"])
@@ -2305,6 +3111,209 @@ def _build_result_rows(
     return result_rows
 
 
+def _mean(values: list[float]) -> float | None:
+    values = [float(v) for v in values if v is not None]
+    return round(sum(values) / len(values), 4) if values else None
+
+
+def _median(values: list[float]) -> float | None:
+    values = sorted(float(v) for v in values if v is not None)
+    if not values:
+        return None
+    mid = len(values) // 2
+    if len(values) % 2:
+        return round(values[mid], 4)
+    return round((values[mid - 1] + values[mid]) / 2, 4)
+
+
+def _percentile(values: list[float], pct: float) -> float | None:
+    values = sorted(float(v) for v in values if v is not None)
+    if not values:
+        return None
+    if len(values) == 1:
+        return round(values[0], 4)
+    pos = (len(values) - 1) * pct
+    lo = int(pos)
+    hi = min(lo + 1, len(values) - 1)
+    weight = pos - lo
+    return round(values[lo] * (1 - weight) + values[hi] * weight, 4)
+
+
+def _distribution(values: list[str], limit: int = 30) -> dict:
+    counts = Counter(str(v or "").strip() or "(vacio)" for v in values)
+    return dict(counts.most_common(limit))
+
+
+def _numeric_summary(values: list[float]) -> dict:
+    clean = [float(v) for v in values if v is not None]
+    return {
+        "n": len(clean),
+        "min": round(min(clean), 4) if clean else None,
+        "p25": _percentile(clean, 0.25),
+        "median": _median(clean),
+        "mean": _mean(clean),
+        "p75": _percentile(clean, 0.75),
+        "p95": _percentile(clean, 0.95),
+        "max": round(max(clean), 4) if clean else None,
+    }
+
+
+def _cohen_kappa_for_pairs(pairs: list[tuple[int, int]]) -> float | None:
+    if not pairs:
+        return None
+    n = len(pairs)
+    observed = sum(1 for a, b in pairs if a == b) / n
+    p_a_1 = sum(1 for a, _ in pairs if a == 1) / n
+    p_b_1 = sum(1 for _, b in pairs if b == 1) / n
+    expected = (p_a_1 * p_b_1) + ((1 - p_a_1) * (1 - p_b_1))
+    if expected == 1:
+        return 1.0 if observed == 1 else None
+    return round((observed - expected) / (1 - expected), 4)
+
+
+def _paper_reporting_summary(rows: list, principles: list, arbiter_ids: list, agreement: dict, status_counts: dict) -> dict:
+    processed_rows = [
+        row for row in rows
+        if _row_processing_status(row, principles) != "pending"
+    ]
+    ok_rows = [
+        row for row in rows
+        if _row_processing_status(row, principles) == "ok"
+    ]
+    entry_metrics = [_entry_consensus_metrics_from_row(row, principles) for row in ok_rows]
+    usage_metrics = [_entry_usage_metrics_from_row(row, arbiter_ids) for row in processed_rows]
+
+    principle_summary = {}
+    for principle in principles:
+        consensus_values = [_safe_int(row.get(f"{principle}_consensus")) for row in ok_rows]
+        positives = sum(1 for v in consensus_values if v == 1)
+        negatives = sum(1 for v in consensus_values if v == 0)
+        errors = sum(1 for v in consensus_values if v is not None and v < 0)
+        missing = sum(1 for v in consensus_values if v is None)
+        supports = []
+        for metrics in entry_metrics:
+            p_metrics = metrics.get("per_principle", {}).get(principle, {})
+            raters = p_metrics.get("raters") or 0
+            support = p_metrics.get("support")
+            if support is not None and raters:
+                supports.append(support / raters)
+        principle_summary[principle] = {
+            "n": len(consensus_values),
+            "positive": positives,
+            "negative": negatives,
+            "errors": errors,
+            "missing": missing,
+            "positive_rate_percent": round((positives / (positives + negatives)) * 100, 1) if positives + negatives else None,
+            "mean_majority_support_percent": round((_mean(supports) or 0) * 100, 1) if supports else None,
+            "agreement": agreement.get("per_principle", {}).get(principle, {}),
+        }
+
+    observed_values = [
+        m.get("observed_agreement_percent")
+        for m in entry_metrics
+        if m.get("observed_agreement_percent") is not None
+    ]
+    mean_support_values = [
+        m.get("mean_support_percent")
+        for m in entry_metrics
+        if m.get("mean_support_percent") is not None
+    ]
+    split_counts = [m.get("split_principles", 0) or 0 for m in entry_metrics]
+    unanimous_counts = [m.get("unanimous_principles", 0) or 0 for m in entry_metrics]
+
+    arbiter_summary = {}
+    for arb_id in arbiter_ids:
+        prompt_tokens = []
+        completion_tokens = []
+        total_tokens = []
+        latencies = []
+        votes = []
+        missing_votes = 0
+        for row in processed_rows:
+            prompt_tokens.append(_safe_int(row.get(f"prompt_tokens_{arb_id}"), 0) or 0)
+            completion_tokens.append(_safe_int(row.get(f"completion_tokens_{arb_id}"), 0) or 0)
+            total_tokens.append(_safe_int(row.get(f"total_tokens_{arb_id}"), 0) or 0)
+            lat = _safe_float(row.get(f"latency_s_{arb_id}"))
+            if lat is not None and lat >= 0:
+                latencies.append(lat)
+            for principle in principles:
+                vote = _safe_int(row.get(f"{principle}_{arb_id}"))
+                if vote in (0, 1):
+                    votes.append(vote)
+                else:
+                    missing_votes += 1
+        arbiter_summary[arb_id] = {
+            "calls": len(latencies),
+            "vote_count": len(votes),
+            "missing_votes": missing_votes,
+            "positive_vote_rate_percent": round((sum(votes) / len(votes)) * 100, 1) if votes else None,
+            "prompt_tokens": _numeric_summary(prompt_tokens),
+            "completion_tokens": _numeric_summary(completion_tokens),
+            "total_tokens": _numeric_summary(total_tokens),
+            "latency_s": _numeric_summary(latencies),
+        }
+
+    pairwise = []
+    for i, arb_a in enumerate(arbiter_ids):
+        for arb_b in arbiter_ids[i + 1:]:
+            pairs = []
+            for row in processed_rows:
+                for principle in principles:
+                    a = _safe_int(row.get(f"{principle}_{arb_a}"))
+                    b = _safe_int(row.get(f"{principle}_{arb_b}"))
+                    if a in (0, 1) and b in (0, 1):
+                        pairs.append((a, b))
+            agreements = sum(1 for a, b in pairs if a == b)
+            pairwise.append({
+                "arbiter_a": arb_a,
+                "arbiter_b": arb_b,
+                "n": len(pairs),
+                "observed_agreement_percent": round((agreements / len(pairs)) * 100, 1) if pairs else None,
+                "cohen_kappa": _cohen_kappa_for_pairs(pairs),
+                "disagreements": len(pairs) - agreements,
+            })
+
+    total_prompt = sum(m.get("prompt_tokens", 0) or 0 for m in usage_metrics)
+    total_completion = sum(m.get("completion_tokens", 0) or 0 for m in usage_metrics)
+    total_tokens = sum(m.get("total_tokens", 0) or 0 for m in usage_metrics)
+    latencies = [m.get("latency_s") for m in usage_metrics if m.get("latency_s") is not None]
+    return {
+        "dataset": {
+            "total_rows": len(rows),
+            "processed_rows": len(processed_rows),
+            "successful_rows": status_counts.get("ok", 0),
+            "failed_rows": status_counts.get("failed", 0),
+            "pending_rows": status_counts.get("pending", 0),
+            "principle_count": len(principles),
+            "arbiter_count": len(arbiter_ids),
+            "dataset_distribution": _distribution([row.get("dataset", "") for row in rows]),
+            "class_distribution": _distribution([row.get("class", "") for row in rows]),
+        },
+        "consensus_quality": {
+            "entry_observed_agreement_percent": _numeric_summary(observed_values),
+            "entry_mean_support_percent": _numeric_summary(mean_support_values),
+            "split_principles_per_entry": _numeric_summary(split_counts),
+            "unanimous_principles_per_entry": _numeric_summary(unanimous_counts),
+            "entries_with_any_split_principle": sum(1 for v in split_counts if v > 0),
+            "entries_below_60_agreement": sum(1 for v in observed_values if v < 60),
+            "entries_below_80_agreement": sum(1 for v in observed_values if v < 80),
+        },
+        "principles": principle_summary,
+        "arbiters": arbiter_summary,
+        "pairwise_arbiters": pairwise,
+        "resources": {
+            "prompt_tokens_total": total_prompt,
+            "completion_tokens_total": total_completion,
+            "tokens_total": total_tokens,
+            "prompt_share_percent": round((total_prompt / total_tokens) * 100, 1) if total_tokens else None,
+            "completion_share_percent": round((total_completion / total_tokens) * 100, 1) if total_tokens else None,
+            "tokens_per_entry": _numeric_summary([m.get("total_tokens") for m in usage_metrics]),
+            "latency_s_per_entry": _numeric_summary(latencies),
+            "arbiter_calls_per_entry": _numeric_summary([m.get("arbiter_calls") for m in usage_metrics]),
+        },
+    }
+
+
 
 
 
@@ -2491,6 +3500,8 @@ def api_run_stats():
     effective_result_limit = processed_result_rows if result_limit is None else result_limit
     result_offset = min(result_offset, max(processed_result_rows - 1, 0)) if processed_result_rows else 0
     result_count = min(max(processed_result_rows - result_offset, 0), effective_result_limit)
+    agreement = compute_agreement_metrics(rows, principles, arbiter_ids)
+    paper_summary = _paper_reporting_summary(rows, principles, arbiter_ids, agreement, status_counts)
 
     return jsonify({
         "source_file":         source_file,
@@ -2504,7 +3515,8 @@ def api_run_stats():
         "total_latency_s":     round(total_latency_global, 3),
         "arbiters":            stats,
         "principles":          principles,
-        "agreement":           compute_agreement_metrics(rows, principles, arbiter_ids),
+        "agreement":           agreement,
+        "paper_summary":       paper_summary,
         "results_total":       processed_result_rows,
         "results_count":       result_count,
         "results_offset":      result_offset,
@@ -2544,6 +3556,9 @@ def api_checkpoint_status():
                 "successful_rows": summary.get("successful_rows", 0),
                 "failed_rows": summary.get("failed_rows", 0),
             }
+            if run_state["status"] == "completed":
+                _clear_runtime_checkpoint_files()
+                return jsonify({"exists": False, "run_state": run_state})
         except (OSError, json.JSONDecodeError):
             run_state = None
     if not cp.exists():
@@ -2581,12 +3596,12 @@ def api_failed_queue():
 
 @app.route("/api/checkpoint/clear", methods=["POST"])
 def api_checkpoint_clear():
-    cleared = []
-    for name in ["checkpoint.json", "failed_queue.jsonl", "run_state.json",
-                 "claim_results.jsonl", "arbiter_results.jsonl"]:
-        p = CHECKPOINTS_DIR / name
-        if p.exists():
-            p.unlink(); cleared.append(name)
+    cleared = _clear_runtime_checkpoint_files()
+    run_state_path = CHECKPOINTS_DIR / "run_state.json"
+    if run_state_path.exists():
+        run_state_path.unlink()
+        cleared.append("run_state.json")
+    _reset_current_stats()
     return jsonify({"ok": True, "cleared": cleared})
 
 
@@ -2601,4 +3616,3 @@ if __name__ == "__main__":
     _port = int(_os.environ.get("LABELFORGE_PORT", "7860"))
     print(f"  LabelForge   ->   http://{_host}:{_port}")
     app.run(debug=True, host=_host, port=_port, threaded=True)
-

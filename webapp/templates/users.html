@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}Usuarios - LabelForge{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <div class="page-title mb-0">Usuarios</div>
+  <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createUserModal">
+    <i class="bi bi-person-plus me-1"></i>Crear usuario
+  </button>
+</div>
+
+<div class="card-dark accent-card accent-cyan">
+  <div class="card-header-label">Admin unico y usuarios activos</div>
+  <div id="users-list"><span class="text-secondary small">Cargando...</span></div>
+</div>
+
+<div class="modal fade" id="createUserModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content bg-dark text-light" style="border:1px solid #2d3148">
+      <div class="modal-header border-secondary">
+        <h5 class="modal-title">Crear usuario</h5>
+        <button class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form id="create-user-form">
+        <div class="modal-body d-grid gap-3">
+          <div>
+            <label class="form-label small text-secondary">Usuario</label>
+            <input class="form-control" id="new-username" autocomplete="off">
+          </div>
+          <div>
+            <label class="form-label small text-secondary">Email</label>
+            <input class="form-control" id="new-email" type="email" autocomplete="off">
+          </div>
+          <div>
+            <label class="form-label small text-secondary">Contrasena temporal</label>
+            <input class="form-control" id="new-password" type="password" autocomplete="new-password">
+          </div>
+          <div class="text-secondary small">Los usuarios creados aqui nacen con rol user. Para cambiar admin usa transferencia.</div>
+        </div>
+        <div class="modal-footer border-secondary">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Crear</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+let users = [];
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+  }[ch]));
+}
+
+function userBadge(user) {
+  const tone = user.role === 'admin' ? 'info' : 'secondary';
+  return `<span class="badge bg-${tone}-subtle text-${tone} border border-${tone}">${escapeHtml(user.role)}</span>`;
+}
+
+function activeBadge(user) {
+  return user.active
+    ? '<span class="badge bg-success-subtle text-success border border-success">activo</span>'
+    : '<span class="badge bg-secondary-subtle text-secondary border border-secondary">desactivado</span>';
+}
+
+function renderUsers() {
+  const el = document.getElementById('users-list');
+  if (!users.length) {
+    el.innerHTML = '<span class="text-secondary small">Sin usuarios.</span>';
+    return;
+  }
+  el.innerHTML = `
+    <div class="table-responsive">
+      <table class="table table-dark table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Usuario</th>
+            <th>Email</th>
+            <th>Rol</th>
+            <th>Estado</th>
+            <th>Ultimo login</th>
+            <th class="text-end">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${users.map(u => `
+            <tr>
+              <td>
+                <div class="d-flex align-items-center gap-2">
+                  ${u.avatar_url ? `<img src="${escapeHtml(u.avatar_url)}" alt="" style="width:32px;height:32px;border-radius:50%;object-fit:cover">` : '<span class="d-inline-flex align-items-center justify-content-center" style="width:32px;height:32px;border-radius:50%;background:#252b3d;color:#94a3b8"><i class="bi bi-person"></i></span>'}
+                  <strong>${escapeHtml(u.username)}</strong>
+                </div>
+              </td>
+              <td>${escapeHtml(u.email || '-')}</td>
+              <td>${userBadge(u)}</td>
+              <td>${activeBadge(u)}</td>
+              <td class="text-secondary small">${escapeHtml(u.last_login_at || '-')}</td>
+              <td class="text-end">
+                <div class="btn-group btn-group-sm">
+                  <button class="btn btn-outline-secondary" onclick="editUser(${u.id})" title="Editar"><i class="bi bi-pencil"></i></button>
+                  ${u.role !== 'admin' && u.active ? `<button class="btn btn-outline-info" onclick="transferAdmin(${u.id})" title="Transferir admin"><i class="bi bi-shield-check"></i></button>` : ''}
+                  ${u.role !== 'admin' && u.active ? `<button class="btn btn-outline-danger" onclick="disableUser(${u.id})" title="Desactivar"><i class="bi bi-person-dash"></i></button>` : ''}
+                </div>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+async function loadUsers() {
+  users = await fetch('/api/users').then(r => r.json());
+  renderUsers();
+}
+
+document.getElementById('create-user-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const payload = {
+    username: document.getElementById('new-username').value.trim(),
+    email: document.getElementById('new-email').value.trim(),
+    password: document.getElementById('new-password').value,
+  };
+  const res = await fetch('/api/users', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    showToast(data.error || 'No se pudo crear usuario', 'error');
+    return;
+  }
+  ev.target.reset();
+  bootstrap.Modal.getInstance(document.getElementById('createUserModal')).hide();
+  showToast('Usuario creado');
+  await loadUsers();
+});
+
+async function editUser(id) {
+  const u = users.find(x => x.id === id);
+  if (!u) return;
+  const username = prompt('Usuario:', u.username);
+  if (username === null) return;
+  const email = prompt('Email:', u.email || '');
+  if (email === null) return;
+  const password = prompt('Nueva contrasena temporal (deja vacio para no cambiar):', '');
+  if (password === null) return;
+  const res = await fetch(`/api/users/${id}`, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username, email, password, active: u.active}),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    showToast(data.error || 'No se pudo actualizar', 'error');
+    return;
+  }
+  showToast('Usuario actualizado');
+  await loadUsers();
+}
+
+async function transferAdmin(id) {
+  const u = users.find(x => x.id === id);
+  if (!u || !confirm(`Transferir admin a ${u.username}? Tu cuenta pasara a user.`)) return;
+  const res = await fetch(`/api/users/${id}/transfer-admin`, {method: 'POST'});
+  const data = await res.json();
+  if (!res.ok) {
+    showToast(data.error || 'No se pudo transferir admin', 'error');
+    return;
+  }
+  showToast('Admin transferido');
+  setTimeout(() => window.location.href = '/profile', 700);
+}
+
+async function disableUser(id) {
+  const u = users.find(x => x.id === id);
+  if (!u || !confirm(`Desactivar usuario ${u.username}?`)) return;
+  const res = await fetch(`/api/users/${id}`, {method: 'DELETE'});
+  const data = await res.json();
+  if (!res.ok) {
+    showToast(data.error || 'No se pudo desactivar', 'error');
+    return;
+  }
+  showToast('Usuario desactivado');
+  await loadUsers();
+}
+
+loadUsers();
+</script>
+{% endblock %}

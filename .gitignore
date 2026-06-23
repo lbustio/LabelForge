@@ -45,6 +45,9 @@ config/*.private.json
 # ---------------------------------------------------------------------------
 # Dataset bilingue completo - datos privados de investigacion
 data/all_datasets_en_es/
+data/uploads/
+data/avatars/
+app_state/
 
 # Patrones generales para otros datos pesados
 data/**/*.csv

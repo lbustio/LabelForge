@@ -7,6 +7,7 @@ las metricas de acuerdo inter-arbitros y las validaciones de configuracion.
 import sys
 import tempfile
 import unittest
+from argparse import Namespace
 from pathlib import Path
 from unittest import mock
 
@@ -17,7 +18,7 @@ if str(ROOT) not in sys.path:
 
 from labelforge_core.utils import safe_int, safe_float, safe_binary_int, number
 from labelforge_core.agreement_metrics import compute_agreement_metrics, compute_consensus_metrics
-from labelforge_core.label_persuasion import validate_safety_policy
+from labelforge_core.label_persuasion import should_reuse_run_state, validate_safety_policy
 from labelforge_core.arbiters_io import normalize_arbiter
 
 
@@ -136,6 +137,23 @@ class TestSafetyPolicy(unittest.TestCase):
             validate_safety_policy(cfg)
 
 
+class TestRunResume(unittest.TestCase):
+    def test_fresh_disables_run_state_reuse(self):
+        state = {
+            "status": "running",
+            "input_file": "data/input.csv",
+            "config_file": "config/arbiters_config.json",
+            "total_rows": 10,
+        }
+        args = Namespace(
+            input="data/input.csv",
+            config="config/arbiters_config.json",
+            fresh=True,
+        )
+
+        self.assertFalse(should_reuse_run_state(state, args, 10))
+
+
 class TestArbiterConfigSafety(unittest.TestCase):
     def test_api_key_override_is_migrated_and_not_persisted(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -160,4 +178,3 @@ class TestArbiterConfigSafety(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

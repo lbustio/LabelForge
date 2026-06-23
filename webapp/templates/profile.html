@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Perfil - LabelForge{% endblock %}
+
+{% block content %}
+<div class="page-title">Mi perfil</div>
+
+<div class="row g-3">
+  <div class="col-lg-7">
+    <div class="card-dark accent-card accent-cyan">
+      <div class="card-header-label">Datos de usuario</div>
+      <form id="profile-form" class="d-grid gap-3">
+        <div>
+          <label class="form-label small text-secondary" for="profile-username">Usuario</label>
+          <input class="form-control" id="profile-username" autocomplete="username">
+        </div>
+        <div>
+          <label class="form-label small text-secondary" for="profile-email">Email de recuperacion futura</label>
+          <input class="form-control" id="profile-email" type="email" autocomplete="email">
+          <div class="form-text text-secondary">Por ahora no hay recuperacion por email. Queda guardado para despues.</div>
+        </div>
+        <hr style="border-color:#2d3148">
+        <div>
+          <label class="form-label small text-secondary" for="profile-current-password">Contrasena actual</label>
+          <input class="form-control" id="profile-current-password" type="password" autocomplete="current-password">
+        </div>
+        <div>
+          <label class="form-label small text-secondary" for="profile-new-password">Nueva contrasena</label>
+          <input class="form-control" id="profile-new-password" type="password" autocomplete="new-password">
+          <div class="form-text text-secondary">Deja vacio si no quieres cambiarla.</div>
+        </div>
+        <button class="btn btn-primary" type="submit">
+          <i class="bi bi-check2-circle me-1"></i>Guardar perfil
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card-dark accent-card accent-violet">
+      <div class="card-header-label">Imagen</div>
+      <div class="d-flex align-items-center gap-3 mb-3">
+        <img id="profile-avatar-preview" alt="" style="width:88px;height:88px;border-radius:50%;object-fit:cover;border:1px solid #2d3148;background:#111827">
+        <div>
+          <div class="fw-semibold" id="profile-name">-</div>
+          <div class="text-secondary small" id="profile-role">-</div>
+        </div>
+      </div>
+      <form id="avatar-form" class="d-grid gap-3">
+        <input class="form-control" id="profile-avatar" name="avatar" type="file" accept="image/png,image/jpeg,image/gif,image/webp">
+        <button class="btn btn-outline-info" type="submit">
+          <i class="bi bi-upload me-1"></i>Subir imagen
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+let currentProfile = null;
+
+function avatarSrc(user) {
+  return user?.avatar_url || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="88" height="88"%3E%3Crect width="88" height="88" fill="%23252b3d"/%3E%3Ctext x="44" y="50" text-anchor="middle" font-size="32" fill="%2394a3b8"%3E?%3C/text%3E%3C/svg%3E';
+}
+
+async function loadProfile() {
+  const user = await fetch('/api/profile').then(r => r.json());
+  currentProfile = user;
+  document.getElementById('profile-username').value = user.username || '';
+  document.getElementById('profile-email').value = user.email || '';
+  document.getElementById('profile-name').textContent = user.username || '-';
+  document.getElementById('profile-role').textContent = user.role || 'user';
+  document.getElementById('profile-avatar-preview').src = avatarSrc(user);
+}
+
+document.getElementById('profile-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const payload = {
+    username: document.getElementById('profile-username').value.trim(),
+    email: document.getElementById('profile-email').value.trim(),
+    current_password: document.getElementById('profile-current-password').value,
+    new_password: document.getElementById('profile-new-password').value,
+  };
+  const res = await fetch('/api/profile', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    showToast(data.error || 'No se pudo guardar', 'error');
+    return;
+  }
+  document.getElementById('profile-current-password').value = '';
+  document.getElementById('profile-new-password').value = '';
+  showToast('Perfil actualizado');
+  await loadProfile();
+});
+
+document.getElementById('avatar-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const input = document.getElementById('profile-avatar');
+  if (!input.files.length) {
+    showToast('Selecciona una imagen', 'warn');
+    return;
+  }
+  const form = new FormData();
+  form.append('avatar', input.files[0]);
+  const res = await fetch('/api/profile/avatar', {method: 'POST', body: form});
+  const data = await res.json();
+  if (!res.ok) {
+    showToast(data.error || 'No se pudo subir imagen', 'error');
+    return;
+  }
+  input.value = '';
+  showToast('Imagen actualizada');
+  await loadProfile();
+});
+
+loadProfile();
+</script>
+{% endblock %}

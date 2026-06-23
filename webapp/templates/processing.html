@@ -387,7 +387,11 @@ function renderRateLimitSummary() {
   }
   const tone = rateLimitSummary.global_alert === 'danger' ? 'text-danger' : (rateLimitSummary.global_alert === 'warning' ? 'text-warning' : 'text-info');
   el.className = `form-text ${tone} mt-2`;
-  el.innerHTML = `${escapeHtml(rateLimitSummary.global_msg)} <button type="button" class="btn btn-link btn-sm p-0 align-baseline" onclick="useSafeDelay()">Usar espera segura</button>`;
+  const safeDelay = Number(rateLimitSummary.global_safe_delay || 0);
+  const action = safeDelay > 0
+    ? ` <button type="button" class="btn btn-link btn-sm p-0 align-baseline" onclick="useSafeDelay()">Usar espera segura</button>`
+    : '';
+  el.innerHTML = `${escapeHtml(rateLimitSummary.global_msg)}${action}`;
 }
 
 function useSafeDelay() {

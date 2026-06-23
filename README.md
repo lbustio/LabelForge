@@ -163,9 +163,12 @@ CLI:
 
 ```bash
 python main_cli.py --limit 10
+python main_cli.py --limit 10 --fresh
 python main_cli.py
 python main_cli.py --config config/arbiters_config.json --input data/mi_dataset.csv --column claim
 ```
+
+Usa `--fresh` cuando quieras ignorar checkpoints reanudables de una corrida anterior y arrancar una salida nueva sin mezclar resultados parciales.
 
 La webapp incluye:
 
@@ -319,8 +322,7 @@ Ejecucion:
 | `POST` | `/api/run/start` |
 | `POST` | `/api/run/stop` |
 | `GET` | `/api/run/status` |
-| `GET` | `/api/run/current-stats` |
-| `GET` | `/api/run/logs` |
+| `GET` | `/api/run/snapshot` |
 | `GET` | `/api/run/stats` |
 | `GET` | `/api/run/principle-counts` |
 
