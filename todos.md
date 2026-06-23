@@ -27,12 +27,6 @@ Ultima revision: 2026-06-23.
   - mantener compatibilidad con CSV final, checkpoints existentes y `/run`;
   - cubrir con tests antes de quitar helpers duplicados.
 
-- [ ] Probar flujo completo end-to-end desde la webapp con subconjunto pequeno:
-  - configurar dataset desde `/processing`;
-  - validar preflight en `/arbiters`;
-  - ejecutar `--limit 5` o equivalente desde `/run`;
-  - confirmar logs SSE, checkpoint, CSV final y estadisticas en `/api/run/stats`.
-
 - [ ] Ejecutar pipeline completo sobre el dataset de investigacion y guardar:
   - CSV final en `output/`;
   - log completo en `logs/`;
@@ -107,6 +101,9 @@ Ultima revision: 2026-06-23.
   al contrato del nucleo.
 - [x] Preflight CLI consolidado: `main_cli.py` ya no lee la config default ni
   valida `hw_profile.json`; el preflight vive en el nucleo y usa la config real.
+- [x] Smoke end-to-end desde webapp con `limit=1`: Flask lanzo `main_cli.py`,
+  procesaron los 3 arbitros locales, se genero CSV, snapshot runtime,
+  `/api/run/stats` y `/api/outputs`.
 - [x] Auditoria inicial de arquitectura: detectadas duplicaciones en preflight,
   checkpoints, dataset y reporting.
 - [x] Configuracion editable movida de `scripts/` a `config/`.

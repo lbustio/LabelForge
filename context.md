@@ -229,6 +229,20 @@ Nota: existe bandera CLI `--fresh` para limpiar checkpoints reanudables antes
 de iniciar una corrida nueva. No extender esta idea a otros casos sin revisar
 primero el contrato de checkpoints.
 
+Smoke reciente desde webapp:
+
+- fecha: 2026-06-23;
+- endpoint: `POST /api/run/start` con `limit=1`;
+- Flask lanzo `main_cli.py` como subprocess real;
+- dataset: `data/uploads/all_datasets_en_es.csv`;
+- columna: `claim`;
+- arbitros: `arb1`, `arb3`, `arb4`;
+- resultado: exit code 0, 1/1 filas exitosas, 0 fallos;
+- CSV: `output/labeled_20260623_162215.csv`;
+- `/api/run/stats?limit=5`: 200, con agreement, `paper_summary`,
+  resultados por entrada, tokens y latencias;
+- `/api/outputs`: 200, detecto 1 fila, 5 principios, 3 arbitros y tokens.
+
 ## 7. Checkpoints y salida
 
 Estado durable:
