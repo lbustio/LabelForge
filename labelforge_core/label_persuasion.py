@@ -45,10 +45,13 @@ from dotenv import load_dotenv
 # Modulo compartido de metricas de acuerdo
 # ---------------------------------------------------------------------------
 from labelforge_core.agreement_metrics import (
-    CONSENSUS_METRIC_KEYS,
+    build_entry_consensus_metric_fieldnames,
     build_consensus_metric_fieldnames,
+    compute_entry_consensus_metrics,
     compute_consensus_metrics,
+    flatten_entry_consensus_metrics,
     flatten_consensus_metrics,
+    format_entry_consensus_metrics,
 )
 from labelforge_core.arbiters_io import (
     export_arbiters_to_file,
@@ -881,132 +884,6 @@ def compute_consensus(arb_results: list, principles: list) -> dict:
         p: 1 if sum(r.get(p, 0) for r in arb_results) >= majority else 0
         for p in principles
     }
-
-
-def compute_entry_consensus_metrics(record: dict, arbiters: list, principles: list) -> dict:
-    """Metricas de solidez del consenso para una sola entrada."""
-    per_principle = {}
-    total_pairs = 0
-    agreed_pairs = 0
-    support_ratios = []
-    unanimous = 0
-    split = 0
-
-    for principle in principles:
-        values = []
-        for arb in arbiters:
-            value = record.get(f"{principle}_{arb['id']}")
-            if value in (0, 1):
-                values.append(value)
-        if not values:
-            continue
-
-        ones = sum(1 for value in values if value == 1)
-        zeros = len(values) - ones
-        consensus_value = record.get(f"{principle}_consensus")
-        support = ones if consensus_value == 1 else zeros
-        support_ratio = support / len(values)
-        support_ratios.append(support_ratio)
-
-        pairs = len(values) * (len(values) - 1) // 2
-        principle_agreed_pairs = 0
-        for i in range(len(values)):
-            for j in range(i + 1, len(values)):
-                if values[i] == values[j]:
-                    principle_agreed_pairs += 1
-        total_pairs += pairs
-        agreed_pairs += principle_agreed_pairs
-
-        is_unanimous = support == len(values)
-        if is_unanimous:
-            unanimous += 1
-        elif len(values) == len(arbiters):
-            split += 1
-
-        per_principle[principle] = {
-            "consensus": consensus_value,
-            "support": support,
-            "raters": len(values),
-            "support_ratio": round(support_ratio, 4),
-            "votes_0": zeros,
-            "votes_1": ones,
-            "unanimous": is_unanimous,
-        }
-
-    observed_agreement = agreed_pairs / total_pairs if total_pairs else None
-    mean_support_ratio = sum(support_ratios) / len(support_ratios) if support_ratios else None
-    return {
-        "observed_agreement": round(observed_agreement, 4) if observed_agreement is not None else None,
-        "observed_agreement_percent": round(observed_agreement * 100, 1) if observed_agreement is not None else None,
-        "mean_support_ratio": round(mean_support_ratio, 4) if mean_support_ratio is not None else None,
-        "mean_support_percent": round(mean_support_ratio * 100, 1) if mean_support_ratio is not None else None,
-        "unanimous_principles": unanimous,
-        "split_principles": split,
-        "principle_count": len(per_principle),
-        "per_principle": per_principle,
-    }
-
-
-def format_entry_consensus_metrics(metrics: dict, principles: list) -> str:
-    agreement = metrics.get("observed_agreement")
-    agreement_text = f"{agreement * 100:.1f}%" if agreement is not None else "N/A"
-    principle_count = metrics.get("principle_count", 0)
-    support_parts = []
-    per_principle = metrics.get("per_principle", {})
-    for principle in principles:
-        item = per_principle.get(principle)
-        if item:
-            support_parts.append(f"{principle}:{item['support']}/{item['raters']}")
-    return (
-        f"acuerdo={agreement_text} "
-        f"unanimidad={metrics.get('unanimous_principles', 0)}/{principle_count} "
-        f"divididos={metrics.get('split_principles', 0)}/{principle_count} "
-        f"apoyo=" + ",".join(support_parts)
-    )
-
-
-def flatten_entry_consensus_metrics(metrics: dict, principles: list) -> dict:
-    flat = {
-        "entry_consensus_observed_agreement": metrics.get("observed_agreement"),
-        "entry_consensus_observed_agreement_percent": metrics.get("observed_agreement_percent"),
-        "entry_consensus_mean_support_ratio": metrics.get("mean_support_ratio"),
-        "entry_consensus_mean_support_percent": metrics.get("mean_support_percent"),
-        "entry_consensus_unanimous_principles": metrics.get("unanimous_principles"),
-        "entry_consensus_split_principles": metrics.get("split_principles"),
-        "entry_consensus_principle_count": metrics.get("principle_count"),
-    }
-    per_principle = metrics.get("per_principle", {})
-    for principle in principles:
-        item = per_principle.get(principle, {})
-        flat[f"{principle}_entry_consensus_support"] = item.get("support")
-        flat[f"{principle}_entry_consensus_raters"] = item.get("raters")
-        flat[f"{principle}_entry_consensus_support_ratio"] = item.get("support_ratio")
-        flat[f"{principle}_entry_consensus_votes_0"] = item.get("votes_0")
-        flat[f"{principle}_entry_consensus_votes_1"] = item.get("votes_1")
-        flat[f"{principle}_entry_consensus_unanimous"] = item.get("unanimous")
-    return flat
-
-
-def build_entry_consensus_metric_fieldnames(principles: list) -> list:
-    fields = [
-        "entry_consensus_observed_agreement",
-        "entry_consensus_observed_agreement_percent",
-        "entry_consensus_mean_support_ratio",
-        "entry_consensus_mean_support_percent",
-        "entry_consensus_unanimous_principles",
-        "entry_consensus_split_principles",
-        "entry_consensus_principle_count",
-    ]
-    for principle in principles:
-        fields.extend([
-            f"{principle}_entry_consensus_support",
-            f"{principle}_entry_consensus_raters",
-            f"{principle}_entry_consensus_support_ratio",
-            f"{principle}_entry_consensus_votes_0",
-            f"{principle}_entry_consensus_votes_1",
-            f"{principle}_entry_consensus_unanimous",
-        ])
-    return fields
 
 
 def add_entry_consensus_metrics(record: dict, arbiters: list, principles: list) -> dict:

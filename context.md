@@ -294,10 +294,16 @@ hacerlo en `dataset_io.py`.
 - Cohen Kappa promedio por pares;
 - Krippendorff Alpha nominal;
 - positive rate.
+- Cohen Kappa para pares binarios ya filtrados;
+- metricas de solidez de consenso por entrada;
+- columnas/flattening de metricas de consenso por entrada.
 
 Regla arquitectonica:
 
 - los calculos viven en Python;
+- `agreement_metrics.py` es la autoridad de estadistica pura;
+- `label_persuasion.py` aplica esas metricas al pipeline y escribe CSV;
+- `run_reporting.py` organiza reportes a partir de filas CSV/checkpoint;
 - la UI renderiza datos y formatea;
 - evitar mover reglas de negocio a JavaScript.
 

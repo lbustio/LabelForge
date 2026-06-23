@@ -17,7 +17,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from labelforge_core.utils import safe_int, safe_float, safe_binary_int, number
-from labelforge_core.agreement_metrics import compute_agreement_metrics, compute_consensus_metrics
+from labelforge_core.agreement_metrics import (
+    cohen_kappa_for_pairs,
+    compute_agreement_metrics,
+    compute_consensus_metrics,
+    compute_entry_consensus_metrics,
+    flatten_entry_consensus_metrics,
+)
 from labelforge_core import checkpoint_io
 from labelforge_core.dataset_io import DatasetError, inspect_dataset, load_dataset, resolve_dataset_path
 from labelforge_core.run_reporting import (
@@ -111,6 +117,32 @@ class TestAgreementMetrics(unittest.TestCase):
 
         metrics = compute_consensus_metrics(results, principles, arbiters)
         self.assertEqual(metrics["global"]["observed_agreement"], 1.0)
+
+    def test_entry_consensus_metrics_are_core_contract(self):
+        record = {
+            "AUTH_arb1": 1,
+            "AUTH_arb2": 1,
+            "AUTH_arb3": 0,
+            "AUTH_consensus": 1,
+            "SP_arb1": 0,
+            "SP_arb2": 0,
+            "SP_arb3": 0,
+            "SP_consensus": 0,
+        }
+        arbiters = [{"id": "arb1"}, {"id": "arb2"}, {"id": "arb3"}]
+        principles = ["AUTH", "SP"]
+
+        metrics = compute_entry_consensus_metrics(record, arbiters, principles)
+        flat = flatten_entry_consensus_metrics(metrics, principles)
+
+        self.assertEqual(metrics["observed_agreement"], 0.6667)
+        self.assertEqual(metrics["unanimous_principles"], 1)
+        self.assertEqual(metrics["split_principles"], 1)
+        self.assertEqual(flat["AUTH_entry_consensus_support"], 2)
+        self.assertEqual(flat["SP_entry_consensus_unanimous"], True)
+
+    def test_cohen_kappa_for_pairs_is_shared(self):
+        self.assertEqual(cohen_kappa_for_pairs([(1, 1), (0, 0)]), 1.0)
 
 
 class TestSafetyPolicy(unittest.TestCase):

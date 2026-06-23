@@ -99,6 +99,8 @@ Ultima revision: 2026-06-23.
 - [x] Reporting centralizado en `labelforge_core/run_reporting.py`; la webapp
   delega metricas, filas de resultados, conteos por principio y resumen paper
   al contrato del nucleo.
+- [x] Metricas estadisticas centralizadas en `labelforge_core/agreement_metrics.py`:
+  acuerdo inter-arbitro, Cohen por pares y consenso por entrada.
 - [x] Preflight CLI consolidado: `main_cli.py` ya no lee la config default ni
   valida `hw_profile.json`; el preflight vive en el nucleo y usa la config real.
 - [x] Smoke end-to-end desde webapp con `limit=1`: Flask lanzo `main_cli.py`,

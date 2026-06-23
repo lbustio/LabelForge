@@ -13,7 +13,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from labelforge_core.agreement_metrics import compute_agreement_metrics
+from labelforge_core.agreement_metrics import cohen_kappa_for_pairs, compute_agreement_metrics
 from labelforge_core.utils import safe_float, safe_int
 
 
@@ -316,19 +316,6 @@ def numeric_summary(values: list[float]) -> dict:
     }
 
 
-def _cohen_kappa_for_pairs(pairs: list[tuple[int, int]]) -> float | None:
-    if not pairs:
-        return None
-    n = len(pairs)
-    observed = sum(1 for a, b in pairs if a == b) / n
-    p_a_1 = sum(1 for a, _ in pairs if a == 1) / n
-    p_b_1 = sum(1 for _, b in pairs if b == 1) / n
-    expected = (p_a_1 * p_b_1) + ((1 - p_a_1) * (1 - p_b_1))
-    if expected == 1:
-        return 1.0 if observed == 1 else None
-    return round((observed - expected) / (1 - expected), 4)
-
-
 def paper_reporting_summary(
     rows: list[dict],
     principles: list[str],
@@ -433,7 +420,7 @@ def paper_reporting_summary(
                 "arbiter_b": arb_b,
                 "n": len(pairs),
                 "observed_agreement_percent": round((agreements / len(pairs)) * 100, 1) if pairs else None,
-                "cohen_kappa": _cohen_kappa_for_pairs(pairs),
+                "cohen_kappa": cohen_kappa_for_pairs(pairs),
                 "disagreements": len(pairs) - agreements,
             })
 
