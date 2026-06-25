@@ -45,7 +45,7 @@ from labelforge_core.arbiters_io import (
     require_export_password,
     validate_imported_arbiters,
 )
-from labelforge_core.checkpoint_io import clear_runtime_checkpoints
+from labelforge_core.checkpoint_io import clear_runtime_checkpoints, CLAIM_RESULTS_PATH
 from labelforge_core.dataset_io import (
     DatasetError,
     inspect_dataset,
@@ -719,8 +719,14 @@ def _record_run_owner(output_file: str, run_id: str | None, user: dict | None) -
         conn.commit()
 
 
-def _clear_runtime_checkpoint_files(include_run_state: bool = False) -> list[str]:
-    return clear_runtime_checkpoints(include_run_state=include_run_state)
+def _clear_runtime_checkpoint_files(
+    include_run_state: bool = False,
+    include_claim_results: bool = False,
+) -> list[str]:
+    return clear_runtime_checkpoints(
+        include_run_state=include_run_state,
+        include_claim_results=include_claim_results,
+    )
 
 
 def _output_owner(name: str) -> dict | None:
@@ -2087,6 +2093,50 @@ def api_local_delete_archived_model(filename: str):
         return jsonify({"error": str(exc)}), 500
 
 
+@app.route("/api/local/external", methods=["GET"])
+def api_local_external():
+    """Lista los GGUFs registrados como movidos fuera del cache."""
+    try:
+        from labelforge_core.local_models import list_external_models
+        return jsonify(list_external_models())
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/local/external/<filename>/restore", methods=["POST"])
+def api_local_restore_external_model(filename: str):
+    """Mueve un GGUF externo de vuelta a models/."""
+    if not _valid_gguf_filename(filename):
+        return jsonify({"error": "Nombre de archivo invalido"}), 400
+    try:
+        from labelforge_core.local_models import restore_external_model
+        restore_external_model(filename)
+        _log.info("Modelo externo restaurado a cache: %s", filename)
+        return jsonify({"ok": True, "restored": filename})
+    except FileNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except FileExistsError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/local/external/<filename>", methods=["DELETE"])
+def api_local_unregister_external_model(filename: str):
+    """Quita un modelo externo del registro sin tocar el archivo."""
+    if not _valid_gguf_filename(filename):
+        return jsonify({"error": "Nombre de archivo invalido"}), 400
+    try:
+        from labelforge_core.local_models import unregister_external_model
+        unregister_external_model(filename)
+        _log.info("Modelo externo desregistrado: %s", filename)
+        return jsonify({"ok": True, "unregistered": filename})
+    except FileNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 # ---------------------------------------------------------------------------
 # Rutas de paginas
 # ---------------------------------------------------------------------------
@@ -2547,9 +2597,11 @@ def api_update_processing():
 def api_run_start():
     app.logger.info("[run/start] Solicitud recibida")
 
-    if _process_state["running"]:
-        app.logger.info("[run/start] Ya hay un proceso corriendo -> 409")
-        return jsonify({"error": "Ya hay un proceso corriendo"}), 409
+    with _process_state["state_lock"]:
+        if _process_state["running"]:
+            app.logger.info("[run/start] Ya hay un proceso corriendo -> 409")
+            return jsonify({"error": "Ya hay un proceso corriendo"}), 409
+        _process_state["running"] = True  # claim slot atomically before releasing lock
 
     data  = request.get_json() or {}
     limit = data.get("limit")
@@ -2560,16 +2612,22 @@ def api_run_start():
         cfg_data = read_config()
     except Exception as exc:
         app.logger.error("[run/start] Error leyendo config: %s", exc)
+        with _process_state["state_lock"]:
+            _process_state["running"] = False
         return jsonify({"error": f"Error leyendo configuracion: {exc}"}), 500
 
     try:
         preflight_issues = validate_provider_preflight(cfg_data)
     except Exception as exc:
         app.logger.error("[run/start] Error en preflight: %s", exc)
+        with _process_state["state_lock"]:
+            _process_state["running"] = False
         return jsonify({"error": f"Error en preflight: {exc}"}), 500
 
     if preflight_issues:
         app.logger.info("[run/start] Preflight fallo: %s", preflight_issues)
+        with _process_state["state_lock"]:
+            _process_state["running"] = False
         return jsonify({
             "error": "No se puede iniciar: hay problemas de credenciales o proveedores.",
             "issues": preflight_issues,
@@ -2596,12 +2654,7 @@ def api_run_start():
     _push_run_log("--- Solicitud recibida: preparando ejecucion ---")
     _push_run_log(f"Usuario: {run_user.get('username') if run_user else '-'}")
     _push_run_log(f"Comando: {' '.join(cmd)}")
-    with _process_state["state_lock"]:
-        _process_state["running"] = True
-
     def run_and_capture():
-        with _process_state["state_lock"]:
-            _process_state["running"] = True
         try:
             env = os.environ.copy()
             env["DATA_LABELING_WEBAPP_METRICS"] = "1"
@@ -2661,9 +2714,14 @@ def api_run_start():
 
 @app.route("/api/run/stop", methods=["POST"])
 def api_run_stop():
-    proc = _process_state.get("proc")
-    if proc and _process_state["running"]:
-        proc.terminate()
+    with _process_state["state_lock"]:
+        proc    = _process_state.get("proc")
+        running = _process_state["running"]
+    if proc and running:
+        try:
+            proc.terminate()
+        except OSError:
+            pass
         with _process_state["state_lock"]:
             _process_state["running"] = False
             _process_state["exit_code"] = "STOPPED"
@@ -2736,6 +2794,33 @@ def api_serve_output(name):
     return path.read_bytes(), 200, {"Content-Type": "text/csv; charset=utf-8", "Content-Disposition": f'attachment; filename="{name}"'}
 
 
+@app.route("/api/outputs/<name>/stats", methods=["GET"])
+def api_output_stats(name):
+    """Calcula estadisticas completas para un CSV historico especifico."""
+    import csv as _csv
+    import re as _re
+    if not _re.match(r"^labeled_\d{8}_\d{6}\.csv$", name):
+        return jsonify({"error": "Nombre de archivo invalido"}), 400
+    if not _can_access_output(name):
+        return jsonify({"error": "No autorizado"}), 403
+    path = OUTPUT_DIR / name
+    if not path.exists():
+        return jsonify({"error": "Archivo no encontrado"}), 404
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            reader = _csv.DictReader(f)
+            fieldnames = list(reader.fieldnames or [])
+            rows = list(reader)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+    return jsonify(build_run_stats(rows, fieldnames, name, result_limit=None))
+
+
+@app.route("/history")
+def page_history():
+    return render_template("history.html")
+
+
 @app.route("/api/outputs/<name>", methods=["DELETE"])
 def api_delete_output(name):
     import re
@@ -2763,7 +2848,7 @@ def api_archive_all_outputs():
     files = list(OUTPUT_DIR.glob("labeled_*.csv")) if OUTPUT_DIR.exists() else []
     files = [f for f in files if re.match(r"^labeled_\d{8}_\d{6}\.csv$", f.name)]
     if not files:
-        cleared = _clear_runtime_checkpoint_files()
+        cleared = _clear_runtime_checkpoint_files(include_run_state=True, include_claim_results=True)
         _reset_current_stats()
         return jsonify({"ok": True, "archived": 0, "archive_dir": None, "cleared": cleared})
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -2774,7 +2859,9 @@ def api_archive_all_outputs():
         dest = archive_dir / f.name
         f.rename(dest)
         count += 1
-    cleared = _clear_runtime_checkpoint_files()
+    # Archive is an explicit "done with this run" — clear all checkpoint state including
+    # claim_results.jsonl so the next run starts completely fresh from the UI perspective.
+    cleared = _clear_runtime_checkpoint_files(include_run_state=True, include_claim_results=True)
     _reset_current_stats()
     with _auth_db() as conn:
         conn.executemany("DELETE FROM run_ownership WHERE output_file = ?", [(f.name,) for f in files])
@@ -2881,33 +2968,41 @@ def _load_checkpoint_result_rows() -> tuple[list[dict], list[str], str]:
 @app.route("/api/run/stats", methods=["GET"])
 def api_run_stats():
     """
-    Lee el ultimo CSV etiquetado y calcula estadisticas de tokens,
-    latencia acumulada por arbitro y una tabla de resultados por entrada.
+    Lee el ultimo CSV etiquetado (o claim_results.jsonl si no hay CSV aun)
+    y calcula estadisticas de tokens, latencia por arbitro y tabla de resultados.
     """
     import csv as _csv
 
-    if not OUTPUT_DIR.exists():
-        return jsonify({"error": "No hay outputs generados aun"}), 404
+    rows: list[dict] = []
+    fieldnames: list[str] = []
+    source_file: str = ""
 
-    csvs = sorted(OUTPUT_DIR.glob("labeled_*.csv"), reverse=True)
-    if not csvs:
-        return jsonify({"error": "No hay outputs generados aun"}), 404
+    if OUTPUT_DIR.exists():
+        csvs = sorted(OUTPUT_DIR.glob("labeled_*.csv"), reverse=True)
+        if csvs:
+            latest = csvs[0]
+            try:
+                with open(latest, "r", encoding="utf-8") as f:
+                    reader = _csv.DictReader(f)
+                    fieldnames = reader.fieldnames or []
+                    rows = list(reader)
+                source_file = latest.name
+            except Exception as e:
+                app.logger.warning("[run/stats] Error leyendo CSV %s: %s", latest.name, e)
 
-    latest = csvs[0]
-    try:
-        with open(latest, "r", encoding="utf-8") as f:
-            reader = _csv.DictReader(f)
-            fieldnames = reader.fieldnames or []
-            rows = list(reader)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    source_file = latest.name
+    # Use checkpoint rows (claim_results.jsonl) only while a run is underway (run_state.json
+    # exists). This avoids showing stale data from a previous run after the CSV was archived
+    # but the checkpoint was not yet cleared.
+    run_state_path = CHECKPOINTS_DIR / "run_state.json"
+    if run_state_path.exists():
+        checkpoint_rows, checkpoint_fieldnames, checkpoint_source = _load_checkpoint_result_rows()
+        if len(checkpoint_rows) > len(rows):
+            rows = checkpoint_rows
+            fieldnames = checkpoint_fieldnames
+            source_file = checkpoint_source or "checkpoint"
 
-    checkpoint_rows, checkpoint_fieldnames, checkpoint_source = _load_checkpoint_result_rows()
-    if len(checkpoint_rows) > len(rows):
-        rows = checkpoint_rows
-        fieldnames = checkpoint_fieldnames
-        source_file = checkpoint_source or "checkpoint"
+    if not rows:
+        return jsonify({"error": "No hay datos aun"}), 404
 
     raw_limit = str(request.args.get("limit", "250")).strip().lower()
     try:
@@ -2956,7 +3051,16 @@ def api_checkpoint_status():
                 "failed_rows": summary.get("failed_rows", 0),
             }
             if run_state["status"] == "completed":
-                _clear_runtime_checkpoint_files()
+                # claim_results.jsonl is intentionally preserved after completion
+                # so the next run with a higher limit can skip already-done entries.
+                claim_count = run_state.get("processed_rows", 0) or 0
+                if CLAIM_RESULTS_PATH.exists() and claim_count > 0:
+                    return jsonify({
+                        "exists": True,
+                        "last_index": claim_count - 1,
+                        "claims_done": claim_count,
+                        "run_state": run_state,
+                    })
                 return jsonify({"exists": False, "run_state": run_state})
         except (OSError, json.JSONDecodeError):
             run_state = None
@@ -2995,7 +3099,7 @@ def api_failed_queue():
 
 @app.route("/api/checkpoint/clear", methods=["POST"])
 def api_checkpoint_clear():
-    cleared = _clear_runtime_checkpoint_files(include_run_state=True)
+    cleared = _clear_runtime_checkpoint_files(include_run_state=True, include_claim_results=True)
     _reset_current_stats()
     return jsonify({"ok": True, "cleared": cleared})
 

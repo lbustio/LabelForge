@@ -298,6 +298,11 @@
     <li><a href="/" class="nav-link nav-home {% if request.path == '/' %}active{% endif %}">
       <i class="bi bi-house"></i> Inicio
     </a></li>
+    {% if current_user %}
+    <li><a href="/history" class="nav-link {% if request.path == '/history' %}active{% endif %}">
+      <i class="bi bi-clock-history"></i> Historial
+    </a></li>
+    {% endif %}
     {% if current_user and current_user.role == 'admin' %}
     <li><a href="/arbiters" class="nav-link nav-arbiters {% if request.path == '/arbiters' %}active{% endif %}">
       <i class="bi bi-people"></i> Arbitros
@@ -437,6 +442,9 @@ function arbiterColorRGB(idx, maxArbiters) {
 function arbiterColorHSL(idx, maxArbiters) {
   const hue = Math.round((idx * 360 / (maxArbiters || 10) + 190) % 360);
   return `hsl(${hue} 78% 62%)`;
+}
+function arbLabel(a) {
+  return a.persona ? `${a.name} · ${a.persona} (${a.id})` : `${a.name} (${a.id})`;
 }
 </script>
 {% block scripts %}{% endblock %}

@@ -22,10 +22,12 @@ from labelforge_core.agreement_metrics import (
     compute_agreement_metrics,
     compute_consensus_metrics,
     compute_entry_consensus_metrics,
+    compute_majority_consensus,
     flatten_entry_consensus_metrics,
 )
 from labelforge_core import checkpoint_io
 from labelforge_core.dataset_io import DatasetError, inspect_dataset, load_dataset, resolve_dataset_path
+from labelforge_core.llm_json import extract_first_json_object, parse_llm_json, strip_markdown_json
 from labelforge_core.run_reporting import (
     build_run_stats,
     detect_arbiters,
@@ -34,6 +36,16 @@ from labelforge_core.run_reporting import (
     row_processing_status,
 )
 from labelforge_core.provider_preflight import validate_provider_preflight
+from labelforge_core.prompting import (
+    build_output_instruction,
+    build_principles_catalog,
+    build_user_prompt,
+)
+from labelforge_core.usage_metrics import (
+    build_entry_usage_metric_fieldnames,
+    compute_entry_usage_metrics,
+    entry_usage_metrics_from_row,
+)
 from labelforge_core.label_persuasion import should_reuse_run_state, validate_safety_policy
 from labelforge_core.arbiters_io import normalize_arbiter
 
@@ -143,6 +155,152 @@ class TestAgreementMetrics(unittest.TestCase):
 
     def test_cohen_kappa_for_pairs_is_shared(self):
         self.assertEqual(cohen_kappa_for_pairs([(1, 1), (0, 0)]), 1.0)
+
+    def test_majority_consensus_is_core_contract(self):
+        consensus = compute_majority_consensus(
+            [{"AUTH": 1, "SP": 0}, {"AUTH": 1, "SP": 1}, {"AUTH": 0, "SP": 0}],
+            ["AUTH", "SP"],
+        )
+
+        self.assertEqual(consensus, {"AUTH": 1, "SP": 0})
+
+
+class TestPrompting(unittest.TestCase):
+    def test_build_output_instruction_without_justifications(self):
+        task_cfg = {
+            "principles": {"AUTH": "Authority", "SP": "Social proof"},
+            "include_justifications": False,
+        }
+
+        self.assertEqual(
+            build_output_instruction(task_cfg),
+            'Return JSON only: {"AUTH":0,"SP":0}',
+        )
+
+    def test_build_output_instruction_with_justifications(self):
+        task_cfg = {
+            "principles": {"AUTH": "Authority"},
+            "include_justifications": True,
+        }
+
+        instruction = build_output_instruction(task_cfg)
+
+        self.assertIn('"AUTH":0', instruction)
+        self.assertIn('"AUTH_why":"..."', instruction)
+        self.assertIn("Each *_why <=8 words", instruction)
+
+    def test_build_user_prompt_adds_missing_sections_and_truncates(self):
+        task_cfg = {
+            "principles": {"AUTH": "Authority"},
+            "user_prompt_template": "TEXT: {item}",
+        }
+
+        prompt = build_user_prompt(task_cfg, "abcdef", max_chars=3)
+
+        self.assertIn(build_principles_catalog(task_cfg), prompt)
+        self.assertIn("TEXT: abc", prompt)
+        self.assertIn('Return JSON only: {"AUTH":0}', prompt)
+        self.assertNotIn("abcdef", prompt)
+
+
+class TestLlmJson(unittest.TestCase):
+    def test_parse_direct_json(self):
+        result, mode = parse_llm_json('{"AUTH": 1}', ["AUTH"])
+
+        self.assertEqual(result, {"AUTH": 1})
+        self.assertEqual(mode, "direct")
+
+    def test_parse_markdown_json_with_trailing_comma(self):
+        cleaned = strip_markdown_json('```json\n{"AUTH": 1,}\n```')
+        result, mode = parse_llm_json('```json\n{"AUTH": 1,}\n```', ["AUTH"])
+
+        self.assertEqual(cleaned, '{"AUTH": 1,}')
+        self.assertEqual(result, {"AUTH": 1})
+        self.assertEqual(mode, "trim_trailing_commas")
+
+    def test_parse_unquoted_keys(self):
+        result, mode = parse_llm_json("{AUTH: true, SP: false}", ["AUTH", "SP"])
+
+        self.assertEqual(result, {"AUTH": True, "SP": False})
+        self.assertEqual(mode, "quote_unquoted_keys")
+
+    def test_salvage_principle_fields(self):
+        raw = "AUTH: yes, AUTH_why: official claim, SP: no, SP_why: no cue"
+
+        result, mode = parse_llm_json(raw, ["AUTH", "SP"])
+
+        self.assertEqual(result["AUTH"], 1)
+        self.assertEqual(result["SP"], 0)
+        self.assertEqual(result["AUTH_why"], "official claim")
+        self.assertEqual(result["SP_why"], "no cue")
+        self.assertEqual(mode, "salvage_fields")
+
+    def test_extract_first_json_object_ignores_surrounding_text(self):
+        self.assertEqual(
+            extract_first_json_object('preface {"AUTH": {"nested": 1}} trailing'),
+            '{"AUTH": {"nested": 1}}',
+        )
+
+    def test_invalid_response_raises(self):
+        with self.assertRaises(Exception):
+            parse_llm_json("AUTH maybe", ["AUTH"])
+
+
+class TestUsageMetrics(unittest.TestCase):
+    def test_compute_entry_usage_metrics_from_arbiter_columns(self):
+        record = {
+            "prompt_tokens_arb1": "10",
+            "completion_tokens_arb1": "5",
+            "total_tokens_arb1": "15",
+            "latency_s_arb1": "1.2",
+            "prompt_tokens_arb2": "3",
+            "completion_tokens_arb2": "2",
+            "total_tokens_arb2": "5",
+            "latency_s_arb2": "0.8",
+        }
+
+        metrics = compute_entry_usage_metrics(record, [{"id": "arb1"}, {"id": "arb2"}])
+
+        self.assertEqual(metrics["entry_prompt_tokens"], 13)
+        self.assertEqual(metrics["entry_completion_tokens"], 7)
+        self.assertEqual(metrics["entry_total_tokens"], 20)
+        self.assertEqual(metrics["entry_latency_s"], 2.0)
+        self.assertEqual(metrics["entry_latency_avg_s"], 1.0)
+        self.assertEqual(metrics["entry_arbiter_calls"], 2)
+        self.assertEqual(metrics["entry_tokens_per_call"], 10.0)
+
+    def test_entry_usage_metrics_from_row_prefers_stored_entry_fields(self):
+        row = {
+            "entry_prompt_tokens": "9",
+            "entry_completion_tokens": "1",
+            "entry_total_tokens": "10",
+            "entry_latency_s": "0.5",
+            "entry_latency_avg_s": "0.5",
+            "entry_arbiter_calls": "1",
+            "entry_tokens_per_call": "10",
+            "prompt_tokens_arb1": "999",
+        }
+
+        metrics = entry_usage_metrics_from_row(row, ["arb1"])
+
+        self.assertEqual(metrics["prompt_tokens"], 9)
+        self.assertEqual(metrics["total_tokens"], 10)
+        self.assertEqual(metrics["latency_s"], 0.5)
+        self.assertEqual(metrics["arbiter_calls"], 1)
+
+    def test_entry_usage_fieldnames_are_stable_csv_contract(self):
+        self.assertEqual(
+            build_entry_usage_metric_fieldnames(),
+            [
+                "entry_prompt_tokens",
+                "entry_completion_tokens",
+                "entry_total_tokens",
+                "entry_latency_s",
+                "entry_latency_avg_s",
+                "entry_arbiter_calls",
+                "entry_tokens_per_call",
+            ],
+        )
 
 
 class TestSafetyPolicy(unittest.TestCase):

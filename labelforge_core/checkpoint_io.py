@@ -67,8 +67,16 @@ def load_jsonl_latest(path: Path, key_fields: tuple) -> dict:
     return latest
 
 
-def clear_runtime_checkpoints(include_run_state: bool = False) -> list[str]:
-    paths = [CHECKPOINT_PATH, FAILED_QUEUE_PATH, CLAIM_RESULTS_PATH, ARBITER_RESULTS_PATH]
+def clear_runtime_checkpoints(
+    include_run_state: bool = False,
+    include_claim_results: bool = False,
+) -> list[str]:
+    # claim_results.jsonl is preserved by default so a subsequent run with a
+    # higher limit can skip already-processed entries without recomputing them.
+    # Pass include_claim_results=True only for --fresh or explicit user resets.
+    paths = [CHECKPOINT_PATH, FAILED_QUEUE_PATH, ARBITER_RESULTS_PATH]
+    if include_claim_results:
+        paths.append(CLAIM_RESULTS_PATH)
     if include_run_state:
         paths.append(RUN_STATE_PATH)
 

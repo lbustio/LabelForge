@@ -76,6 +76,15 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.debug and args.host not in ("127.0.0.1", "localhost", "::1"):
+        print(
+            "\n  ERROR: --debug no puede usarse con --host distinto de localhost.\n"
+            "  El debugger de Flask expone ejecucion de codigo arbitrario en la red.\n"
+            "  Usa --host 127.0.0.1 o elimina --debug.\n",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     print(f"  LabelForge   ->   http://{args.host}:{args.port}")
     status = auth_status()
     if status["enabled"]:

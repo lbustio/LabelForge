@@ -231,6 +231,16 @@ def compute_agreement_metrics(rows: list, principles: list, arbiter_ids: list) -
     }
 
 
+def compute_majority_consensus(arb_results: list, principles: list) -> dict:
+    """Binary majority consensus for one entry across arbiter result dicts."""
+    n = len(arb_results)
+    majority = (n // 2) + 1
+    return {
+        principle: 1 if sum(result.get(principle, 0) for result in arb_results) >= majority else 0
+        for principle in principles
+    }
+
+
 def compute_consensus_metrics(results: dict, principles: list, arbiters: list) -> dict:
     """
     Calculo de metricas usado desde labelforge_core/label_persuasion.py

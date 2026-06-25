@@ -215,7 +215,7 @@ function renderArbiterOptions() {
     return;
   }
   select.innerHTML = arbiters.map(a => `
-    <option value="${escapeHtml(a.id)}">${escapeHtml(a.id)} - ${escapeHtml(a.name || a.id)}</option>
+    <option value="${escapeHtml(a.id)}">${escapeHtml(arbLabel(a))}</option>
   `).join('');
 }
 

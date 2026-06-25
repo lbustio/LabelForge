@@ -85,3 +85,10 @@ def number(value: Any, default: Any = 0) -> Any:
     except (TypeError, ValueError):
         return default
 
+
+def arb_label(arb: dict) -> str:
+    name = arb.get("name") or arb.get("id", "?")
+    persona = (arb.get("persona") or "").strip()
+    arb_id = arb.get("id", "?")
+    return f"{name} · {persona} ({arb_id})" if persona else f"{name} ({arb_id})"
+

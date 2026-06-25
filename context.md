@@ -75,12 +75,15 @@ labelforge_core/
   checkpoint_io.py
   dataset_io.py
   label_persuasion.py
+  llm_json.py
   local_models.py
   paths.py
+  prompting.py
   provider_preflight.py
   rate_limits.py
   run_reporting.py
   secrets_io.py
+  usage_metrics.py
   utils.py
 webapp/
   app.py
@@ -195,8 +198,9 @@ default.
 - carga config y dataset;
 - valida safety;
 - ejecuta preflight;
+- construye prompts usando `labelforge_core/prompting.py`;
 - llama proveedores;
-- parsea JSON;
+- parsea respuestas JSON/JSON-like usando `labelforge_core/llm_json.py`;
 - guarda checkpoints;
 - calcula consenso;
 - reintenta fallos;
@@ -297,6 +301,7 @@ hacerlo en `dataset_io.py`.
 - Cohen Kappa para pares binarios ya filtrados;
 - metricas de solidez de consenso por entrada;
 - columnas/flattening de metricas de consenso por entrada.
+- consenso binario por mayoria para cada entrada.
 
 Regla arquitectonica:
 
@@ -550,6 +555,18 @@ diseno y pedir aprobacion antes de tocar codigo.
   `_paper_reporting_summary()` ni calculo directo de `/api/run/stats`.
 - La webapp sigue encargada de permisos, ownership, lectura del ultimo CSV y
   fallback a checkpoints; el calculo de dominio queda en el nucleo.
+
+### Prompting y parsing LLM centralizados
+
+- Hecho: `labelforge_core/prompting.py` construye catalogo de principios,
+  instruccion de salida JSON y prompt de usuario.
+- Hecho: `labelforge_core/llm_json.py` concentra parsing de respuestas de
+  arbitros, incluyendo extraccion desde markdown, reparaciones conservadoras y
+  rescate final de campos por principio.
+- Hecho: `labelforge_core/usage_metrics.py` concentra calculo de tokens,
+  latencias, llamadas por entrada y nombres de columnas `entry_*`.
+- `label_persuasion.py` debe seguir orquestando la corrida y no volver a cargar
+  funciones locales de prompting/parsing/uso.
 
 ### Outputs generados por CLI
 

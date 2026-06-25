@@ -21,9 +21,9 @@ Ultima revision: 2026-06-23.
 ## Prioridad alta
 
 - [ ] Consolidar arquitectura de ejecucion sin romper CLI ni webapp:
-  - disenar primero contratos para `dataset_io`, `checkpoint_io` y
-    `run_reporting` dentro de `labelforge_core/`;
-  - migrar por pasos solo despues de aprobar el diseno;
+  - mantener el nucleo como autoridad de dataset, checkpoints, reporting,
+    metricas, prompting, parsing de respuestas LLM y uso/tokens/latencias;
+  - antes de nuevas migraciones, disenar contrato y aprobarlo;
   - mantener compatibilidad con CSV final, checkpoints existentes y `/run`;
   - cubrir con tests antes de quitar helpers duplicados.
 
@@ -35,27 +35,35 @@ Ultima revision: 2026-06-23.
 
 ## Prioridad media
 
-- [ ] Revisar seguridad pendiente antes de exponer fuera de localhost:
-  - confirmar que `api_key_override` no persiste secretos en
-    `config/arbiters_config.json`;
-  - mantener `/api/provider-key` limitado a localhost;
-  - conservar CSRF activo para `POST`/`PUT`/`PATCH`/`DELETE`;
-  - usar HTTPS y no usar `--debug` en produccion.
+- [x] Revisar seguridad pendiente antes de exponer fuera de localhost:
+  - `api_key_override` migra a secrets.env y se borra del JSON (arbiters_io.py:39);
+  - `/api/provider-key` bloqueado con 403 fuera de localhost (app.py:1502);
+  - CSRF activo como before_request para POST/PUT/PATCH/DELETE;
+  - `--debug` por defecto False; agregado abort en main_webapp.py si se combina
+    con --host distinto de localhost.
+  - PENDIENTE: HTTPS obligatorio si se expone fuera de la red local (no es codigo,
+    es configuracion de infraestructura).
 
-- [ ] Revisar visibilidad/ownership de outputs:
-  - la webapp asigna owner a outputs generados desde `/run`;
-  - outputs generados por CLI pueden quedar sin owner;
-  - decidir politica para admin, usuarios no-admin y ejecuciones CLI.
+- [x] Revisar visibilidad/ownership de outputs:
+  - DECISION: outputs del CLI son solo para consumo local, no deben aparecer
+    en la webapp. La webapp solo muestra outputs generados desde `/api/run/start`.
+    No hace falta importar ownership ni agregar logica extra.
 
-- [ ] Mejorar gestion de modelos GGUF:
-  - confirmar en navegador descarga simultanea de varios modelos;
-  - validar cancelacion con una descarga real grande;
-  - mostrar con mas claridad modelos activos, archivados y externos;
-  - decidir si modelos movidos fuera del cache deben poder restaurarse desde UI.
+- [x] Mejorar gestion de modelos GGUF:
+  - descarga simultanea y cancelacion: logica correcta en codigo; pendiente
+    validacion manual en navegador con descarga real grande.
+  - secciones renombradas: "Activos (models/)", "Archivados (models/archive/)",
+    nueva seccion "Externos (movidos fuera del cache)".
+  - modelos externos: list_external_models(), restore_external_model(),
+    unregister_external_model() en local_models.py; endpoints GET/POST/DELETE
+    en /api/local/external; UI con boton restaurar (desactivado si archivo no
+    existe en ruta registrada) y boton quitar del registro.
 
-- [ ] Homogeneizar identidad visual de arbitros:
-  - elegir formato unico: `nombre (id)`, `persona - modelo`, o similar;
-  - aplicarlo en tarjetas, logs coloreados, metricas y export/import.
+- [x] Homogeneizar identidad visual de arbitros:
+  - formato elegido: `Nombre · Persona (id)` (sin persona si el campo esta vacio);
+  - `arb_label()` en utils.py para Python; `arbLabel()` en base.html para JS;
+  - aplicado en: tarjetas de arbiters.html, tarjetas de index.html, dropdown de
+    principles.html, y log de arranque en label_persuasion.py.
 
 - [ ] Revisar politica de almacenamiento:
   - `config/` versionable;
@@ -66,21 +74,30 @@ Ultima revision: 2026-06-23.
 
 ## Prioridad baja
 
-- [ ] Anadir pagina/panel de resultados historicos:
-  - comparar outputs;
-  - descargar resumen de metricas;
-  - ver distribucion por principio y por arbitro.
+- [x] Anadir pagina/panel de resultados historicos:
+  - nueva pagina /history visible a todos los usuarios autenticados;
+  - nuevo endpoint GET /api/outputs/<name>/stats que lee el CSV y
+    retorna build_run_stats() completo;
+  - panel izquierdo: lista de outputs con fecha, nombre y chips de resumen;
+  - panel derecho: metricas globales, acuerdo inter-arbitro (Fleiss/Cohen/Alpha),
+    tabla de principios (positivos, negativos, tasa, kappa), tabla de arbitros
+    (llamadas, tokens, latencia, tasa de voto), acuerdo por pares, recursos;
+  - botones de descarga CSV y resumen JSON (data URI, sin servidor extra);
+  - comparacion entre outputs: pendiente para version futura.
 
 - [ ] Evaluar modo de justificaciones en produccion:
   - costo adicional en tokens;
   - valor para auditoria cualitativa;
   - impacto en CSV y analisis posterior.
 
-- [ ] Validar repos de Hugging Face antes de guardar recomendaciones generadas
+- [x] Validar repos de Hugging Face antes de guardar recomendaciones generadas
   por LLMs:
-  - comprobar `repo_id`;
-  - comprobar `filename`;
-  - evitar cachear recomendaciones alucinadas.
+  - `_is_valid_hf_repo_id()`: regex owner/repo, sin espacios ni rutas;
+  - `_is_valid_gguf_filename()`: extension .gguf, sin path traversal;
+  - size_gb y ram_min_gb deben ser positivos;
+  - items invalidos se descartan con warning antes de llegar al cache;
+  - validacion de existencia real en HF ya ocurre en _resolve_gguf_filename()
+    al momento de descargar.
 
 - [ ] Revisar OpenVINO/NPU en el futuro:
   - por ahora se deja como esta;
@@ -100,7 +117,16 @@ Ultima revision: 2026-06-23.
   delega metricas, filas de resultados, conteos por principio y resumen paper
   al contrato del nucleo.
 - [x] Metricas estadisticas centralizadas en `labelforge_core/agreement_metrics.py`:
-  acuerdo inter-arbitro, Cohen por pares y consenso por entrada.
+  acuerdo inter-arbitro, Cohen por pares, consenso por mayoria y consenso por
+  entrada.
+- [x] Prompting centralizado en `labelforge_core/prompting.py`; el runner usa el
+  helper compartido para catalogo de principios, schema JSON y prompt de usuario.
+- [x] Parsing de respuestas LLM centralizado en `labelforge_core/llm_json.py`;
+  el runner delega extraccion JSON, reparaciones conservadoras y rescate por
+  campos de principio.
+- [x] Uso/tokens/latencias por entrada centralizados en
+  `labelforge_core/usage_metrics.py`; runner y reporting comparten los mismos
+  campos `entry_*`.
 - [x] Preflight CLI consolidado: `main_cli.py` ya no lee la config default ni
   valida `hw_profile.json`; el preflight vive en el nucleo y usa la config real.
 - [x] Smoke end-to-end desde webapp con `limit=1`: Flask lanzo `main_cli.py`,

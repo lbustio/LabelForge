@@ -28,8 +28,6 @@ import logging
 import argparse
 import warnings
 import getpass
-import ast
-import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -49,6 +47,7 @@ from labelforge_core.agreement_metrics import (
     build_consensus_metric_fieldnames,
     compute_entry_consensus_metrics,
     compute_consensus_metrics,
+    compute_majority_consensus,
     flatten_entry_consensus_metrics,
     flatten_consensus_metrics,
     format_entry_consensus_metrics,
@@ -72,9 +71,15 @@ from labelforge_core.checkpoint_io import (
     save_run_state,
 )
 from labelforge_core.dataset_io import DatasetError, load_dataset
+from labelforge_core.llm_json import parse_llm_json
+from labelforge_core.prompting import build_user_prompt
 from labelforge_core.secrets_io import provider_api_key_env, secrets_env_path, set_secret_value
 from labelforge_core.provider_preflight import require_provider_preflight
-from labelforge_core.utils import number as _number
+from labelforge_core.usage_metrics import (
+    add_entry_usage_metrics,
+    build_entry_usage_metric_fieldnames,
+)
+from labelforge_core.utils import number as _number, arb_label as _arb_label
 from labelforge_core.paths import (
     ARBITERS_CONFIG_PATH,
     BASE_DIR,
@@ -356,6 +361,14 @@ def classify_llm_error(exc: Exception) -> dict:
             "message": "El LLM devolvio una respuesta que no es JSON valido.",
         }
 
+    if isinstance(exc, (ValueError, KeyError, TypeError)):
+        return {
+            "kind": "invalid_response",
+            "pause": False,
+            "retryable": True,
+            "message": "Campo faltante o valor invalido en respuesta del LLM.",
+        }
+
     text = f"{type(exc).__name__}: {exc}".lower()
     quota_terms = [
         "429", "quota", "resource_exhausted", "rate_limit", "rate limit",
@@ -629,175 +642,6 @@ PROVIDER_CALLERS = {
 }
 
 
-def build_output_instruction(task_cfg: dict) -> str:
-    principles = list(task_cfg["principles"].keys())
-    include_why = bool(task_cfg.get("include_justifications", False))
-
-    if include_why:
-        fields = []
-        for p in principles:
-            fields.append(f'"{p}":0')
-            fields.append(f'"{p}_why":"..."')
-        schema = "{" + ",".join(fields) + "}"
-        return (
-            f"Return JSON only: {schema}\n"
-            "Each *_why <=8 words. If absent, use \"no cue\"."
-        )
-
-    schema = "{" + ",".join(f'"{p}":0' for p in principles) + "}"
-    return f"Return JSON only: {schema}"
-
-
-def build_principles_catalog(task_cfg: dict) -> str:
-    lines = ["Persuasion principles to label:"]
-    for key, description in task_cfg["principles"].items():
-        lines.append(f"- {key}: {description}")
-    return "\n".join(lines)
-
-
-def build_user_prompt(task_cfg: dict, claim: str, max_chars: int) -> str:
-    template = task_cfg["user_prompt_template"]
-    output_instruction = build_output_instruction(task_cfg)
-    principles_catalog = build_principles_catalog(task_cfg)
-    prompt = template.format(
-        item=claim[:max_chars],
-        principles_catalog=principles_catalog,
-        output_instruction=output_instruction,
-        output_schema=output_instruction,
-    )
-    if "{principles_catalog}" not in template:
-        prompt = f"{principles_catalog}\n\n{prompt}"
-    if "{output_instruction}" not in template and "{output_schema}" not in template:
-        prompt = f"{prompt}\n\n{output_instruction}"
-    return prompt
-
-
-def strip_markdown_json(raw: str) -> str:
-    raw = (raw or "").strip()
-    if raw.startswith("```"):
-        parts = raw.split("```")
-        raw = parts[1] if len(parts) > 1 else raw
-        if raw.strip().lower().startswith("json"):
-            raw = raw.strip()[4:]
-    return raw.strip()
-
-
-def extract_first_json_object(raw: str) -> str:
-    start = raw.find("{")
-    if start < 0:
-        return raw
-    depth = 0
-    in_string = False
-    escape = False
-    for pos in range(start, len(raw)):
-        ch = raw[pos]
-        if escape:
-            escape = False
-            continue
-        if ch == "\\" and in_string:
-            escape = True
-            continue
-        if ch == '"':
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return raw[start:pos + 1]
-    return raw[start:]
-
-
-def _coerce_label_value(value) -> Optional[int]:
-    if value in (0, 1):
-        return int(value)
-    text = str(value).strip().lower()
-    if text in {"0", "false", "no", "absent", "none"}:
-        return 0
-    if text in {"1", "true", "yes", "present"}:
-        return 1
-    try:
-        return 1 if int(float(text)) >= 1 else 0
-    except (TypeError, ValueError):
-        return None
-
-
-def _salvage_principle_json(raw: str, principles: list[str]) -> Optional[dict]:
-    """
-    Last-resort parser for malformed LLM JSON. It only accepts a response if every
-    required principle label can be recovered; justifications are best-effort.
-    """
-    if not principles:
-        return None
-
-    text = extract_first_json_object(strip_markdown_json(raw))
-    result = {}
-
-    for p in principles:
-        label_re = re.compile(
-            rf'["\']?{re.escape(p)}["\']?\s*:\s*["\']?(0|1|true|false|yes|no)["\']?',
-            re.IGNORECASE,
-        )
-        match = label_re.search(text)
-        if not match:
-            return None
-        value = _coerce_label_value(match.group(1))
-        if value is None:
-            return None
-        result[p] = value
-
-        why_key = f"{p}_why"
-        why_re = re.compile(
-            rf'["\']?{re.escape(why_key)}["\']?\s*:\s*["\']?'
-            rf'(.*?)'
-            rf'(?=(?:["\']?\s*,\s*["\']?[A-Za-z_][A-Za-z0-9_]*["\']?\s*:)|(?:\s*[}}]\s*$))',
-            re.IGNORECASE | re.DOTALL,
-        )
-        why_match = why_re.search(text)
-        why = why_match.group(1).strip() if why_match else "no cue"
-        why = why.strip().strip('",\'').replace("\r", " ").replace("\n", " ")
-        result[why_key] = why[:240] if why else "no cue"
-
-    return result
-
-
-def parse_llm_json(raw: str, principles: Optional[list[str]] = None) -> tuple[dict, str]:
-    """Parse LLM JSON with conservative repairs for common response drift."""
-    cleaned = extract_first_json_object(strip_markdown_json(raw))
-    no_trailing = re.sub(r",\s*([}\]])", r"\1", cleaned)
-    quoted_keys = re.sub(r'([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)', r'\1"\2"\3', cleaned)
-    quoted_no_trailing = re.sub(r",\s*([}\]])", r"\1", quoted_keys)
-    attempts = [
-        ("direct", cleaned),
-        ("trim_trailing_commas", no_trailing),
-        ("quote_unquoted_keys", quoted_keys),
-        ("quote_keys_trim_commas", quoted_no_trailing),
-    ]
-
-    last_error = None
-    for mode, candidate in attempts:
-        try:
-            return json.loads(candidate), mode
-        except json.JSONDecodeError as exc:
-            last_error = exc
-
-    try:
-        value = ast.literal_eval(cleaned)
-        if isinstance(value, dict):
-            return value, "python_literal"
-    except (ValueError, SyntaxError) as exc:
-        last_error = exc
-
-    salvaged = _salvage_principle_json(raw, principles or [])
-    if salvaged is not None:
-        return salvaged, "salvage_fields"
-
-    raise last_error or ValueError("No se pudo parsear JSON del LLM")
-
-
 # ---------------------------------------------------------------------------
 # Llamada a un arbitro (cualquier proveedor)
 # ---------------------------------------------------------------------------
@@ -874,77 +718,9 @@ def call_arbiter(
         return None
 
 
-# ---------------------------------------------------------------------------
-# Consenso por mayoria
-# ---------------------------------------------------------------------------
-def compute_consensus(arb_results: list, principles: list) -> dict:
-    n        = len(arb_results)
-    majority = (n // 2) + 1
-    return {
-        p: 1 if sum(r.get(p, 0) for r in arb_results) >= majority else 0
-        for p in principles
-    }
-
-
 def add_entry_consensus_metrics(record: dict, arbiters: list, principles: list) -> dict:
     metrics = compute_entry_consensus_metrics(record, arbiters, principles)
     record.update(flatten_entry_consensus_metrics(metrics, principles))
-    return metrics
-
-
-def compute_entry_usage_metrics(record: dict, arbiters: list) -> dict:
-    prompt_tokens = 0
-    completion_tokens = 0
-    total_tokens = 0
-    total_latency = 0.0
-    latency_calls = 0
-    arbiter_calls = 0
-
-    for arb in arbiters:
-        arb_id = arb["id"]
-        p_tok = _number(record.get(f"prompt_tokens_{arb_id}"), 0)
-        c_tok = _number(record.get(f"completion_tokens_{arb_id}"), 0)
-        t_tok = _number(record.get(f"total_tokens_{arb_id}"), p_tok + c_tok)
-        lat = _number(record.get(f"latency_s_{arb_id}"), -1.0)
-
-        if p_tok > 0:
-            prompt_tokens += p_tok
-        if c_tok > 0:
-            completion_tokens += c_tok
-        if t_tok > 0:
-            total_tokens += t_tok
-        if t_tok >= 0 or lat >= 0:
-            arbiter_calls += 1
-        if lat >= 0:
-            total_latency += lat
-            latency_calls += 1
-
-    return {
-        "entry_prompt_tokens": prompt_tokens,
-        "entry_completion_tokens": completion_tokens,
-        "entry_total_tokens": total_tokens,
-        "entry_latency_s": round(total_latency, 3) if latency_calls else None,
-        "entry_latency_avg_s": round(total_latency / latency_calls, 3) if latency_calls else None,
-        "entry_arbiter_calls": arbiter_calls,
-        "entry_tokens_per_call": round(total_tokens / arbiter_calls, 2) if arbiter_calls else None,
-    }
-
-
-def build_entry_usage_metric_fieldnames() -> list:
-    return [
-        "entry_prompt_tokens",
-        "entry_completion_tokens",
-        "entry_total_tokens",
-        "entry_latency_s",
-        "entry_latency_avg_s",
-        "entry_arbiter_calls",
-        "entry_tokens_per_call",
-    ]
-
-
-def add_entry_usage_metrics(record: dict, arbiters: list) -> dict:
-    metrics = compute_entry_usage_metrics(record, arbiters)
-    record.update(metrics)
     return metrics
 
 
@@ -1122,7 +898,7 @@ def save_progress_state(
     save_run_state(state)
 
 
-def should_reuse_run_state(state: dict, args, total: int) -> bool:
+def should_reuse_run_state(state: dict, args, total: int, resolved_input: str = "") -> bool:
     if getattr(args, "fresh", False):
         return False
     if not state:
@@ -1130,7 +906,7 @@ def should_reuse_run_state(state: dict, args, total: int) -> bool:
     if state.get("status") not in {"running", "paused"}:
         return False
     return (
-        state.get("input_file") == str(args.input)
+        state.get("input_file") == str(resolved_input or args.input or "")
         and state.get("config_file") == str(args.config)
         and int(state.get("total_rows", -1)) == int(total)
     )
@@ -1187,7 +963,7 @@ def process_claim(
         partial_arbiter_results.setdefault(row_key, {})[arb["id"]] = result
         append_arbiter_result(row_index, arb["id"], result)
 
-    consensus = compute_consensus(list(arb_results.values()), principles)
+    consensus = compute_majority_consensus(list(arb_results.values()), principles)
 
     record = {}
     for p in principles:
@@ -1359,11 +1135,11 @@ def main():
     log.info(f"Total de entradas a procesar: {total}")
 
     if args.fresh:
-        clear_runtime_checkpoints(include_run_state=True)
+        clear_runtime_checkpoints(include_run_state=True, include_claim_results=True)
         log.info("Modo --fresh: checkpoints reanudables previos limpiados")
 
     previous_state = load_run_state()
-    if should_reuse_run_state(previous_state, args, total):
+    if should_reuse_run_state(previous_state, args, total, resolved_input=str(input_file)):
         run_id = previous_state.get("run_id", RUN_ID)
         output_path = Path(previous_state.get("output_path", OUTPUT_DIR / f"labeled_{run_id}.csv"))
         state = previous_state
@@ -1407,11 +1183,27 @@ def main():
     log.info(f"Output    : {output_path}")
     for arb in arbiters:
         p = arb["provider"]
-        log.info(f"  {arb['id']} ({arb['name']}): {p['type']} / {p['model']}")
+        log.info(f"  {_arb_label(arb)}: {p['type']} / {p['model']}")
 
     rate_limiters = {arb["id"]: DynamicRateLimiter(proc_cfg) for arb in arbiters}
 
     checkpoint = load_checkpoint()
+    # If checkpoint data exists but belongs to a different input/config, discard it.
+    # Only reuse when dataset and config match; a higher limit on the same run is fine.
+    if checkpoint["results"] and previous_state:
+        prev_input  = previous_state.get("input_file", "")
+        prev_config = previous_state.get("config_file", "")
+        mismatch = (
+            (prev_input  and prev_input  != str(input_file))
+            or (prev_config and prev_config != str(args.config))
+        )
+        if mismatch:
+            log.warning(
+                "Checkpoint ignorado: corresponde a otro input o config. "
+                "Use --fresh para iniciar completamente desde cero."
+            )
+            checkpoint = {"last_index": -1, "results": {}}
+
     last_done  = checkpoint["last_index"]
     results    = checkpoint["results"]
     partial_arbiter_results = load_arbiter_results()

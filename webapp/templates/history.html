@@ -1,0 +1,322 @@
+{% extends "base.html" %}
+{% block title %}Historial - LabelForge{% endblock %}
+{% block content %}
+<style>
+  .output-card {
+    cursor: pointer;
+    border: 1px solid #2d3148;
+    border-radius: .5rem;
+    padding: .75rem 1rem;
+    margin-bottom: .5rem;
+    background: #12141e;
+    transition: border-color .15s, background .15s;
+  }
+  .output-card:hover { border-color: #4a5180; background: #161927; }
+  .output-card.selected { border-color: #6c8aff; background: #161d35; }
+  .metric-box {
+    background: #12141e;
+    border: 1px solid #2d3148;
+    border-radius: .4rem;
+    padding: .6rem .9rem;
+    text-align: center;
+  }
+  .metric-box .value { font-size: 1.4rem; font-weight: 700; color: #e2e8f0; }
+  .metric-box .label { font-size: .68rem; color: #8899bb; text-transform: uppercase; letter-spacing: .07em; }
+  .kappa-badge {
+    display: inline-block;
+    padding: .15rem .5rem;
+    border-radius: .3rem;
+    font-size: .78rem;
+    font-weight: 600;
+  }
+  .kappa-good  { background: #1a3a1a; color: #4cca6e; border: 1px solid #2d5a2d; }
+  .kappa-mod   { background: #2a2a10; color: #c8c040; border: 1px solid #4a4a20; }
+  .kappa-low   { background: #3a1a1a; color: #e05050; border: 1px solid #5a2d2d; }
+  .kappa-na    { background: #1e2030; color: #8899bb; border: 1px solid #2d3148; }
+  .bar-wrap { height: 8px; background: #1e2030; border-radius: 4px; overflow: hidden; }
+  .bar-fill  { height: 100%; border-radius: 4px; transition: width .4s; }
+</style>
+
+<div class="container-fluid py-4" style="max-width:1400px">
+  <div class="mb-4">
+    <h4 class="mb-0" style="color:#e2e8f0"><i class="bi bi-clock-history me-2"></i>Historial de resultados</h4>
+    <div class="text-secondary small mt-1">Selecciona un archivo para ver sus metricas detalladas.</div>
+  </div>
+
+  <div class="row g-4">
+    <!-- Lista de outputs -->
+    <div class="col-lg-4">
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <div class="fw-semibold small text-secondary"><i class="bi bi-files me-1"></i>Archivos</div>
+        <button class="btn btn-sm btn-outline-secondary" onclick="loadOutputList()">
+          <i class="bi bi-arrow-clockwise"></i>
+        </button>
+      </div>
+      <div id="output-list">
+        <div class="text-secondary small">Cargando...</div>
+      </div>
+    </div>
+
+    <!-- Panel de detalle -->
+    <div class="col-lg-8">
+      <div id="detail-panel">
+        <div class="text-secondary text-center py-5" style="color:#4a5180!important">
+          <i class="bi bi-arrow-left-circle" style="font-size:2rem"></i>
+          <div class="mt-2">Selecciona un archivo para ver sus metricas</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+}
+
+let _outputs = [];
+let _selectedName = null;
+
+async function loadOutputList() {
+  const listEl = document.getElementById('output-list');
+  listEl.innerHTML = '<div class="text-secondary small"><div class="spinner-border spinner-border-sm me-2"></div>Cargando...</div>';
+  try {
+    _outputs = await fetch('/api/outputs').then(r => r.json());
+    if (!Array.isArray(_outputs) || !_outputs.length) {
+      listEl.innerHTML = '<div class="text-secondary small">No hay archivos de resultados.</div>';
+      return;
+    }
+    listEl.innerHTML = _outputs.map(o => outputCard(o)).join('');
+    if (_selectedName) {
+      const card = document.querySelector(`[data-name="${CSS.escape(_selectedName)}"]`);
+      if (card) card.classList.add('selected');
+    }
+  } catch(e) {
+    listEl.innerHTML = `<div class="text-danger small">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function outputCard(o) {
+  const ts = o.run_timestamp || o.modified || o.name;
+  const rows = o.row_count != null ? `${o.row_count} entradas` : '';
+  const arbs = (o.arbiters || []).length ? `${o.arbiters.length} arb.` : '';
+  const prins = (o.principles || []).length ? `${o.principles.length} princ.` : '';
+  const chips = [rows, arbs, prins].filter(Boolean).join(' · ');
+  return `<div class="output-card" data-name="${escapeHtml(o.name)}" onclick="selectOutput(this.dataset.name)">
+    <div class="fw-semibold small mb-1" style="color:#c8d0e8">${escapeHtml(ts)}</div>
+    <div class="text-secondary" style="font-size:.72rem">${escapeHtml(o.name)}</div>
+    ${chips ? `<div class="mt-1" style="font-size:.7rem;color:#6a7a9a">${escapeHtml(chips)}</div>` : ''}
+  </div>`;
+}
+
+async function selectOutput(name) {
+  _selectedName = name;
+  document.querySelectorAll('.output-card').forEach(c => c.classList.toggle('selected', c.dataset.name === name));
+  const panel = document.getElementById('detail-panel');
+  panel.innerHTML = '<div class="text-secondary small text-center py-4"><div class="spinner-border spinner-border-sm me-2"></div>Calculando metricas...</div>';
+  try {
+    const stats = await fetch(`/api/outputs/${encodeURIComponent(name)}/stats`).then(r => r.json());
+    if (stats.error) throw new Error(stats.error);
+    panel.innerHTML = renderDetail(name, stats);
+  } catch(e) {
+    panel.innerHTML = `<div class="text-danger small">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function kappaClass(k) {
+  if (k == null) return 'kappa-na';
+  if (k >= 0.6)  return 'kappa-good';
+  if (k >= 0.4)  return 'kappa-mod';
+  return 'kappa-low';
+}
+
+function fmt(v, decimals = 1) {
+  if (v == null) return '-';
+  return typeof v === 'number' ? v.toFixed(decimals) : v;
+}
+
+function renderDetail(name, s) {
+  const ps = s.paper_summary || {};
+  const ds = ps.dataset || {};
+  const cq = ps.consensus_quality || {};
+  const ag = s.agreement || {};
+  const principles = Object.keys(ps.principles || {});
+  const arbiterIds = Object.keys(ps.arbiters || {});
+  const pairwise   = ps.pairwise_arbiters || [];
+  const res        = ps.resources || {};
+
+  const downloadJsonUrl = `data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(ps, null, 2))}`;
+
+  // --- Metricas globales ---
+  const globalMetrics = `
+    <div class="row g-2 mb-3">
+      <div class="col-6 col-md-3"><div class="metric-box">
+        <div class="value">${ds.successful_rows ?? '-'}</div><div class="label">Entradas OK</div>
+      </div></div>
+      <div class="col-6 col-md-3"><div class="metric-box">
+        <div class="value">${ds.failed_rows ?? '-'}</div><div class="label">Fallidas</div>
+      </div></div>
+      <div class="col-6 col-md-3"><div class="metric-box">
+        <div class="value">${ds.principle_count ?? '-'}</div><div class="label">Principios</div>
+      </div></div>
+      <div class="col-6 col-md-3"><div class="metric-box">
+        <div class="value">${ds.arbiter_count ?? '-'}</div><div class="label">Arbitros</div>
+      </div></div>
+    </div>`;
+
+  // --- Acuerdo global ---
+  const fk = ag.fleiss_kappa;
+  const ck = ag.cohen_kappa_avg;
+  const ka = ag.krippendorff_alpha;
+  const oa = ag.observed_agreement;
+  const agreementSection = `
+    <div class="mb-3">
+      <div class="fw-semibold small text-secondary mb-2"><i class="bi bi-bar-chart me-1"></i>Acuerdo inter-arbitro</div>
+      <div class="row g-2">
+        <div class="col-6 col-md-3"><div class="metric-box">
+          <div class="value"><span class="kappa-badge ${kappaClass(fk)}">${fmt(fk, 3)}</span></div>
+          <div class="label">Fleiss Kappa</div>
+        </div></div>
+        <div class="col-6 col-md-3"><div class="metric-box">
+          <div class="value"><span class="kappa-badge ${kappaClass(ck)}">${fmt(ck, 3)}</span></div>
+          <div class="label">Cohen Kappa avg</div>
+        </div></div>
+        <div class="col-6 col-md-3"><div class="metric-box">
+          <div class="value"><span class="kappa-badge ${kappaClass(ka)}">${fmt(ka, 3)}</span></div>
+          <div class="label">Krippendorff α</div>
+        </div></div>
+        <div class="col-6 col-md-3"><div class="metric-box">
+          <div class="value">${oa != null ? fmt(oa * 100, 1) + '%' : '-'}</div>
+          <div class="label">Acuerdo observado</div>
+        </div></div>
+      </div>
+    </div>`;
+
+  // --- Principios ---
+  const principleRows = principles.map(p => {
+    const info = (ps.principles || {})[p] || {};
+    const rate = info.positive_rate_percent;
+    const pAg  = (info.agreement || {});
+    return `<tr>
+      <td class="text-secondary small">${escapeHtml(p)}</td>
+      <td class="text-end">${info.positive ?? '-'}</td>
+      <td class="text-end">${info.negative ?? '-'}</td>
+      <td class="text-end">${rate != null ? rate + '%' : '-'}</td>
+      <td class="text-end"><span class="kappa-badge ${kappaClass(pAg.fleiss_kappa)}">${fmt(pAg.fleiss_kappa, 3)}</span></td>
+    </tr>`;
+  }).join('');
+
+  const principlesSection = principles.length ? `
+    <div class="mb-3">
+      <div class="fw-semibold small text-secondary mb-2"><i class="bi bi-tags me-1"></i>Principios</div>
+      <div class="table-responsive">
+        <table class="table table-sm table-dark" style="font-size:.8rem">
+          <thead><tr>
+            <th>Principio</th><th class="text-end">Positivos</th><th class="text-end">Negativos</th>
+            <th class="text-end">Tasa positiva</th><th class="text-end">Fleiss κ</th>
+          </tr></thead>
+          <tbody>${principleRows}</tbody>
+        </table>
+      </div>
+    </div>` : '';
+
+  // --- Arbitros ---
+  const arbiterRows = arbiterIds.map(id => {
+    const a = (ps.arbiters || {})[id] || {};
+    const tok = (a.total_tokens || {});
+    const lat = (a.latency_s || {});
+    return `<tr>
+      <td class="text-secondary small">${escapeHtml(id)}</td>
+      <td class="text-end">${a.calls ?? '-'}</td>
+      <td class="text-end">${tok.mean != null ? Math.round(tok.mean).toLocaleString() : '-'}</td>
+      <td class="text-end">${lat.mean != null ? fmt(lat.mean, 2) + 's' : '-'}</td>
+      <td class="text-end">${a.positive_vote_rate_percent != null ? a.positive_vote_rate_percent + '%' : '-'}</td>
+    </tr>`;
+  }).join('');
+
+  const arbitersSection = arbiterIds.length ? `
+    <div class="mb-3">
+      <div class="fw-semibold small text-secondary mb-2"><i class="bi bi-people me-1"></i>Arbitros</div>
+      <div class="table-responsive">
+        <table class="table table-sm table-dark" style="font-size:.8rem">
+          <thead><tr>
+            <th>ID</th><th class="text-end">Llamadas</th><th class="text-end">Tokens/llamada</th>
+            <th class="text-end">Latencia avg</th><th class="text-end">Tasa voto+</th>
+          </tr></thead>
+          <tbody>${arbiterRows}</tbody>
+        </table>
+      </div>
+    </div>` : '';
+
+  // --- Pares ---
+  const pairRows = pairwise.map(pw => `<tr>
+    <td class="text-secondary small">${escapeHtml(pw.arbiter_a)}</td>
+    <td class="text-secondary small">${escapeHtml(pw.arbiter_b)}</td>
+    <td class="text-end">${pw.observed_agreement_percent != null ? pw.observed_agreement_percent + '%' : '-'}</td>
+    <td class="text-end"><span class="kappa-badge ${kappaClass(pw.cohen_kappa)}">${fmt(pw.cohen_kappa, 3)}</span></td>
+    <td class="text-end">${pw.n ?? '-'}</td>
+  </tr>`).join('');
+
+  const pairwiseSection = pairwise.length ? `
+    <div class="mb-3">
+      <div class="fw-semibold small text-secondary mb-2"><i class="bi bi-diagram-2 me-1"></i>Acuerdo por pares</div>
+      <div class="table-responsive">
+        <table class="table table-sm table-dark" style="font-size:.8rem">
+          <thead><tr>
+            <th>Arbitro A</th><th>Arbitro B</th>
+            <th class="text-end">Acuerdo obs.</th><th class="text-end">Cohen κ</th><th class="text-end">N</th>
+          </tr></thead>
+          <tbody>${pairRows}</tbody>
+        </table>
+      </div>
+    </div>` : '';
+
+  // --- Recursos ---
+  const resourcesSection = res.tokens_total ? `
+    <div class="mb-3">
+      <div class="fw-semibold small text-secondary mb-2"><i class="bi bi-lightning me-1"></i>Recursos</div>
+      <div class="row g-2">
+        <div class="col-6 col-md-4"><div class="metric-box">
+          <div class="value" style="font-size:1rem">${(res.tokens_total || 0).toLocaleString()}</div>
+          <div class="label">Tokens totales</div>
+        </div></div>
+        <div class="col-6 col-md-4"><div class="metric-box">
+          <div class="value" style="font-size:1rem">${fmt((res.tokens_per_entry || {}).mean, 0)}</div>
+          <div class="label">Tokens / entrada</div>
+        </div></div>
+        <div class="col-6 col-md-4"><div class="metric-box">
+          <div class="value" style="font-size:1rem">${fmt((res.latency_s_per_entry || {}).mean, 2)}s</div>
+          <div class="label">Latencia avg / entrada</div>
+        </div></div>
+      </div>
+    </div>` : '';
+
+  return `
+    <div class="d-flex align-items-center justify-content-between mb-3">
+      <div>
+        <div class="fw-semibold" style="color:#c8d0e8">${escapeHtml(name)}</div>
+        <div class="text-secondary small">${escapeHtml(s.source_file || name)}</div>
+      </div>
+      <div class="d-flex gap-2">
+        <a href="/outputs/${encodeURIComponent(name)}" class="btn btn-sm btn-outline-secondary" download>
+          <i class="bi bi-filetype-csv me-1"></i>CSV
+        </a>
+        <a href="${downloadJsonUrl}" download="${escapeHtml(name.replace('.csv',''))}_summary.json"
+           class="btn btn-sm btn-outline-info">
+          <i class="bi bi-braces me-1"></i>Resumen JSON
+        </a>
+      </div>
+    </div>
+    ${globalMetrics}
+    ${agreementSection}
+    ${principlesSection}
+    ${arbitersSection}
+    ${pairwiseSection}
+    ${resourcesSection}`;
+}
+
+loadOutputList();
+</script>
+{% endblock %}

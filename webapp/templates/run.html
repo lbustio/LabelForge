@@ -451,6 +451,8 @@ let runErrors = [];
 let queuedClaims = [];
 let lastArbErrors = {};
 let latestLiveStats = null;
+let _lastSeenClaimRow = null;
+let _statsRefreshDebounce = null;
 let chartDonut = null;
 let chartLatency = null;
 let chartSpeed = null;
@@ -759,7 +761,7 @@ async function loadFailedQueue() {
 
 // ---------- run ----------
 async function startRun() {
-  // Feedback inmediato: el usuario sabe que el click se registro
+  document.getElementById('btn-start').disabled = true;
   appendLog('[Iniciando...] Enviando solicitud al servidor...', 'ok');
   showToast('Iniciando proceso...', 'info');
 
@@ -776,6 +778,7 @@ async function startRun() {
   queuedClaims = [];
   lastArbErrors = {};
   latestLiveStats = null;
+  _lastSeenClaimRow = null;
   resultsOffset = 0;
   updateStats();
   renderRunLists();
@@ -798,6 +801,7 @@ async function startRun() {
     });
     data = await res.json();
   } catch (e) {
+    document.getElementById('btn-start').disabled = false;
     const msg = `Error de red al iniciar: ${e.message}`;
     showToast(msg, 'error');
     appendLog(`[ERROR RED] ${msg}`, 'error');
@@ -809,6 +813,7 @@ async function startRun() {
   appendLog(`[Respuesta servidor] HTTP ${res.status}`, res.ok ? 'ok' : 'error');
 
   if (!res.ok) {
+    document.getElementById('btn-start').disabled = false;
     const issues = Array.isArray(data.issues) ? data.issues : [];
     const errMsg = data.error || `Error HTTP ${res.status}`;
     showToast(errMsg, 'error');
@@ -1318,6 +1323,7 @@ function resetExecutionUi(message = '') {
   queuedClaims = [];
   lastArbErrors = {};
   latestLiveStats = null;
+  _lastSeenClaimRow = null;
   checkpointProcessedRows = 0;
   checkpointTotalRows = 0;
   resultsOffset = 0;
@@ -1420,6 +1426,32 @@ function renderLiveStats(data) {
   }
   updateProgressBars(processed, total, datasetTotal);
   updateCharts(data);
+
+  // Principle distribution chart: read directly from snapshot (every 1s, not every 15s)
+  const _pc = data.principle_counts;
+  const _snapshotPrinciples = data.principles || [];
+  if (_pc && chartPrinciples && _snapshotPrinciples.length) {
+    const _pcTotal = _snapshotPrinciples.reduce((s, p) => s + (_pc[p]?.ones || 0) + (_pc[p]?.zeros || 0), 0);
+    if (_pcTotal > 0) {
+      chartPrinciples.data.labels = _snapshotPrinciples;
+      chartPrinciples.data.datasets[0].data = _snapshotPrinciples.map(p => _pc[p]?.ones || 0);
+      chartPrinciples.data.datasets[1].data = _snapshotPrinciples.map(p => _pc[p]?.zeros || 0);
+      chartPrinciples.update('none');
+      hideChartOverlay('principles');
+    }
+  }
+
+  // When a new entry finishes, immediately refresh the detailed stats panel
+  // (agreement metrics, results table, paper summary) from disk
+  const _lastEvt = data.last_claim?.event;
+  if (_lastEvt && _lastEvt !== 'claim_start') {
+    const _rowKey = String(data.last_claim?.row_index ?? '');
+    if (_rowKey && _rowKey !== _lastSeenClaimRow) {
+      _lastSeenClaimRow = _rowKey;
+      clearTimeout(_statsRefreshDebounce);
+      _statsRefreshDebounce = setTimeout(() => loadRunStats(true), 300);
+    }
+  }
 
   statsOK = ok;
   statsFailed = failed;
@@ -2145,7 +2177,7 @@ function setRunning(running) {
   if (clearBtn) clearBtn.disabled = running;
 
   if (running && !statsRefreshTimer) {
-    statsRefreshTimer = setInterval(() => loadRunStats(true), 8000);
+    statsRefreshTimer = setInterval(() => loadRunStats(true), 4000);
   } else if (!running && statsRefreshTimer) {
     clearInterval(statsRefreshTimer);
     statsRefreshTimer = null;

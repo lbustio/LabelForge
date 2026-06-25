@@ -303,9 +303,9 @@
           <div id="hw-info-body" class="text-secondary">Cargando inventario...</div>
         </div>
 
-        <!-- Modelos descargados -->
+        <!-- Modelos activos -->
         <div class="d-flex align-items-center justify-content-between mb-2">
-          <div class="fw-semibold small text-secondary"><i class="bi bi-hdd me-1"></i>Modelos descargados</div>
+          <div class="fw-semibold small text-secondary"><i class="bi bi-hdd me-1"></i>Activos <span class="text-secondary fw-normal" style="font-size:.7rem">(models/)</span></div>
           <button class="btn btn-sm btn-outline-secondary" onclick="loadCachedModels()" title="Refrescar lista de modelos en disco">
             <i class="bi bi-arrow-clockwise me-1"></i>Refrescar
           </button>
@@ -314,13 +314,25 @@
           <div class="text-secondary small">Cargando...</div>
         </div>
 
+        <!-- Modelos archivados -->
         <div class="d-flex align-items-center justify-content-between mb-2">
-          <div class="fw-semibold small text-secondary"><i class="bi bi-archive me-1"></i>Modelos guardados para despues</div>
+          <div class="fw-semibold small text-secondary"><i class="bi bi-archive me-1"></i>Archivados <span class="text-secondary fw-normal" style="font-size:.7rem">(models/archive/)</span></div>
           <button class="btn btn-sm btn-outline-secondary" onclick="loadArchivedModels()" title="Refrescar modelos archivados">
             <i class="bi bi-arrow-clockwise me-1"></i>Refrescar
           </button>
         </div>
         <div id="archived-models-list" class="mb-3">
+          <div class="text-secondary small">Cargando...</div>
+        </div>
+
+        <!-- Modelos externos -->
+        <div class="d-flex align-items-center justify-content-between mb-2">
+          <div class="fw-semibold small text-secondary"><i class="bi bi-folder-symlink me-1"></i>Externos <span class="text-secondary fw-normal" style="font-size:.7rem">(movidos fuera del cache)</span></div>
+          <button class="btn btn-sm btn-outline-secondary" onclick="loadExternalModels()" title="Refrescar modelos externos">
+            <i class="bi bi-arrow-clockwise me-1"></i>Refrescar
+          </button>
+        </div>
+        <div id="external-models-list" class="mb-3">
           <div class="text-secondary small">Cargando...</div>
         </div>
 
@@ -917,9 +929,7 @@ function renderList() {
             <span class="soft-chip" style="font-size:.62rem;margin-right:0">${escapeHtml(a.id)}</span>
           </div>
           <div style="flex:1">
-            <div class="fw-semibold mb-1">${escapeHtml(a.name)}
-              ${a.persona ? `<span class="text-secondary fw-normal" style="font-size:.82rem">  -  ${escapeHtml(a.persona)}</span>` : ''}
-            </div>
+            <div class="fw-semibold mb-1">${escapeHtml(arbLabel(a))}</div>
             <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
               <span class="soft-chip" style="font-size:.72rem">
                 <i class="bi ${PROVIDER_ICONS[p.type]||'bi-cloud'} me-1"></i>${PROVIDER_LABELS[p.type]||p.type||'?'}
@@ -1348,6 +1358,14 @@ function ggufCard(model, kind, options = {}) {
     actions = `
       <button class="btn btn-sm btn-outline-success" onclick="restoreModel('${escapeHtml(filename)}', this)" title="Cargar de nuevo"><i class="bi bi-box-arrow-in-down"></i></button>
       <button class="btn btn-sm btn-outline-danger" onclick="deleteArchivedModel('${escapeHtml(filename)}', this)" title="Eliminar guardado"><i class="bi bi-trash3"></i></button>`;
+  } else if (kind === 'external') {
+    const existsWarning = model.exists === false
+      ? `<span class="text-warning ms-1" title="El archivo ya no esta en la ruta registrada"><i class="bi bi-exclamation-triangle"></i></span>`
+      : '';
+    actions = `
+      <button class="btn btn-sm btn-outline-success" onclick="restoreExternalModel('${escapeHtml(filename)}', this)" title="Restaurar a models/"${model.exists === false ? ' disabled' : ''}><i class="bi bi-box-arrow-in-down me-1"></i>Restaurar</button>
+      <button class="btn btn-sm btn-outline-secondary" onclick="unregisterExternalModel('${escapeHtml(filename)}', this)" title="Quitar del registro"><i class="bi bi-x-circle"></i></button>
+      ${existsWarning}`;
   } else if (kind === 'recommended') {
     actions = `<button class="btn btn-sm btn-outline-info" onclick="startDownload('${escapeHtml(repoId)}','${escapeHtml(filename)}',this,decodeURIComponent('${encodeURIComponent(description)}'))"><i class="bi bi-download me-1"></i>Descargar</button>`;
   }
@@ -1400,7 +1418,7 @@ async function openDownloadModal() {
     hwBody.innerHTML = `<span class="text-danger">Error al cargar hardware: ${escapeHtml(e.message)}</span>`;
   }
 
-  await Promise.all([loadCachedModels(), loadArchivedModels(), loadRecommended(false)]);
+  await Promise.all([loadCachedModels(), loadArchivedModels(), loadExternalModels(), loadRecommended(false)]);
 }
 
 async function loadCachedModels() {
@@ -1491,6 +1509,48 @@ async function restoreModel(filename, btn) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al cargar');
     await Promise.all([loadCachedModels(), loadArchivedModels(), loadModels(), loadRecommended(false)]);
+  } catch(e) {
+    ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}`);
+    btn.disabled = false;
+  }
+}
+
+async function loadExternalModels() {
+  const listEl = document.getElementById('external-models-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<div class="text-secondary small"><div class="spinner-border spinner-border-sm me-2"></div>Cargando...</div>';
+  try {
+    const models = await fetch('/api/local/external').then(r => r.json());
+    if (models.error) throw new Error(models.error);
+    listEl.innerHTML = models.length
+      ? models.map(m => ggufCard(m, 'external', {border: '#2d3a3a'})).join('')
+      : '<div class="text-secondary small">No hay modelos registrados fuera del cache.</div>';
+  } catch(e) {
+    listEl.innerHTML = `<div class="text-danger small">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function restoreExternalModel(filename, btn) {
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/local/external/${encodeURIComponent(filename)}/restore`, {method: 'POST'});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al restaurar');
+    await Promise.all([loadCachedModels(), loadExternalModels(), loadModels(), loadRecommended(false)]);
+  } catch(e) {
+    ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}`);
+    btn.disabled = false;
+  }
+}
+
+async function unregisterExternalModel(filename, btn) {
+  if (!confirm(`Quitar "${filename}" del registro? El archivo no se elimina.`)) return;
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/local/external/${encodeURIComponent(filename)}`, {method: 'DELETE'});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al desregistrar');
+    await Promise.all([loadExternalModels(), loadRecommended(false)]);
   } catch(e) {
     ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}`);
     btn.disabled = false;

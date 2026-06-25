@@ -352,6 +352,26 @@ def _query_openai(hw: dict) -> list[dict]:
         return []
 
 
+_HF_REPO_RE = re.compile(r"^[\w][\w.\-]{0,38}/[\w][\w.\-]{0,95}$")
+_GGUF_FILE_RE = re.compile(r"^[\w][\w.\-]{2,120}\.gguf$", re.IGNORECASE)
+
+
+def _is_valid_hf_repo_id(repo_id: str) -> bool:
+    """Comprueba que repo_id tiene formato owner/repo sin espacios ni rutas."""
+    return bool(repo_id) and bool(_HF_REPO_RE.match(repo_id)) and "/" in repo_id
+
+
+def _is_valid_gguf_filename(filename: str) -> bool:
+    """Comprueba que filename parece un GGUF real (sin rutas, extension correcta)."""
+    return (
+        bool(filename)
+        and bool(_GGUF_FILE_RE.match(filename))
+        and "/" not in filename
+        and "\\" not in filename
+        and ".." not in filename
+    )
+
+
 def _parse_llm_catalog_response(raw: str) -> list[dict]:
     """Extrae una lista de dicts del JSON devuelto por el LLM."""
     if not raw:
@@ -390,16 +410,29 @@ def _parse_llm_catalog_response(raw: str) -> list[dict]:
             continue
         # Normalizar tipos
         try:
-            result.append({
-                "repo_id":    str(item["repo_id"]).strip(),
-                "filename":   str(item["filename"]).strip(),
-                "size_gb":    float(item["size_gb"]),
-                "ram_min_gb": int(item["ram_min_gb"]),
-                "tier":       str(item.get("tier", "medium")).strip(),
-                "description": str(item.get("description", "")).strip(),
-            })
+            repo_id  = str(item["repo_id"]).strip()
+            filename = str(item["filename"]).strip()
+            size_gb  = float(item["size_gb"])
+            ram_gb   = int(item["ram_min_gb"])
         except (ValueError, TypeError):
             continue
+        if not _is_valid_hf_repo_id(repo_id):
+            log.warning("[catalog] repo_id descartado (formato invalido): %r", repo_id)
+            continue
+        if not _is_valid_gguf_filename(filename):
+            log.warning("[catalog] filename descartado (formato invalido): %r", filename)
+            continue
+        if size_gb <= 0 or ram_gb <= 0:
+            log.warning("[catalog] modelo descartado (size/ram invalidos): %r %r", repo_id, filename)
+            continue
+        result.append({
+            "repo_id":     repo_id,
+            "filename":    filename,
+            "size_gb":     size_gb,
+            "ram_min_gb":  ram_gb,
+            "tier":        str(item.get("tier", "medium")).strip(),
+            "description": str(item.get("description", "")).strip(),
+        })
     return result
 
 
@@ -721,6 +754,81 @@ def delete_archived_model(filename: str) -> None:
         raise FileNotFoundError(f"Modelo no encontrado en archivo: {filename}")
     target.unlink()
     log.info("[local_models] Modelo archivado eliminado: %s", filename)
+
+
+def list_external_models() -> list[dict]:
+    """Lista los modelos registrados como movidos fuera del cache (location: external)."""
+    if not MODELS_JSON.exists():
+        return []
+    try:
+        registry = json.loads(MODELS_JSON.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    results = []
+    for entry in registry:
+        if entry.get("location") == "external" and entry.get("filename"):
+            parsed = _parse_gguf_metadata(entry["filename"])
+            path = entry.get("path", "")
+            results.append({
+                "filename":    entry["filename"],
+                "path":        path,
+                "abs_path":    path,
+                "size_gb":     entry.get("size_gb", 0),
+                "repo_id":     entry.get("repo_id", ""),
+                "creator":     (entry.get("repo_id", "").split("/", 1)[0] if entry.get("repo_id") else ""),
+                "description": entry.get("description", ""),
+                "exists":      Path(path).exists() if path else False,
+                **parsed,
+            })
+    return results
+
+
+def restore_external_model(filename: str) -> None:
+    """Mueve un GGUF externo de vuelta a models/ y actualiza el registro."""
+    if not MODELS_JSON.exists():
+        raise FileNotFoundError(f"No hay registro de modelos externos.")
+    try:
+        registry = json.loads(MODELS_JSON.read_text(encoding="utf-8"))
+    except Exception:
+        raise RuntimeError("No se pudo leer models.json.")
+
+    entry = next((r for r in registry if r.get("filename") == filename and r.get("location") == "external"), None)
+    if not entry:
+        raise FileNotFoundError(f"Modelo externo no encontrado en el registro: {filename}")
+
+    src = Path(entry.get("path", ""))
+    if not src.exists():
+        raise FileNotFoundError(f"El archivo ya no esta en la ruta registrada: {src}")
+
+    MODELS_DIR.mkdir(exist_ok=True)
+    dest = MODELS_DIR / filename
+    if dest.exists():
+        raise FileExistsError(f"Ya existe un modelo activo con ese nombre: {filename}")
+
+    src.rename(dest)
+    registry = [r for r in registry if r.get("filename") != filename]
+    with open(MODELS_JSON, "w", encoding="utf-8") as f:
+        json.dump(registry, f, indent=2, ensure_ascii=False)
+    log.info("[local_models] Modelo externo restaurado: %s", filename)
+
+
+def unregister_external_model(filename: str) -> None:
+    """Elimina la entrada de un modelo externo del registro sin tocar el archivo."""
+    if not MODELS_JSON.exists():
+        raise FileNotFoundError(f"No hay registro de modelos externos.")
+    try:
+        registry = json.loads(MODELS_JSON.read_text(encoding="utf-8"))
+    except Exception:
+        raise RuntimeError("No se pudo leer models.json.")
+
+    original = len(registry)
+    registry = [r for r in registry if not (r.get("filename") == filename and r.get("location") == "external")]
+    if len(registry) == original:
+        raise FileNotFoundError(f"Modelo externo no encontrado en el registro: {filename}")
+
+    with open(MODELS_JSON, "w", encoding="utf-8") as f:
+        json.dump(registry, f, indent=2, ensure_ascii=False)
+    log.info("[local_models] Modelo externo desregistrado: %s", filename)
 
 
 def list_known_model_filenames() -> set[str]:
