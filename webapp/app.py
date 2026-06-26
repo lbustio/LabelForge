@@ -88,6 +88,9 @@ resolve_gcp_credentials(BASE_DIR)
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB maximo por upload
 
+from werkzeug.middleware.proxy_fix import ProxyFix
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
 # ---------------------------------------------------------------------------
 # Logging HTTP y errores de servidor
 # ---------------------------------------------------------------------------
@@ -581,7 +584,8 @@ def _safe_next_url(next_url: str | None) -> str:
 
 def _login_required_response(message: str):
     session.clear()
-    login_url = url_for("login", next=request.full_path if request.query_string else request.path)
+    _next = request.script_root + (request.full_path if request.query_string else request.path)
+    login_url = url_for("login", next=_next)
     if request.path.startswith("/api/"):
         return jsonify({"error": message, "login_url": url_for("login")}), 401
     return redirect(login_url)

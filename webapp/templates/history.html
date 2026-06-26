@@ -83,7 +83,7 @@ async function loadOutputList() {
   const listEl = document.getElementById('output-list');
   listEl.innerHTML = '<div class="text-secondary small"><div class="spinner-border spinner-border-sm me-2"></div>Cargando...</div>';
   try {
-    _outputs = await fetch('/api/outputs').then(r => r.json());
+    _outputs = await fetch(APP_BASE + '/api/outputs').then(r => r.json());
     if (!Array.isArray(_outputs) || !_outputs.length) {
       listEl.innerHTML = '<div class="text-secondary small">No hay archivos de resultados.</div>';
       return;
@@ -117,7 +117,7 @@ async function selectOutput(name) {
   const panel = document.getElementById('detail-panel');
   panel.innerHTML = '<div class="text-secondary small text-center py-4"><div class="spinner-border spinner-border-sm me-2"></div>Calculando metricas...</div>';
   try {
-    const stats = await fetch(`/api/outputs/${encodeURIComponent(name)}/stats`).then(r => r.json());
+    const stats = await fetch(`${APP_BASE}/api/outputs/${encodeURIComponent(name)}/stats`).then(r => r.json());
     if (stats.error) throw new Error(stats.error);
     panel.innerHTML = renderDetail(name, stats);
   } catch(e) {
@@ -300,7 +300,7 @@ function renderDetail(name, s) {
         <div class="text-secondary small">${escapeHtml(s.source_file || name)}</div>
       </div>
       <div class="d-flex gap-2">
-        <a href="/outputs/${encodeURIComponent(name)}" class="btn btn-sm btn-outline-secondary" download>
+        <a href="${APP_BASE}/outputs/${encodeURIComponent(name)}" class="btn btn-sm btn-outline-secondary" download>
           <i class="bi bi-filetype-csv me-1"></i>CSV
         </a>
         <a href="${downloadJsonUrl}" download="${escapeHtml(name.replace('.csv',''))}_summary.json"

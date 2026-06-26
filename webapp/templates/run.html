@@ -540,7 +540,7 @@ function updateLimitExplanation() {
 
 // ---------- punto de control ----------
 async function loadCheckpoint() {
-  const cp = await fetch('/api/checkpoint/status').then(r => r.json());
+  const cp = await fetch(APP_BASE + '/api/checkpoint/status').then(r => r.json());
   const area = document.getElementById('checkpoint-area');
   const runState = cp.run_state;
 
@@ -604,7 +604,7 @@ async function loadCheckpoint() {
 
 async function clearCheckpoint() {
   if (!confirm('Limpiar el punto de control? Se perdera el progreso guardado.')) return;
-  await fetch('/api/checkpoint/clear', {method: 'POST'});
+  await fetch(APP_BASE + '/api/checkpoint/clear', {method: 'POST'});
   await loadCheckpoint();
   showToast('Punto de control limpiado');
 }
@@ -630,9 +630,9 @@ function datasetSummaryText(dataset = {}, runState = null) {
 async function loadConfigSummary() {
   try {
     const [cfg, cp, hw] = await Promise.all([
-      fetch('/api/config').then(r => r.json()),
-      fetch('/api/checkpoint/status').then(r => r.json()).catch(() => ({})),
-      fetch('/api/local/hardware').then(r => r.json()).catch(() => null),
+      fetch(APP_BASE + '/api/config').then(r => r.json()),
+      fetch(APP_BASE + '/api/checkpoint/status').then(r => r.json()).catch(() => ({})),
+      fetch(APP_BASE + '/api/local/hardware').then(r => r.json()).catch(() => null),
     ]);
     hwProfile = hw;
     allArbiterConfigs = {};
@@ -692,7 +692,7 @@ function hwBadge(arbId) {
 
 // ---------- resultados ----------
 async function loadOutputs() {
-  const files = await fetch('/api/outputs').then(r => r.json());
+  const files = await fetch(APP_BASE + '/api/outputs').then(r => r.json());
   const el = document.getElementById('outputs-table');
   if (!files.length) {
     el.innerHTML = '<span class="text-secondary small">Sin resultados todavia.</span>';
@@ -711,7 +711,7 @@ async function loadOutputs() {
       <tbody>${files.map(f => `
         <tr>
           <td class="text-truncate" style="max-width:260px">
-            <a href="/outputs/${encodeURIComponent(f.name)}" target="_blank" style="color:#34d399;text-decoration:none;font-weight:600" title="Abrir CSV">
+            <a href="${APP_BASE}/outputs/${encodeURIComponent(f.name)}" target="_blank" style="color:#34d399;text-decoration:none;font-weight:600" title="Abrir CSV">
               <i class="bi bi-filetype-csv me-1"></i>${escapeHtml(f.name)}
             </a>
           </td>
@@ -740,7 +740,7 @@ async function deleteOutput(name) {
   const decoded = decodeURIComponent(name);
   if (!confirm(`Eliminar el archivo "${decoded}"?`)) return;
   try {
-    const r = await fetch(`/api/outputs/${name}`, { method: 'DELETE' });
+    const r = await fetch(`${APP_BASE}/api/outputs/${name}`, { method: 'DELETE' });
     if (!r.ok) { const e = await r.json(); throw new Error(e.error); }
     showToast(`Archivo "${decoded}" eliminado`, 'success');
     await loadOutputs();
@@ -750,7 +750,7 @@ async function deleteOutput(name) {
 }
 
 async function loadFailedQueue() {
-  const items = await fetch('/api/failed-queue').then(r => r.json()).catch(() => []);
+  const items = await fetch(APP_BASE + '/api/failed-queue').then(r => r.json()).catch(() => []);
   queuedClaims = items.map(item => ({
     claim: item.index,
     arbiter: 'cola persistida',
@@ -794,7 +794,7 @@ async function startRun() {
 
   let res, data;
   try {
-    res = await fetch('/api/run/start', {
+    res = await fetch(APP_BASE + '/api/run/start', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(body),
@@ -834,7 +834,7 @@ async function startRun() {
 }
 
 async function stopRun() {
-  const res = await fetch('/api/run/stop', {method: 'POST'});
+  const res = await fetch(APP_BASE + '/api/run/stop', {method: 'POST'});
   const data = await res.json();
   if (!res.ok) { showToast(data.error || 'Error al detener', 'error'); return; }
   showToast('Proceso detenido', 'warn');
@@ -900,7 +900,7 @@ async function syncRunSnapshot() {
   if (runSyncBusy) return null;
   runSyncBusy = true;
   try {
-    const res = await fetch(`/api/run/snapshot?since=${runSyncSeq}`);
+    const res = await fetch(`${APP_BASE}/api/run/snapshot?since=${runSyncSeq}`);
     if (!res.ok) return null;
     const snapshot = await res.json();
     applyRunSnapshot(snapshot);
@@ -1156,7 +1156,7 @@ function updateCharts(data) {
 
 async function loadPrincipleCounts() {
   try {
-    const data = await fetch('/api/run/principle-counts').then(r => r.json());
+    const data = await fetch(APP_BASE + '/api/run/principle-counts').then(r => r.json());
     const processed = latestLiveStats?.processed_rows || 0;
     if (!data.ok || !chartPrinciples) {
       showChartOverlay('principles', checkpointPendingMsg(processed));
@@ -1187,7 +1187,7 @@ async function archiveAllOutputs() {
   const btn = document.getElementById('btn-archive');
   if (btn) btn.disabled = true;
   try {
-    const res  = await fetch('/api/outputs/archive-all', { method: 'POST' });
+    const res  = await fetch(APP_BASE + '/api/outputs/archive-all', { method: 'POST' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al archivar');
     if (data.archived === 0) {
@@ -2193,7 +2193,7 @@ async function loadRunStats(keepPosition = false) {
     limit: resultPageLimitParam(),
     offset: String(resultsOffset),
   });
-  const res = await fetch(`/api/run/stats?${params.toString()}`);
+  const res = await fetch(`${APP_BASE}/api/run/stats?${params.toString()}`);
   if (!res.ok) return;
   const data = await res.json();
   if (data.error) return;

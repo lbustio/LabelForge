@@ -169,7 +169,7 @@ function showArbiterModal(arb) {
   document.getElementById('arbModalDeleteBtn').onclick = async () => {
     if (!confirm(`Eliminar arbitro "${arb.name}"?`)) return;
     try {
-      const r = await fetch(`/api/arbiters/${encodeURIComponent(arb.id)}`, { method: 'DELETE' });
+      const r = await fetch(`${APP_BASE}/api/arbiters/${encodeURIComponent(arb.id)}`, { method: 'DELETE' });
       if (!r.ok) { const e = await r.json(); throw new Error(e.error); }
       showToast(`Arbitro "${arb.name}" eliminado`, 'success');
       bootstrap.Modal.getInstance(document.getElementById('arbiterModal')).hide();
@@ -209,7 +209,7 @@ function showOutputModal(out) {
   document.getElementById('outModalDeleteBtn').onclick = async () => {
     if (!confirm(`Eliminar resultado "${out.name}"?`)) return;
     try {
-      const r = await fetch(`/api/outputs/${encodeURIComponent(out.name)}`, { method: 'DELETE' });
+      const r = await fetch(`${APP_BASE}/api/outputs/${encodeURIComponent(out.name)}`, { method: 'DELETE' });
       if (!r.ok) { const e = await r.json(); throw new Error(e.error); }
       showToast(`Resultado "${out.name}" eliminado`, 'success');
       bootstrap.Modal.getInstance(document.getElementById('outputModal')).hide();
@@ -228,9 +228,9 @@ let _outputsData = [];
 
 function loadDashboard() {
   Promise.all([
-    fetch('/api/config').then(r => r.json()),
-    fetch('/api/outputs').then(r => r.json()),
-    fetch('/api/checkpoint/status').then(r => r.json()),
+    fetch(APP_BASE + '/api/config').then(r => r.json()),
+    fetch(APP_BASE + '/api/outputs').then(r => r.json()),
+    fetch(APP_BASE + '/api/checkpoint/status').then(r => r.json()),
   ]).then(([cfg, outputs, cp]) => {
     _arbitersData = cfg.arbiters;
     _outputsData = outputs;

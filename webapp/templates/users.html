@@ -113,7 +113,7 @@ function renderUsers() {
 }
 
 async function loadUsers() {
-  users = await fetch('/api/users').then(r => r.json());
+  users = await fetch(APP_BASE + '/api/users').then(r => r.json());
   renderUsers();
 }
 
@@ -124,7 +124,7 @@ document.getElementById('create-user-form').addEventListener('submit', async (ev
     email: document.getElementById('new-email').value.trim(),
     password: document.getElementById('new-password').value,
   };
-  const res = await fetch('/api/users', {
+  const res = await fetch(APP_BASE + '/api/users', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(payload),
@@ -149,7 +149,7 @@ async function editUser(id) {
   if (email === null) return;
   const password = prompt('Nueva contrasena temporal (deja vacio para no cambiar):', '');
   if (password === null) return;
-  const res = await fetch(`/api/users/${id}`, {
+  const res = await fetch(`${APP_BASE}/api/users/${id}`, {
     method: 'PUT',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({username, email, password, active: u.active}),
@@ -166,7 +166,7 @@ async function editUser(id) {
 async function transferAdmin(id) {
   const u = users.find(x => x.id === id);
   if (!u || !confirm(`Transferir admin a ${u.username}? Tu cuenta pasara a user.`)) return;
-  const res = await fetch(`/api/users/${id}/transfer-admin`, {method: 'POST'});
+  const res = await fetch(`${APP_BASE}/api/users/${id}/transfer-admin`, {method: 'POST'});
   const data = await res.json();
   if (!res.ok) {
     showToast(data.error || 'No se pudo transferir admin', 'error');
@@ -179,7 +179,7 @@ async function transferAdmin(id) {
 async function disableUser(id) {
   const u = users.find(x => x.id === id);
   if (!u || !confirm(`Desactivar usuario ${u.username}?`)) return;
-  const res = await fetch(`/api/users/${id}`, {method: 'DELETE'});
+  const res = await fetch(`${APP_BASE}/api/users/${id}`, {method: 'DELETE'});
   const data = await res.json();
   if (!res.ok) {
     showToast(data.error || 'No se pudo desactivar', 'error');

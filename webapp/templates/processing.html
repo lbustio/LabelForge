@@ -365,8 +365,8 @@ function initProcessingHelpPopovers() {
 
 async function loadProcessing() {
   const [data, limits] = await Promise.all([
-    fetch('/api/processing').then(r => r.json()),
-    fetch('/api/rate-limits/summary?tier=free').then(r => r.json()).catch(() => null),
+    fetch(APP_BASE + '/api/processing').then(r => r.json()),
+    fetch(APP_BASE + '/api/rate-limits/summary?tier=free').then(r => r.json()).catch(() => null),
   ]);
   FIELDS.forEach(f => {
     const el = document.getElementById(f);
@@ -421,7 +421,7 @@ async function saveProcessing(e) {
     const el = document.getElementById(f);
     if (el) payload[f] = el.value;
   });
-  const res = await fetch('/api/processing', {
+  const res = await fetch(APP_BASE + '/api/processing', {
     method: 'PUT', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(payload),
   });
@@ -537,7 +537,7 @@ async function uploadAndInspect(file) {
   formData.append('file', file);
 
   try {
-    const res = await fetch('/api/dataset/upload', { method: 'POST', body: formData });
+    const res = await fetch(APP_BASE + '/api/dataset/upload', { method: 'POST', body: formData });
     const data = await res.json();
     if (!res.ok) {
       setUploadStatus('', false);
@@ -583,7 +583,7 @@ async function onSheetChange() {
   const sheet = document.getElementById('ds-sheet').value;
   if (!_currentServerPath) return;
   try {
-    const res = await fetch('/api/dataset/inspect', {
+    const res = await fetch(APP_BASE + '/api/dataset/inspect', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({file: _currentServerPath, sheet}),
@@ -610,7 +610,7 @@ async function saveDatasetConfig() {
   if (!inputFile) { showToast('Primero selecciona un archivo', 'error'); return; }
   if (!textColumn) { showToast('Selecciona la columna de texto', 'error'); return; }
 
-  const res = await fetch('/api/dataset/config', {
+  const res = await fetch(APP_BASE + '/api/dataset/config', {
     method: 'PUT',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({input_file: inputFile, sheet, text_column: textColumn}),
@@ -626,7 +626,7 @@ async function saveDatasetConfig() {
 /* --- Cargar configuracion existente ------------------------------------ */
 async function loadDatasetConfig() {
   try {
-    const res = await fetch('/api/dataset/config');
+    const res = await fetch(APP_BASE + '/api/dataset/config');
     const data = await res.json();
     if (!res.ok || !data.input_file) return;
     _savedDatasetConfig = data;
@@ -635,7 +635,7 @@ async function loadDatasetConfig() {
     renderDatasetReady(data);
 
     // Intenta inspeccionar el archivo ya configurado para mostrar informacion.
-    const res2 = await fetch('/api/dataset/inspect', {
+    const res2 = await fetch(APP_BASE + '/api/dataset/inspect', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({file: data.input_file, sheet: data.sheet || ''}),

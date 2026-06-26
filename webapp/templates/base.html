@@ -295,30 +295,30 @@
     <img src="{{ url_for('static', filename='logo-cropped.png') }}" alt="LabelForge">
   </div>
   <ul class="nav flex-column mt-2">
-    <li><a href="/" class="nav-link nav-home {% if request.path == '/' %}active{% endif %}">
+    <li><a href="{{ url_for('index') }}" class="nav-link nav-home {% if request.path == '/' %}active{% endif %}">
       <i class="bi bi-house"></i> Inicio
     </a></li>
     {% if current_user %}
-    <li><a href="/history" class="nav-link {% if request.path == '/history' %}active{% endif %}">
+    <li><a href="{{ url_for('page_history') }}" class="nav-link {% if request.path == '/history' %}active{% endif %}">
       <i class="bi bi-clock-history"></i> Historial
     </a></li>
     {% endif %}
     {% if current_user and current_user.role == 'admin' %}
-    <li><a href="/arbiters" class="nav-link nav-arbiters {% if request.path == '/arbiters' %}active{% endif %}">
+    <li><a href="{{ url_for('page_arbiters') }}" class="nav-link nav-arbiters {% if request.path == '/arbiters' %}active{% endif %}">
       <i class="bi bi-people"></i> Arbitros
     </a></li>
-    <li><a href="/principles" class="nav-link nav-principles {% if request.path == '/principles' %}active{% endif %}">
+    <li><a href="{{ url_for('page_principles') }}" class="nav-link nav-principles {% if request.path == '/principles' %}active{% endif %}">
       <i class="bi bi-tags"></i> Principios
     </a></li>
-    <li><a href="/processing" class="nav-link nav-processing {% if request.path == '/processing' %}active{% endif %}">
+    <li><a href="{{ url_for('page_processing') }}" class="nav-link nav-processing {% if request.path == '/processing' %}active{% endif %}">
       <i class="bi bi-sliders"></i> Procesamiento
     </a></li>
     {% endif %}
     {% if current_user and current_user.role == 'admin' %}
-    <li><a href="/run" class="nav-link nav-run {% if request.path == '/run' %}active{% endif %}">
+    <li><a href="{{ url_for('page_run') }}" class="nav-link nav-run {% if request.path == '/run' %}active{% endif %}">
       <i class="bi bi-play-circle"></i> Ejecutar
     </a></li>
-    <li><a href="/users" class="nav-link nav-arbiters {% if request.path == '/users' %}active{% endif %}">
+    <li><a href="{{ url_for('page_users') }}" class="nav-link nav-arbiters {% if request.path == '/users' %}active{% endif %}">
       <i class="bi bi-person-gear"></i> Usuarios
     </a></li>
     {% endif %}
@@ -343,10 +343,10 @@
         <div class="small text-secondary text-truncate">{{ current_user.role }}</div>
       </div>
     </div>
-    <a href="/profile" class="btn btn-sm btn-outline-secondary w-100">
+    <a href="{{ url_for('page_profile') }}" class="btn btn-sm btn-outline-secondary w-100">
       <i class="bi bi-person-circle"></i> Perfil
     </a>
-    <form method="post" action="/logout" class="mt-2">
+    <form method="post" action="{{ url_for('logout') }}" class="mt-2">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button type="submit" class="btn btn-sm btn-outline-secondary w-100">
         <i class="bi bi-box-arrow-right"></i> Salir
@@ -372,6 +372,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+const APP_BASE = {{ request.script_root | tojson }};
 const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.content || '';
 window.addEventListener('pageshow', (event) => {
   if (event.persisted) {

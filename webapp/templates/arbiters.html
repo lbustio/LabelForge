@@ -612,7 +612,7 @@ async function loadModels() {
   if (location)  payload.location    = location;
 
   try {
-    const res  = await fetch('/api/models', {
+    const res  = await fetch(APP_BASE + '/api/models', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -666,7 +666,7 @@ async function verifyProviderKey() {
     <div class="spinner-border spinner-border-sm me-2"></div>Verificando clave y cargando modelos...
   </div>`;
 
-  const res = await fetch('/api/provider-key', {
+  const res = await fetch(APP_BASE + '/api/provider-key', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
@@ -822,9 +822,9 @@ async function loadRateLimitInfo() {
 // ---------------------------------------------------------------------------
 async function loadArbiters() {
   [arbiters, localHardwareProfile] = await Promise.all([
-    fetch('/api/arbiters').then(r => r.json()),
-    fetch('/api/local/hardware').then(r => r.json()).catch(() => null),
-    fetch('/api/config').then(r => r.json()).then(cfg => {
+    fetch(APP_BASE + '/api/arbiters').then(r => r.json()),
+    fetch(APP_BASE + '/api/local/hardware').then(r => r.json()).catch(() => null),
+    fetch(APP_BASE + '/api/config').then(r => r.json()).then(cfg => {
       maxArbiters = cfg.safety?.max_arbiters || 10;
     }),
   ]);
@@ -839,7 +839,7 @@ async function loadArbiterPreflight(shouldRender = true) {
   const body = document.getElementById('preflight-body');
   if (spinner) spinner.style.display = '';
   try {
-    const data = await fetch('/api/arbiters/preflight').then(r => r.json());
+    const data = await fetch(APP_BASE + '/api/arbiters/preflight').then(r => r.json());
     preflightIssues = data.issues || [];
     preflightByArbiter = {};
     (data.arbiters || []).forEach(s => { preflightByArbiter[s.id] = s; });
@@ -1102,7 +1102,7 @@ function askDelete(id, name) {
   bootstrap.Modal.getOrCreateInstance(document.getElementById('deleteModal')).show();
 }
 async function confirmDelete() {
-  const res  = await fetch(`/api/arbiters/${pendingDeleteId}`, {method:'DELETE'});
+  const res  = await fetch(`${APP_BASE}/api/arbiters/${pendingDeleteId}`, {method:'DELETE'});
   const data = await res.json();
   bootstrap.Modal.getOrCreateInstance(document.getElementById('deleteModal')).hide();
   if (!res.ok) { showToast(data.error || 'Error', 'error'); return; }
@@ -1184,7 +1184,7 @@ async function exportArbiters(btn) {
   }
 
   try {
-    const res = await fetch('/api/arbiters/export', {
+    const res = await fetch(APP_BASE + '/api/arbiters/export', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({password}),
@@ -1244,7 +1244,7 @@ async function importArbiters() {
   form.append('password', password);
   form.append('mode', mode);
 
-  const res = await fetch('/api/arbiters/import', {method: 'POST', body: form});
+  const res = await fetch(APP_BASE + '/api/arbiters/import', {method: 'POST', body: form});
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     showToast(data.error || 'Error al importar', 'error');
@@ -1395,7 +1395,7 @@ async function openDownloadModal() {
 
   const hwBody = document.getElementById('hw-info-body');
   try {
-    const hw = await fetch('/api/local/hardware').then(r => r.json());
+    const hw = await fetch(APP_BASE + '/api/local/hardware').then(r => r.json());
     if (!hw || !hw.os) {
       hwBody.innerHTML = '<span class="text-warning">No se encontro hw_profile.json. Ejecuta <code>python setup_env.py</code> primero.</span>';
     } else {
@@ -1426,7 +1426,7 @@ async function loadCachedModels() {
   if (!listEl) return;
   listEl.innerHTML = '<div class="text-secondary small"><div class="spinner-border spinner-border-sm me-2"></div>Cargando...</div>';
   try {
-    const models = await fetch('/api/local/cached').then(r => r.json());
+    const models = await fetch(APP_BASE + '/api/local/cached').then(r => r.json());
     if (models.error) throw new Error(models.error);
     listEl.innerHTML = models.length
       ? models.map(m => ggufCard(m, 'cached')).join('')
@@ -1441,7 +1441,7 @@ async function loadArchivedModels() {
   if (!listEl) return;
   listEl.innerHTML = '<div class="text-secondary small"><div class="spinner-border spinner-border-sm me-2"></div>Cargando...</div>';
   try {
-    const models = await fetch('/api/local/archive').then(r => r.json());
+    const models = await fetch(APP_BASE + '/api/local/archive').then(r => r.json());
     if (models.error) throw new Error(models.error);
     listEl.innerHTML = models.length
       ? models.map(m => ggufCard(m, 'archived', {border: '#3a3520'})).join('')
@@ -1455,7 +1455,7 @@ async function deleteModel(filename, btn) {
   if (!confirm(`Eliminar ${filename}?`)) return;
   btn.disabled = true;
   try {
-    const res = await fetch(`/api/local/model/${encodeURIComponent(filename)}`, {method: 'DELETE'});
+    const res = await fetch(`${APP_BASE}/api/local/model/${encodeURIComponent(filename)}`, {method: 'DELETE'});
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al eliminar');
     await Promise.all([loadCachedModels(), loadModels(), loadRecommended(false)]);
@@ -1468,7 +1468,7 @@ async function deleteModel(filename, btn) {
 async function archiveModel(filename, btn) {
   btn.disabled = true;
   try {
-    const res = await fetch(`/api/local/model/${encodeURIComponent(filename)}/archive`, {method: 'POST'});
+    const res = await fetch(`${APP_BASE}/api/local/model/${encodeURIComponent(filename)}/archive`, {method: 'POST'});
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al guardar');
     await Promise.all([loadCachedModels(), loadArchivedModels(), loadModels(), loadRecommended(false)]);
@@ -1487,7 +1487,7 @@ async function moveModel(filename, btn) {
   btn.disabled = true;
   ggufSetStatus(filename, 'canceling', 25, `<i class="bi bi-folder-symlink me-1"></i>Moviendo a ${escapeHtml(destinationDir)}...`);
   try {
-    const res = await fetch(`/api/local/model/${encodeURIComponent(filename)}/move`, {
+    const res = await fetch(`${APP_BASE}/api/local/model/${encodeURIComponent(filename)}/move`, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({destination_dir: destinationDir}),
@@ -1505,7 +1505,7 @@ async function moveModel(filename, btn) {
 async function restoreModel(filename, btn) {
   btn.disabled = true;
   try {
-    const res = await fetch(`/api/local/archive/${encodeURIComponent(filename)}/restore`, {method: 'POST'});
+    const res = await fetch(`${APP_BASE}/api/local/archive/${encodeURIComponent(filename)}/restore`, {method: 'POST'});
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al cargar');
     await Promise.all([loadCachedModels(), loadArchivedModels(), loadModels(), loadRecommended(false)]);
@@ -1520,7 +1520,7 @@ async function loadExternalModels() {
   if (!listEl) return;
   listEl.innerHTML = '<div class="text-secondary small"><div class="spinner-border spinner-border-sm me-2"></div>Cargando...</div>';
   try {
-    const models = await fetch('/api/local/external').then(r => r.json());
+    const models = await fetch(APP_BASE + '/api/local/external').then(r => r.json());
     if (models.error) throw new Error(models.error);
     listEl.innerHTML = models.length
       ? models.map(m => ggufCard(m, 'external', {border: '#2d3a3a'})).join('')
@@ -1533,7 +1533,7 @@ async function loadExternalModels() {
 async function restoreExternalModel(filename, btn) {
   btn.disabled = true;
   try {
-    const res = await fetch(`/api/local/external/${encodeURIComponent(filename)}/restore`, {method: 'POST'});
+    const res = await fetch(`${APP_BASE}/api/local/external/${encodeURIComponent(filename)}/restore`, {method: 'POST'});
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al restaurar');
     await Promise.all([loadCachedModels(), loadExternalModels(), loadModels(), loadRecommended(false)]);
@@ -1547,7 +1547,7 @@ async function unregisterExternalModel(filename, btn) {
   if (!confirm(`Quitar "${filename}" del registro? El archivo no se elimina.`)) return;
   btn.disabled = true;
   try {
-    const res = await fetch(`/api/local/external/${encodeURIComponent(filename)}`, {method: 'DELETE'});
+    const res = await fetch(`${APP_BASE}/api/local/external/${encodeURIComponent(filename)}`, {method: 'DELETE'});
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al desregistrar');
     await Promise.all([loadExternalModels(), loadRecommended(false)]);
@@ -1561,7 +1561,7 @@ async function deleteArchivedModel(filename, btn) {
   if (!confirm(`Eliminar definitivamente ${filename}?`)) return;
   btn.disabled = true;
   try {
-    const res = await fetch(`/api/local/archive/${encodeURIComponent(filename)}`, {method: 'DELETE'});
+    const res = await fetch(`${APP_BASE}/api/local/archive/${encodeURIComponent(filename)}`, {method: 'DELETE'});
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al eliminar');
     await Promise.all([loadArchivedModels(), loadRecommended(false)]);
@@ -1662,7 +1662,7 @@ async function startDownload(repoId, filename, btn, description = '') {
   ggufSetStatus(filename, 'downloading', 5, `Iniciando descarga de ${escapeHtml(filename)}...`);
 
   try {
-    const res = await fetch('/api/local/download', {
+    const res = await fetch(APP_BASE + '/api/local/download', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({repo_id: repoId, filename, description}),
@@ -1677,7 +1677,7 @@ async function startDownload(repoId, filename, btn, description = '') {
     btn.innerHTML = '<i class="bi bi-x-circle me-1"></i>Cancelar';
     btn.onclick = () => cancelDownload(data.job_id, filename, btn);
 
-    const es = new EventSource(`/api/local/download/${data.job_id}`);
+    const es = new EventSource(`${APP_BASE}/api/local/download/${data.job_id}`);
     es.onmessage = (e) => {
       const d = JSON.parse(e.data);
       if (d.status === 'done') {
@@ -1726,7 +1726,7 @@ async function cancelDownload(jobId, filename, btn) {
   btn.disabled = true;
   ggufSetStatus(filename, 'canceling', 100, `Cancelando ${escapeHtml(filename)}...`);
   try {
-    const res = await fetch(`/api/local/download/${encodeURIComponent(jobId)}/cancel`, {method: 'POST'});
+    const res = await fetch(`${APP_BASE}/api/local/download/${encodeURIComponent(jobId)}/cancel`, {method: 'POST'});
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al cancelar');
   } catch(e) {

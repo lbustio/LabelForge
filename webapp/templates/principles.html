@@ -116,9 +116,9 @@ let arbiters = [];
 
 async function loadAll() {
   const [pr, pt, arbs] = await Promise.all([
-    fetch('/api/principles').then(r => r.json()),
-    fetch('/api/prompt-template').then(r => r.json()),
-    fetch('/api/arbiters').then(r => r.json()),
+    fetch(APP_BASE + '/api/principles').then(r => r.json()),
+    fetch(APP_BASE + '/api/prompt-template').then(r => r.json()),
+    fetch(APP_BASE + '/api/arbiters').then(r => r.json()),
   ]);
   principles = pr;
   arbiters = arbs;
@@ -176,7 +176,7 @@ async function savePrinciples() {
   if (!Object.keys(updated).length) {
     showToast('Debe haber al menos un principio', 'error'); return;
   }
-  const res = await fetch('/api/principles', {
+  const res = await fetch(APP_BASE + '/api/principles', {
     method: 'PUT', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(updated),
   });
@@ -191,7 +191,7 @@ async function savePrinciples() {
 async function savePromptTemplate() {
   const template = document.getElementById('prompt-template').value;
   const includeJustifications = document.getElementById('include-justifications').checked;
-  const res = await fetch('/api/prompt-template', {
+  const res = await fetch(APP_BASE + '/api/prompt-template', {
     method: 'PUT', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
       user_prompt_template: template,

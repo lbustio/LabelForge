@@ -63,7 +63,7 @@ function avatarSrc(user) {
 }
 
 async function loadProfile() {
-  const user = await fetch('/api/profile').then(r => r.json());
+  const user = await fetch(APP_BASE + '/api/profile').then(r => r.json());
   currentProfile = user;
   document.getElementById('profile-username').value = user.username || '';
   document.getElementById('profile-email').value = user.email || '';
@@ -80,7 +80,7 @@ document.getElementById('profile-form').addEventListener('submit', async (ev) =>
     current_password: document.getElementById('profile-current-password').value,
     new_password: document.getElementById('profile-new-password').value,
   };
-  const res = await fetch('/api/profile', {
+  const res = await fetch(APP_BASE + '/api/profile', {
     method: 'PUT',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(payload),
@@ -105,7 +105,7 @@ document.getElementById('avatar-form').addEventListener('submit', async (ev) => 
   }
   const form = new FormData();
   form.append('avatar', input.files[0]);
-  const res = await fetch('/api/profile/avatar', {method: 'POST', body: form});
+  const res = await fetch(APP_BASE + '/api/profile/avatar', {method: 'POST', body: form});
   const data = await res.json();
   if (!res.ok) {
     showToast(data.error || 'No se pudo subir imagen', 'error');
