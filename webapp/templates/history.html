@@ -76,6 +76,7 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
 }
 
+const IS_ADMIN = {{ 'true' if current_user and current_user.role == 'admin' else 'false' }};
 let _outputs = [];
 let _selectedName = null;
 
@@ -98,6 +99,15 @@ async function loadOutputList() {
   }
 }
 
+function ownerBadge(owner) {
+  if (!IS_ADMIN || !owner) return '';
+  const name = owner.username || owner.email || '?';
+  const avatar = owner.avatar_url
+    ? `<img src="${APP_BASE}${escapeHtml(owner.avatar_url)}" style="width:14px;height:14px;border-radius:50%;object-fit:cover;margin-right:3px" onerror="this.style.display='none'">`
+    : `<i class="bi bi-person-fill me-1" style="font-size:.65rem"></i>`;
+  return `<span style="display:inline-flex;align-items:center;background:#1e2540;border:1px solid #2d3a5a;border-radius:.3rem;padding:.05rem .35rem;font-size:.65rem;color:#8899cc">${avatar}${escapeHtml(name)}</span>`;
+}
+
 function outputCard(o) {
   const ts = o.run_timestamp || o.modified || o.name;
   const rows = o.row_count != null ? `${o.row_count} entradas` : '';
@@ -105,7 +115,10 @@ function outputCard(o) {
   const prins = (o.principles || []).length ? `${o.principles.length} princ.` : '';
   const chips = [rows, arbs, prins].filter(Boolean).join(' · ');
   return `<div class="output-card" data-name="${escapeHtml(o.name)}" onclick="selectOutput(this.dataset.name)">
-    <div class="fw-semibold small mb-1" style="color:#c8d0e8">${escapeHtml(ts)}</div>
+    <div class="d-flex align-items-start justify-content-between gap-1 mb-1">
+      <div class="fw-semibold small" style="color:#c8d0e8">${escapeHtml(ts)}</div>
+      ${ownerBadge(o.owner)}
+    </div>
     <div class="text-secondary" style="font-size:.72rem">${escapeHtml(o.name)}</div>
     ${chips ? `<div class="mt-1" style="font-size:.7rem;color:#6a7a9a">${escapeHtml(chips)}</div>` : ''}
   </div>`;
@@ -119,7 +132,8 @@ async function selectOutput(name) {
   try {
     const stats = await fetch(`${APP_BASE}/api/outputs/${encodeURIComponent(name)}/stats`).then(r => r.json());
     if (stats.error) throw new Error(stats.error);
-    panel.innerHTML = renderDetail(name, stats);
+    const meta = _outputs.find(o => o.name === name) || {};
+    panel.innerHTML = renderDetail(name, stats, meta.owner);
   } catch(e) {
     panel.innerHTML = `<div class="text-danger small">${escapeHtml(e.message)}</div>`;
   }
@@ -137,7 +151,7 @@ function fmt(v, decimals = 1) {
   return typeof v === 'number' ? v.toFixed(decimals) : v;
 }
 
-function renderDetail(name, s) {
+function renderDetail(name, s, owner) {
   const ps = s.paper_summary || {};
   const ds = ps.dataset || {};
   const cq = ps.consensus_quality || {};
@@ -293,13 +307,18 @@ function renderDetail(name, s) {
       </div>
     </div>` : '';
 
+  const ownerLine = IS_ADMIN && owner
+    ? `<div class="mt-1 d-flex align-items-center gap-1">${ownerBadge(owner)}<span class="text-secondary" style="font-size:.7rem">${escapeHtml(owner.email || '')}</span></div>`
+    : '';
+
   return `
-    <div class="d-flex align-items-center justify-content-between mb-3">
+    <div class="d-flex align-items-start justify-content-between mb-3 gap-2">
       <div>
         <div class="fw-semibold" style="color:#c8d0e8">${escapeHtml(name)}</div>
         <div class="text-secondary small">${escapeHtml(s.source_file || name)}</div>
+        ${ownerLine}
       </div>
-      <div class="d-flex gap-2">
+      <div class="d-flex gap-2 flex-shrink-0">
         <a href="${APP_BASE}/outputs/${encodeURIComponent(name)}" class="btn btn-sm btn-outline-secondary" download>
           <i class="bi bi-filetype-csv me-1"></i>CSV
         </a>

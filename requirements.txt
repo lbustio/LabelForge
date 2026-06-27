@@ -27,6 +27,7 @@ psutil>=5.9.0
 
 # --- Web framework ---
 flask>=3.1.0
+waitress>=3.0.0
 
 # --- Cryptographic export/import (.lfarb) ---
 cryptography>=41.0.0

@@ -46,6 +46,42 @@
   </div>
 </div>
 
+<div class="modal fade" id="resetLinkModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content bg-dark text-light" style="border:1px solid #2d3148">
+      <div class="modal-header border-secondary">
+        <h5 class="modal-title"><i class="bi bi-key me-1"></i>Enlace de restablecimiento</h5>
+        <button class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body d-grid gap-3">
+        <div class="alert alert-warning py-2 mb-0 small">
+          <i class="bi bi-exclamation-triangle-fill me-1"></i>
+          Este enlace es de <strong>un solo uso</strong> y expira en <strong>1 hora</strong>.
+          Compártelo con el usuario de forma segura.
+        </div>
+        <div>
+          <label class="form-label small text-secondary">Enlace de reset</label>
+          <div class="input-group">
+            <input class="form-control form-control-sm font-monospace" id="resetLinkInput" readonly>
+            <button class="btn btn-outline-secondary btn-sm" onclick="copyResetLink()" title="Copiar">
+              <i class="bi bi-clipboard" id="resetLinkCopyIcon"></i>
+            </button>
+          </div>
+        </div>
+        <p class="text-secondary small mb-0">
+          El usuario visitará ese enlace, establecerá su nueva contraseña y su sesión actual será invalidada.
+        </p>
+      </div>
+      <div class="modal-footer border-secondary">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
 <script>
 let users = [];
 
@@ -90,7 +126,7 @@ function renderUsers() {
             <tr>
               <td>
                 <div class="d-flex align-items-center gap-2">
-                  ${u.avatar_url ? `<img src="${escapeHtml(u.avatar_url)}" alt="" style="width:32px;height:32px;border-radius:50%;object-fit:cover">` : '<span class="d-inline-flex align-items-center justify-content-center" style="width:32px;height:32px;border-radius:50%;background:#252b3d;color:#94a3b8"><i class="bi bi-person"></i></span>'}
+                  ${u.avatar_url ? `<img src="${escapeHtml(APP_BASE + u.avatar_url)}" alt="" style="width:32px;height:32px;border-radius:50%;object-fit:cover">` : '<span class="d-inline-flex align-items-center justify-content-center" style="width:32px;height:32px;border-radius:50%;background:#252b3d;color:#94a3b8"><i class="bi bi-person"></i></span>'}
                   <strong>${escapeHtml(u.username)}</strong>
                 </div>
               </td>
@@ -101,6 +137,7 @@ function renderUsers() {
               <td class="text-end">
                 <div class="btn-group btn-group-sm">
                   <button class="btn btn-outline-secondary" onclick="editUser(${u.id})" title="Editar"><i class="bi bi-pencil"></i></button>
+                  ${u.active ? `<button class="btn btn-outline-warning" onclick="generateResetLink(${u.id})" title="Generar enlace de reset"><i class="bi bi-key"></i></button>` : ''}
                   ${u.role !== 'admin' && u.active ? `<button class="btn btn-outline-info" onclick="transferAdmin(${u.id})" title="Transferir admin"><i class="bi bi-shield-check"></i></button>` : ''}
                   ${u.role !== 'admin' && u.active ? `<button class="btn btn-outline-danger" onclick="disableUser(${u.id})" title="Desactivar"><i class="bi bi-person-dash"></i></button>` : ''}
                 </div>
@@ -173,7 +210,7 @@ async function transferAdmin(id) {
     return;
   }
   showToast('Admin transferido');
-  setTimeout(() => window.location.href = '/profile', 700);
+  setTimeout(() => window.location.href = APP_BASE + '/profile', 700);
 }
 
 async function disableUser(id) {
@@ -187,6 +224,32 @@ async function disableUser(id) {
   }
   showToast('Usuario desactivado');
   await loadUsers();
+}
+
+async function generateResetLink(id) {
+  const u = users.find(x => x.id === id);
+  if (!u) return;
+  const res = await fetch(`${APP_BASE}/api/users/${id}/reset-link`, {
+    method: 'POST',
+    headers: {'X-CSRF-Token': CSRF_TOKEN},
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    showToast(data.error || 'No se pudo generar el enlace', 'error');
+    return;
+  }
+  document.getElementById('resetLinkInput').value = data.reset_url;
+  document.getElementById('resetLinkCopyIcon').className = 'bi bi-clipboard';
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('resetLinkModal')).show();
+}
+
+function copyResetLink() {
+  const input = document.getElementById('resetLinkInput');
+  navigator.clipboard.writeText(input.value).then(() => {
+    const icon = document.getElementById('resetLinkCopyIcon');
+    icon.className = 'bi bi-clipboard-check';
+    setTimeout(() => { icon.className = 'bi bi-clipboard'; }, 2000);
+  });
 }
 
 loadUsers();

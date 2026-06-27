@@ -1116,12 +1116,22 @@ def main():
     proc_cfg   = cfg["processing"]
     dataset_cfg = cfg.get("dataset", {})
 
-    # Jerarquia: CLI args > config > defaults
-    input_file  = args.input  or dataset_cfg.get("input_file") or str(
-        BASE_DIR / "data" / "all_datasets_en_es" / "all_datasets_en_es.csv"
-    )
+    # Jerarquia: CLI args > config (sin fallback a archivos hardcodeados)
+    input_file  = args.input  or dataset_cfg.get("input_file", "")
     sheet       = args.sheet  if args.sheet is not None else dataset_cfg.get("sheet", "")
-    text_column = args.column or dataset_cfg.get("text_column") or "claim"
+    text_column = args.column or dataset_cfg.get("text_column", "")
+    if not input_file:
+        log.error(
+            "No se especifico archivo de dataset. "
+            "Usa --input <archivo> o configura dataset.input_file en el config."
+        )
+        raise SystemExit(1)
+    if not text_column:
+        log.error(
+            "No se especifico columna de texto. "
+            "Usa --column <columna> o configura dataset.text_column en el config."
+        )
+        raise SystemExit(1)
 
     log.info("Leyendo dataset...")
     try:

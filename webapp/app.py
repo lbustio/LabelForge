@@ -3,6 +3,7 @@ app.py - Flask webapp para configurar y lanzar el proceso de etiquetado
 de principios de persuasion de Ana Ferreira.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -12,7 +13,7 @@ import sys
 import threading
 import time
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -50,6 +51,7 @@ from labelforge_core.dataset_io import (
     DatasetError,
     inspect_dataset,
     load_dataset,
+    profile_dataset,
     resolve_dataset_path,
 )
 from labelforge_core.run_reporting import (
@@ -58,11 +60,17 @@ from labelforge_core.run_reporting import (
     principle_counts_from_rows,
 )
 from labelforge_core.secrets_io import provider_api_key_env, resolve_gcp_credentials, secrets_env_path, set_secret_value
-from labelforge_core.rate_limits import compute_min_delay
+from labelforge_core.rate_limits import (
+    compute_min_delay,
+    get_defaults as _rl_get_defaults,
+    load_config as _rl_load_config,
+    save_config as _rl_save_config,
+)
 from labelforge_core.provider_preflight import validate_provider_preflight
 from labelforge_core.utils import safe_int as _safe_int
 from labelforge_core.paths import (
     ARBITERS_CONFIG_PATH,
+    BASE_DIR,
     CHECKPOINTS_DIR,
     CONFIG_DIR,
     DATA_DIR,
@@ -86,7 +94,7 @@ load_dotenv(SECRETS_ENV_PATH)
 resolve_gcp_credentials(BASE_DIR)
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB maximo por upload
+app.config["MAX_CONTENT_LENGTH"] = 300 * 1024 * 1024  # 300 MB maximo por upload
 
 from werkzeug.middleware.proxy_fix import ProxyFix
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
@@ -251,8 +259,8 @@ app.config.update(
     TEMPLATES_AUTO_RELOAD=True,
 )
 
-_AUTH_EXEMPT = frozenset({"/favicon.ico", "/login", "/logout"})
-_AUTH_EXEMPT_PREFIX = ("/static/", "/login/")
+_AUTH_EXEMPT = frozenset({"/favicon.ico", "/login", "/logout", "/forgot-password"})
+_AUTH_EXEMPT_PREFIX = ("/static/", "/login/", "/reset-password/")
 _CSRF_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _LOGIN_FAIL_WINDOW_SECONDS = 900
 _LOGIN_FAIL_MAX = 8
@@ -264,8 +272,11 @@ _ADMIN_API_EXACT = frozenset({
     "/api/provider-key",
     "/api/rate-limits",
     "/api/rate-limits/summary",
+    "/api/rate-limits/config",
+    "/api/rate-limits/config/defaults",
     "/api/dataset/config",
     "/api/dataset/inspect",
+    "/api/dataset/profile",
     "/api/dataset/upload",
     "/api/prompt-template",
     "/api/processing",
@@ -352,6 +363,18 @@ def _auth_db() -> sqlite3.Connection:
             run_id TEXT,
             user_id INTEGER NOT NULL,
             username TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+            token_hash TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            expires_at TEXT NOT NULL,
+            used INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(user_id) REFERENCES users(id)
         )
@@ -552,9 +575,52 @@ def _local_credentials_user(username: str, password: str) -> dict | None:
     return None
 
 
+_RESET_TOKEN_TTL_SECONDS = 3600
+
+
+def _generate_reset_token(user_id: int) -> str:
+    raw = _sec.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw.encode()).hexdigest()
+    expires_at = (datetime.now(timezone.utc) + timedelta(seconds=_RESET_TOKEN_TTL_SECONDS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with _auth_db() as conn:
+        conn.execute("DELETE FROM password_reset_tokens WHERE user_id = ? AND used = 0", (user_id,))
+        conn.execute(
+            "INSERT INTO password_reset_tokens (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
+            (token_hash, user_id, expires_at),
+        )
+        conn.commit()
+    return raw
+
+
+def _validate_reset_token(raw: str) -> tuple[dict | None, str]:
+    if not raw:
+        return None, "Enlace invalido."
+    token_hash = hashlib.sha256(raw.encode()).hexdigest()
+    with _auth_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM password_reset_tokens WHERE token_hash = ? AND used = 0",
+            (token_hash,),
+        ).fetchone()
+    if not row:
+        return None, "Enlace invalido o ya utilizado."
+    expires_at = datetime.fromisoformat(row["expires_at"].replace("Z", "+00:00"))
+    if datetime.now(timezone.utc) > expires_at:
+        return None, "El enlace ha expirado. Solicita uno nuevo al administrador."
+    user = _get_user_by_id(row["user_id"])
+    if not user or not user["active"]:
+        return None, "Usuario no encontrado o inactivo."
+    return user, ""
+
+
+def _consume_reset_token(raw: str) -> None:
+    token_hash = hashlib.sha256(raw.encode()).hexdigest()
+    with _auth_db() as conn:
+        conn.execute("UPDATE password_reset_tokens SET used = 1 WHERE token_hash = ?", (token_hash,))
+        conn.commit()
+
+
 def _set_session_user(user: dict) -> None:
     session.clear()
-    session.permanent = True
     session["user"] = user
     now = int(time.time())
     session["auth_at"] = now
@@ -971,6 +1037,63 @@ def api_users_disable(user_id: int):
         conn.commit()
     _log.info("user_disabled admin=%s user=%s", _session_user()["username"], user["username"])
     return jsonify({"ok": True})
+
+
+@app.route("/api/users/<int:user_id>/reset-link", methods=["POST"])
+def api_users_reset_link(user_id: int):
+    denied = _require_admin()
+    if denied:
+        return denied
+    user = _get_user_by_id(user_id)
+    if not user or not user["active"]:
+        return jsonify({"error": "Usuario no encontrado o inactivo."}), 404
+    raw = _generate_reset_token(user_id)
+    reset_url = url_for("page_reset_password", token=raw, _external=True)
+    _log.info("reset_link_generated admin=%s target=%s", _session_user()["username"], user["username"])
+    return jsonify({"reset_url": reset_url})
+
+
+@app.route("/forgot-password")
+def page_forgot_password():
+    return render_template("forgot_password.html")
+
+
+@app.route("/reset-password/<token>", methods=["GET", "POST"])
+def page_reset_password(token: str):
+    user, token_error = _validate_reset_token(token)
+    error = ""
+    success = False
+    if user and request.method == "POST":
+        provided_csrf = request.form.get("csrf_token", "")
+        if not provided_csrf or not _sec.compare_digest(provided_csrf, _csrf_token()):
+            error = "Sesion expirada. Recarga la pagina."
+        else:
+            password = request.form.get("password", "")
+            confirm = request.form.get("password_confirm", "")
+            if password != confirm:
+                error = "Las contrasenas no coinciden."
+            else:
+                ok, pw_error = _validate_password_strength(password)
+                if not ok:
+                    error = pw_error
+                else:
+                    with _auth_db() as conn:
+                        conn.execute(
+                            "UPDATE users SET password_hash = ?, session_version = lower(hex(randomblob(16))), updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                            (generate_password_hash(password), user["id"]),
+                        )
+                        conn.commit()
+                    _consume_reset_token(token)
+                    _log.info("password_reset_completed user=%s", user["username"])
+                    success = True
+    return render_template(
+        "reset_password.html",
+        token=token,
+        reset_user=user,
+        token_error=token_error,
+        error=error,
+        success=success,
+    )
 
 
 @app.context_processor
@@ -1825,6 +1948,33 @@ def api_rate_limits_summary():
     })
 
 
+@app.route("/api/rate-limits/config", methods=["GET"])
+def api_rate_limits_config_get():
+    """Retorna la configuracion de rate limits desde config/rate_limits.json."""
+    return jsonify(_rl_load_config())
+
+
+@app.route("/api/rate-limits/config", methods=["PUT"])
+def api_rate_limits_config_put():
+    """Actualiza config/rate_limits.json con el JSON recibido."""
+    data = request.get_json()
+    if not data or not isinstance(data, dict):
+        return jsonify({"error": "JSON invalido o vacio"}), 400
+    try:
+        _rl_save_config(data)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": f"Error al guardar: {exc}"}), 500
+    return jsonify({"ok": True})
+
+
+@app.route("/api/rate-limits/config/defaults", methods=["GET"])
+def api_rate_limits_config_defaults():
+    """Retorna los valores predeterminados de rate limits (sin modificar el archivo)."""
+    return jsonify(_rl_get_defaults())
+
+
 # ---------------------------------------------------------------------------
 # API: Modelos locales GGUF
 # ---------------------------------------------------------------------------
@@ -1847,8 +1997,8 @@ def api_local_recommended():
         from labelforge_core.local_models import list_known_model_filenames, recommended_models
         hw = _load_hw_profile()
         result = recommended_models(hw if hw else None, force_refresh=force)
-        downloaded = list_known_model_filenames()
-        result = [m for m in result if m.get("filename") not in downloaded]
+        downloaded_lower = {f.lower() for f in list_known_model_filenames()}
+        result = [m for m in result if m.get("filename", "").lower() not in downloaded_lower]
         return jsonify(result)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
@@ -2172,11 +2322,18 @@ def page_run():
 def api_get_dataset_config():
     """Devuelve la configuracion actual del dataset de entrada."""
     cfg = read_config()
-    return jsonify(cfg.get("dataset", {
-        "input_file": "",
-        "sheet": "",
-        "text_column": "claim",
-    }))
+    dataset = cfg.get("dataset", {"input_file": "", "sheet": "", "text_column": ""})
+    result = dict(dataset)
+    input_file = result.get("input_file", "")
+    if input_file:
+        try:
+            p = (BASE_DIR / input_file).resolve()
+            st = p.stat()
+            result["file_size_bytes"] = st.st_size
+            result["uploaded_at"] = int(st.st_mtime)
+        except OSError:
+            pass
+    return jsonify(result)
 
 
 @app.route("/api/dataset/config", methods=["PUT"])
@@ -2243,6 +2400,33 @@ def api_dataset_inspect():
         return jsonify({"error": f"Error al leer dataset: {exc}"}), 500
 
 
+@app.route("/api/dataset/profile", methods=["POST"])
+def api_dataset_profile():
+    """
+    Devuelve el perfil completo de un dataset: shape, tipos, fill rate, muestra,
+    estadisticas numericas y vista previa de filas.
+    Body: {"file": "ruta/relativa", "sheet": "opcional"}
+    """
+    data = request.get_json() or {}
+    raw_path = data.get("file", "").strip()
+    if not raw_path:
+        return jsonify({"error": "El campo 'file' es obligatorio"}), 400
+    try:
+        path = _resolve_allowed_dataset_path(raw_path)
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 403
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if not path.exists():
+        return jsonify({"error": "Archivo no encontrado."}), 404
+    try:
+        return jsonify(profile_dataset(path, sheet=data.get("sheet", "")))
+    except DatasetError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": f"Error al perfilar dataset: {exc}"}), 500
+
+
 @app.route("/api/dataset/upload", methods=["POST"])
 def api_dataset_upload():
     """
@@ -2273,16 +2457,29 @@ def api_dataset_upload():
         return jsonify({"error": "Ruta de destino no permitida"}), 400
     f.save(str(save_path))
 
-    # Reutilizar logica de inspect
     rel_path = str(save_path.relative_to(BASE_DIR)).replace("\\", "/")
+    stat = save_path.stat()
 
     try:
-        inspected = inspect_dataset(save_path)
+        profile = profile_dataset(save_path)
     except DatasetError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
         return jsonify({"error": f"Error al leer dataset: {exc}"}), 500
-    return jsonify({**inspected, "path": rel_path})
+    return jsonify({
+        **profile,
+        "path": rel_path,
+        "file_size_bytes": stat.st_size,
+        "uploaded_at": int(stat.st_mtime),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Error handlers
+# ---------------------------------------------------------------------------
+@app.errorhandler(413)
+def request_entity_too_large(e):
+    return jsonify({"error": "El archivo es demasiado grande (máximo 300 MB)."}), 413
 
 
 # ---------------------------------------------------------------------------
@@ -2412,6 +2609,192 @@ def api_get_arbiter(arb_id):
         if arb["id"] == arb_id:
             return jsonify(arb)
     return jsonify({"error": f"Arbitro '{arb_id}' no encontrado"}), 404
+
+
+@app.route("/api/arbiters/<arb_id>/hw-check", methods=["GET"])
+def api_arbiter_hw_check(arb_id):
+    """Verifica si el modelo del arbitro es adecuado para el hardware local."""
+    arb = next((a for a in read_config()["arbiters"] if a["id"] == arb_id), None)
+    if not arb:
+        return jsonify({"error": f"Arbitro '{arb_id}' no encontrado"}), 404
+
+    prov = arb.get("provider", {})
+    prov_type = prov.get("type", "gemini")
+
+    CLOUD_TYPES = {"gemini", "anthropic", "openai", "vertex_gemini"}
+
+    is_local_compat = False
+    if prov_type == "openai_compat":
+        base_url = prov.get("base_url", "")
+        is_local_compat = any(h in base_url for h in ("localhost", "127.0.0.1", "::1", "0.0.0.0"))
+
+    if prov_type in CLOUD_TYPES or (prov_type == "openai_compat" and not is_local_compat):
+        return jsonify({
+            "is_local": False,
+            "provider_type": prov_type,
+            "model": prov.get("model", ""),
+        })
+
+    hw = _load_hw_profile()
+    gpu = hw.get("gpu", {})
+    cpu = hw.get("cpu", {})
+
+    result = {
+        "is_local": True,
+        "provider_type": prov_type,
+        "model": prov.get("model", ""),
+        "no_hw_profile": not hw,
+        "hw": {
+            "ram_gb": hw.get("ram_gb"),
+            "gpu_name": gpu.get("name"),
+            "vram_gb": gpu.get("vram_gb"),
+            "gpu_detected": gpu.get("detected", False),
+            "gpu_shared": gpu.get("shared_memory", False),
+            "cpu_model": cpu.get("model"),
+            "cpu_cores": cpu.get("cores_physical"),
+            "best_backend": hw.get("best_backend", "cpu"),
+        },
+    }
+
+    if prov_type == "llama_cpp":
+        from labelforge_core.local_models import get_optimal_params
+        model_path_rel = prov.get("model_path", "")
+        if not model_path_rel:
+            result["fit"] = "no_model_path"
+            result["fit_msg"] = "El arbitro no tiene model_path configurado."
+            return jsonify(result)
+
+        mpath = Path(model_path_rel)
+        if not mpath.is_absolute():
+            mpath = BASE_DIR / model_path_rel
+
+        result["model_path"] = model_path_rel
+        result["model_exists"] = mpath.exists()
+
+        if not mpath.exists():
+            result["fit"] = "missing"
+            result["fit_msg"] = f"El archivo del modelo no se encontro: {model_path_rel}"
+        elif not hw:
+            result["fit"] = "no_hw_profile"
+            result["fit_msg"] = "No hay perfil de hardware (hw_profile.json). Ejecuta 'python setup_env.py'."
+        else:
+            from labelforge_core.local_models import get_optimal_params, list_cached_models, recommended_models
+            size_gb = round(mpath.stat().st_size / (1024 ** 3), 2)
+            result["model_size_gb"] = size_gb
+            n_ctx = int(prov.get("n_ctx") or 4096)
+            optimal = get_optimal_params(str(mpath), n_ctx=n_ctx, hw_profile=hw)
+            result["optimal_params"] = optimal
+
+            n_gpu    = optimal["n_gpu_layers"]
+            vram_gb  = gpu.get("vram_gb") or 0
+            ram_gb   = hw.get("ram_gb") or 0
+            gpu_name = gpu.get("name") or "GPU desconocida"
+            shared   = gpu.get("shared_memory", False)
+
+            # Memoria efectiva (misma logica que get_optimal_params)
+            if gpu.get("detected") and vram_gb:
+                effective_mem = vram_gb * (0.75 if shared else 0.90)
+            else:
+                effective_mem = ram_gb * 0.6
+
+            utilization_pct = round(size_gb / effective_mem * 100, 1) if effective_mem else None
+            result["utilization_pct"] = utilization_pct
+            result["effective_mem_gb"] = round(effective_mem, 1)
+
+            if n_gpu == -1:
+                result["fit"] = "full_gpu"
+                result["fit_msg"] = (
+                    f"El modelo cabe completamente en VRAM. "
+                    f"GPU: {gpu_name} ({vram_gb} GB VRAM), modelo: {size_gb} GB."
+                )
+            elif n_gpu > 0:
+                result["fit"] = "partial_gpu"
+                result["fit_msg"] = (
+                    f"Offload parcial a GPU: {n_gpu} capas en GPU, el resto en RAM. "
+                    f"GPU: {gpu_name} ({vram_gb} GB VRAM), modelo: {size_gb} GB. "
+                    "Un modelo mas pequeno mejoraria la velocidad."
+                )
+            elif not gpu.get("detected"):
+                result["fit"] = "cpu_only"
+                result["fit_msg"] = (
+                    f"Sin GPU detectada. El modelo corre en CPU "
+                    f"({cpu.get('cores_physical', '?')} nucleos fisicos). "
+                    "Espera tiempos de inferencia altos."
+                )
+            else:
+                result["fit"] = "cpu_fallback"
+                result["fit_msg"] = (
+                    f"El modelo ({size_gb} GB) supera la VRAM disponible ({vram_gb} GB). "
+                    "Se ejecutara en CPU. Considera un modelo mas pequeno para aprovechar la GPU."
+                )
+
+            # Sugerencias: modelos del catalogo que caben en el HW y son mas capaces
+            try:
+                cached_filenames = {m["filename"].lower() for m in list_cached_models()}
+                all_recs = recommended_models(hw_profile=hw)
+                # Candidatos: caben en memoria y son al menos 1.5x mas grandes que el actual
+                candidates = [
+                    m for m in all_recs
+                    if m.get("fits_in_memory") is True and m["size_gb"] > size_gb * 1.5
+                ]
+                # Ordenar por tamano desc (mas capaz primero)
+                candidates.sort(key=lambda m: m["size_gb"], reverse=True)
+                suggestions = []
+                for m in candidates[:4]:
+                    suggestions.append({
+                        "filename":    m["filename"],
+                        "repo_id":     m.get("repo_id", ""),
+                        "size_gb":     m["size_gb"],
+                        "description": m.get("description", ""),
+                        "tier":        m.get("tier", ""),
+                        "downloaded":  m["filename"].lower() in cached_filenames,
+                    })
+                result["suggestions"] = suggestions
+            except Exception:
+                result["suggestions"] = []
+
+    elif prov_type == "ollama":
+        if not hw:
+            result["fit"] = "no_hw_profile"
+            result["fit_msg"] = "No hay perfil de hardware. Ejecuta 'python setup_env.py'."
+        else:
+            ram_gb = hw.get("ram_gb", 0)
+            vram_gb = gpu.get("vram_gb") or 0
+            gpu_name = gpu.get("name") or "ninguna"
+            if gpu.get("detected"):
+                result["fit"] = "ollama_gpu"
+                result["fit_msg"] = (
+                    f"Ollama gestiona la VRAM automaticamente. "
+                    f"GPU detectada: {gpu_name}"
+                    + (f" ({vram_gb} GB VRAM)" if vram_gb else "")
+                    + f", {ram_gb} GB RAM del sistema."
+                )
+            else:
+                result["fit"] = "ollama_cpu"
+                result["fit_msg"] = (
+                    f"Sin GPU detectada. Ollama ejecutara el modelo en CPU. "
+                    f"RAM del sistema: {ram_gb} GB."
+                )
+
+    else:  # openai_compat local
+        base_url = prov.get("base_url", "")
+        result["base_url"] = base_url
+        if hw:
+            ram_gb = hw.get("ram_gb", 0)
+            gpu_name = gpu.get("name") or "ninguna"
+            vram_gb = gpu.get("vram_gb") or 0
+            result["fit"] = "compat_local"
+            result["fit_msg"] = (
+                f"API compatible con OpenAI en {base_url}. "
+                f"Hardware local: {gpu_name}"
+                + (f" ({vram_gb} GB VRAM)" if vram_gb else "")
+                + f", {ram_gb} GB RAM."
+            )
+        else:
+            result["fit"] = "no_hw_profile"
+            result["fit_msg"] = "No hay perfil de hardware. Ejecuta 'python setup_env.py'."
+
+    return jsonify(result)
 
 
 @app.route("/api/arbiters/<arb_id>", methods=["PUT"])
@@ -2638,17 +3021,37 @@ def api_run_start():
         }), 400
 
     dataset_cfg = cfg_data.get("dataset", {})
-    input_file  = dataset_cfg.get("input_file", "")
+    input_file  = dataset_cfg.get("input_file", "").strip()
     sheet       = dataset_cfg.get("sheet", "")
-    text_column = dataset_cfg.get("text_column", "claim")
+    text_column = dataset_cfg.get("text_column", "").strip()
+
+    def _abort_run(message: str, status: int = 400):
+        with _process_state["state_lock"]:
+            _process_state["running"] = False
+        return jsonify({"error": message}), status
+
+    if not input_file:
+        return _abort_run(
+            "No hay dataset configurado. Ve a Procesamiento, sube un archivo y pulsa Guardar."
+        )
+    if not text_column:
+        return _abort_run(
+            "No hay columna de texto configurada. Ve a Procesamiento y selecciona la columna."
+        )
+    try:
+        resolved_input = _resolve_allowed_dataset_path(input_file)
+        if not resolved_input.exists():
+            return _abort_run(
+                f"El archivo '{Path(input_file).name}' no existe en el servidor. Vuelve a subirlo en Procesamiento."
+            )
+    except (PermissionError, ValueError) as exc:
+        return _abort_run(str(exc))
 
     cmd = [sys.executable, "-u", str(BASE_DIR / "main_cli.py")]
-    if input_file:
-        cmd += ["--input", input_file]
+    cmd += ["--input", input_file]
     if sheet:
         cmd += ["--sheet", sheet]
-    if text_column:
-        cmd += ["--column", text_column]
+    cmd += ["--column", text_column]
     if limit:
         cmd += ["--limit", str(int(limit))]
 

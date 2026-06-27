@@ -29,6 +29,7 @@ DATA_DIR = BASE_DIR / "data"
 
 ARBITERS_CONFIG_PATH = CONFIG_DIR / "arbiters_config.json"
 LOCAL_MODELS_CONFIG_PATH = CONFIG_DIR / "local_models_config.json"
+RATE_LIMITS_CONFIG_PATH = CONFIG_DIR / "rate_limits.json"
 
 def resolve_config_file_path(path: str | Path | None) -> Path:
     """Resuelve la ruta de configuracion sin redirigir ubicaciones antiguas."""

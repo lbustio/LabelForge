@@ -68,6 +68,48 @@
     line-height: 1.35;
     word-break: break-word;
   }
+  /* ── Dataset card ──────────────────────────────────────────────────── */
+  .ds-step-hdr { display:flex; align-items:center; gap:.75rem; margin-bottom:.85rem; }
+  .ds-step-num {
+    width:1.8rem; height:1.8rem; border-radius:50%;
+    display:inline-flex; align-items:center; justify-content:center;
+    font-size:.78rem; font-weight:700; flex-shrink:0;
+    background:#1a1d27; border:1.5px solid #3d445e; color:#64748b;
+    transition:background .2s, border-color .2s, color .2s;
+  }
+  .ds-step-num.active { background:rgba(var(--tone-cyan),.14); border-color:rgba(var(--tone-cyan),.55); color:rgb(var(--tone-cyan)); }
+  .ds-step-num.done  { background:rgba(16,185,129,.14); border-color:rgba(16,185,129,.45); color:#34d399; }
+  .ds-step-sep { border-color:#2d3148; margin:1.25rem 0; }
+  .ds-dropzone {
+    border:2px dashed rgba(var(--tone-cyan),.35); border-radius:.75rem; padding:2rem 1.5rem;
+    text-align:center; cursor:pointer; transition:background .2s, border-color .2s;
+    background:rgba(var(--tone-cyan),.03);
+  }
+  .ds-dropzone:hover, .ds-dropzone.drag-over { background:rgba(var(--tone-cyan),.09); border-color:rgba(var(--tone-cyan),.7); }
+  .ds-dropzone-icon { font-size:2.2rem; opacity:.5; }
+  .ds-upload-bar {
+    display:flex; align-items:center; gap:.75rem;
+    background:rgba(255,255,255,.04); border:1px solid rgba(var(--tone-cyan),.22);
+    border-radius:.5rem; padding:.6rem 1rem; margin-top:.75rem; font-size:.85rem;
+  }
+  #ds-nav-tabs { border-color:#2d3148; }
+  #ds-nav-tabs .nav-link { color:#64748b; border-color:transparent; font-size:.82rem; padding:.4rem .85rem; }
+  #ds-nav-tabs .nav-link.active { color:rgb(var(--tone-cyan)); background:rgba(var(--tone-cyan),.08); border-color:rgba(var(--tone-cyan),.3) rgba(var(--tone-cyan),.3) rgba(var(--tone-cyan),.08); }
+  #ds-nav-tabs .nav-link:hover:not(.active) { color:#94a3b8; border-color:transparent; }
+  .ds-tab-pane { border:1px solid rgba(var(--tone-cyan),.18); border-top:none; border-radius:0 0 .5rem .5rem; overflow:hidden; }
+  .ds-tab-scroll { max-height:260px; overflow:auto; }
+  .ds-tab-pane .table { margin:0; font-size:.8rem; }
+  .ds-tab-pane .table thead th { background:rgba(var(--tone-cyan),.07); color:#94a3b8; font-weight:600; font-size:.74rem; letter-spacing:.04em; border-color:#2d3148; position:sticky; top:0; z-index:1; white-space:nowrap; }
+  .ds-tab-pane .table tbody td { border-color:#1e2130; color:#cbd5e1; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ds-tab-pane .table tbody tr:hover td { background:rgba(255,255,255,.025); }
+  .col-type-badge { font-size:.68rem; font-weight:700; padding:.15rem .5rem; border-radius:.3rem; white-space:nowrap; }
+  .col-type-badge.text   { background:rgba(var(--tone-violet),.16); color:rgb(var(--tone-violet)); }
+  .col-type-badge.number { background:rgba(var(--tone-cyan),.14);   color:rgb(var(--tone-cyan)); }
+  .ds-col-detail { background:rgba(255,255,255,.03); border:1px solid #2d3148; border-radius:.5rem; padding:.75rem 1rem; }
+  .ds-col-sample-item { font-size:.8rem; color:#94a3b8; font-style:italic; padding:.25rem 0; border-bottom:1px solid rgba(255,255,255,.05); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ds-col-sample-item:last-child { border-bottom:none; }
+  .ds-ready-banner { background:linear-gradient(135deg,rgba(16,185,129,.11),rgba(34,211,238,.07)); border:1px solid rgba(16,185,129,.32); border-radius:.65rem; padding:.85rem 1rem; }
+
   .chart-box {
     background: #0a0c14;
     border: 1px solid #2d3148;
@@ -139,6 +181,141 @@
 
 <div class="page-title">
   <i class="bi bi-play-circle me-2" style="color:#34d399"></i>Ejecutar etiquetado
+</div>
+
+<!-- ============================================================ -->
+<!-- DATASET: Subir / perfilar / seleccionar columna               -->
+<!-- ============================================================ -->
+<div class="card-dark accent-panel accent-cyan mb-4">
+  <div class="card-header-label"><i class="bi bi-database me-2"></i>Dataset de entrada</div>
+
+  <!-- PASO 1: Subir archivo -->
+  <div id="step-1">
+    <div class="ds-step-hdr">
+      <span class="ds-step-num active" id="step-1-num">1</span>
+      <span class="fw-semibold text-light">Subir archivo</span>
+      <span class="text-secondary small">CSV · XLSX · XLS</span>
+    </div>
+    <input type="file" id="ds-file-input" accept=".csv,.xlsx,.xls" style="display:none" onchange="onFileSelected(this.files)">
+    <div class="ds-dropzone" id="ds-dropzone"
+         ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+      <div class="ds-dropzone-icon mb-2"><i class="bi bi-cloud-upload"></i></div>
+      <div class="fw-semibold text-light mb-1">Arrastra tu archivo aqui</div>
+      <div class="text-secondary small mb-3">o haz clic para explorar</div>
+      <button type="button" class="btn btn-outline-info btn-sm px-3"
+              onclick="document.getElementById('ds-file-input').click()">
+        <i class="bi bi-folder2-open me-1"></i>Seleccionar archivo
+      </button>
+    </div>
+    <div class="ds-upload-bar" id="ds-upload-bar" style="display:none">
+      <i class="bi bi-file-earmark-spreadsheet text-info fs-5 flex-shrink-0"></i>
+      <div style="min-width:0;flex:1">
+        <div class="fw-semibold text-light text-truncate" id="ds-fname">-</div>
+        <div class="text-secondary" style="font-size:.75rem" id="ds-fsize"></div>
+      </div>
+      <div id="ds-upload-status" class="d-flex align-items-center gap-2 flex-shrink-0">
+        <span class="spinner-border spinner-border-sm text-info" id="ds-spinner" style="display:none"></span>
+        <span id="ds-status-text" class="small"></span>
+      </div>
+    </div>
+    <div id="ds-upload-error" class="text-danger small mt-2" style="display:none"></div>
+  </div>
+
+  <!-- PASO 2: Resumen del dataset -->
+  <div id="step-2" style="display:none">
+    <hr class="ds-step-sep">
+    <div class="ds-step-hdr">
+      <span class="ds-step-num active" id="step-2-num">2</span>
+      <span class="fw-semibold text-light">Resumen del dataset</span>
+      <div class="ms-auto d-flex align-items-center gap-2 flex-shrink-0">
+        <span class="badge rounded-pill" style="background:rgba(var(--tone-cyan),.12);color:rgb(var(--tone-cyan));border:1px solid rgba(var(--tone-cyan),.28);font-weight:normal">
+          <i class="bi bi-table me-1"></i><span id="ds-n-rows">-</span> filas
+        </span>
+        <span class="badge rounded-pill" style="background:rgba(var(--tone-violet),.12);color:rgb(var(--tone-violet));border:1px solid rgba(var(--tone-violet),.28);font-weight:normal">
+          <i class="bi bi-layout-three-columns me-1"></i><span id="ds-n-cols">-</span> columnas
+        </span>
+        <button class="btn btn-outline-secondary btn-sm" onclick="resetUpload()">
+          <i class="bi bi-arrow-repeat me-1"></i>Cambiar
+        </button>
+      </div>
+    </div>
+    <ul class="nav nav-tabs mb-0" id="ds-nav-tabs">
+      <li class="nav-item"><button class="nav-link active" id="tab-btn-preview" onclick="switchDsTab('preview')"><i class="bi bi-eye me-1"></i>Vista previa</button></li>
+      <li class="nav-item"><button class="nav-link" id="tab-btn-info" onclick="switchDsTab('info')"><i class="bi bi-list-columns me-1"></i>Columnas</button></li>
+      <li class="nav-item"><button class="nav-link" id="tab-btn-stats" onclick="switchDsTab('stats')"><i class="bi bi-bar-chart me-1"></i>Estadisticas</button></li>
+    </ul>
+    <div class="ds-tab-pane" id="tab-preview">
+      <div class="ds-tab-scroll">
+        <table class="table table-dark table-sm table-hover"><thead><tr id="ds-preview-head"></tr></thead><tbody id="ds-preview-body"></tbody></table>
+      </div>
+    </div>
+    <div class="ds-tab-pane" id="tab-info" style="display:none">
+      <div class="ds-tab-scroll">
+        <table class="table table-dark table-sm">
+          <thead><tr><th style="width:2rem">#</th><th>Columna</th><th>Tipo</th><th>No nulos</th><th class="text-end">% relleno</th><th>Muestra de valores</th></tr></thead>
+          <tbody id="ds-info-body"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="ds-tab-pane" id="tab-stats" style="display:none">
+      <div id="ds-stats-empty" class="p-3 small text-secondary"><i class="bi bi-info-circle me-1"></i>No se detectaron columnas numericas.</div>
+      <div id="ds-stats-wrap" class="ds-tab-scroll" style="display:none">
+        <table class="table table-dark table-sm"><thead><tr id="ds-stats-head"></tr></thead><tbody id="ds-stats-body"></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- PASO 3: Columna a etiquetar -->
+  <div id="step-3" style="display:none">
+    <hr class="ds-step-sep">
+    <div class="ds-step-hdr">
+      <span class="ds-step-num active" id="step-3-num">3</span>
+      <span class="fw-semibold text-light">Columna a etiquetar</span>
+      <span class="text-secondary small">¿Que columna contiene el texto a analizar?</span>
+    </div>
+    <div id="ds-sheet-group" style="display:none" class="mb-3">
+      <label class="form-label small text-secondary" for="ds-sheet">Hoja de calculo</label>
+      <select class="form-select" id="ds-sheet" onchange="onSheetChange()">
+        <option value="">(primera hoja)</option>
+      </select>
+    </div>
+    <div class="mb-3">
+      <label class="form-label small text-secondary" for="ds-column">Columna</label>
+      <select class="form-select" id="ds-column" onchange="onColumnChange()">
+        <option value="">(selecciona una columna)</option>
+      </select>
+    </div>
+    <div id="ds-col-detail" class="ds-col-detail mb-3" style="display:none">
+      <div class="d-flex align-items-center gap-2 mb-2">
+        <span class="col-type-badge" id="ds-col-type">texto</span>
+        <span class="small text-secondary">
+          <span id="ds-col-fill">-</span>% con valor &nbsp;·&nbsp; <span id="ds-col-nonnull">-</span> no nulos
+        </span>
+      </div>
+      <div class="small text-secondary mb-1">Muestra:</div>
+      <div id="ds-col-samples"></div>
+    </div>
+    <button class="btn btn-primary" onclick="confirmColumn()">
+      <i class="bi bi-check2-circle me-1"></i>Confirmar columna
+    </button>
+  </div>
+
+  <!-- Banner: listo -->
+  <div id="ds-ready-banner" class="ds-ready-banner mt-3" style="display:none">
+    <div class="d-flex align-items-center gap-3">
+      <div class="rounded-circle d-flex align-items-center justify-content-center flex-shrink-0"
+           style="width:36px;height:36px;background:rgba(16,185,129,.16);border:1px solid rgba(16,185,129,.4);color:#34d399">
+        <i class="bi bi-check2-circle"></i>
+      </div>
+      <div style="min-width:0">
+        <div class="fw-semibold" style="color:#d1fae5">Listo para ejecutar</div>
+        <div class="small text-secondary text-truncate" id="ds-ready-detail">-</div>
+      </div>
+      <button class="btn btn-outline-secondary btn-sm ms-auto flex-shrink-0" onclick="resetUpload()">
+        <i class="bi bi-arrow-repeat me-1"></i>Cambiar
+      </button>
+    </div>
+  </div>
 </div>
 
 <!-- ============================================================ -->
@@ -613,18 +790,17 @@ async function clearCheckpoint() {
 function datasetSummaryText(dataset = {}, runState = null) {
   const inputFile = (dataset.input_file || runState?.input_file || '').trim();
   const sheet = (dataset.sheet || runState?.sheet || '').trim();
-  const textColumn = (dataset.text_column || runState?.text_column || 'claim').trim();
+  const textColumn = (dataset.text_column || runState?.text_column || '').trim();
 
   if (!inputFile) return 'sin archivo seleccionado';
 
   const filename = inputFile.split(/[\\/]/).pop() || inputFile;
   const details = [
     `archivo: ${filename}`,
-    `ruta: ${inputFile}`,
     sheet ? `hoja: ${sheet}` : '',
-    `columna: ${textColumn}`,
+    textColumn ? `columna: ${textColumn}` : 'sin columna seleccionada',
   ].filter(Boolean);
-  return details.join(' - ');
+  return details.join(' · ');
 }
 
 async function loadConfigSummary() {
@@ -2165,12 +2341,13 @@ function setRunning(running) {
   txt.textContent = running ? 'Corriendo...' : 'Inactivo';
 
   // Bloquear/desbloquear inputs mientras se ejecuta
-  const controls = [
-    'limit-input',
-  ];
-  controls.forEach(id => {
+  ['limit-input', 'ds-column', 'ds-sheet', 'ds-file-input'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = running;
+  });
+  // Botones del dataset
+  document.querySelectorAll('#step-1 button, #step-3 button, #ds-ready-banner button').forEach(btn => {
+    btn.disabled = running;
   });
   // Bloquear boton de limpiar checkpoint (dinamico)
   const clearBtn = document.querySelector('#checkpoint-area button');
@@ -2247,6 +2424,271 @@ async function loadRunStats(keepPosition = false) {
   renderAgreementMetrics(data.agreement);
   renderResultsTable(data);
 }
+
+// -----------------------------------------------------------------------
+// Dataset — estado
+// -----------------------------------------------------------------------
+let _currentServerPath = '';
+let _savedDatasetConfig = null;
+let _datasetProfile = null;
+
+function onDragOver(e) { e.preventDefault(); e.stopPropagation(); document.getElementById('ds-dropzone').classList.add('drag-over'); }
+function onDragLeave(e) { e.preventDefault(); e.stopPropagation(); document.getElementById('ds-dropzone').classList.remove('drag-over'); }
+function onDrop(e) { e.preventDefault(); e.stopPropagation(); document.getElementById('ds-dropzone').classList.remove('drag-over'); if (e.dataTransfer.files?.length) onFileSelected(e.dataTransfer.files); }
+
+function onFileSelected(files) {
+  if (!files?.length) return;
+  const file = files[0];
+  const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
+  if (!['.csv', '.xlsx', '.xls'].includes(ext)) { showUploadError(`Formato '${ext}' no soportado. Usa .csv, .xlsx o .xls`); return; }
+  document.getElementById('ds-fname').textContent = file.name;
+  setDsMeta(file.size, null);
+  document.getElementById('ds-upload-bar').style.display = '';
+  document.getElementById('ds-upload-error').style.display = 'none';
+  uploadDatasetFile(file);
+}
+
+async function uploadDatasetFile(file) {
+  setDsSpinner(true, 'Subiendo...');
+  hideProfileSteps();
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await fetch(APP_BASE + '/api/dataset/upload', { method: 'POST', body: fd });
+    let data;
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      data = await res.json();
+    } else {
+      setDsSpinner(false, '');
+      showUploadError(res.status === 413 ? 'El archivo es demasiado grande (limite: 300 MB).' : `Error ${res.status} del servidor.`);
+      return;
+    }
+    if (!res.ok) { setDsSpinner(false, ''); showUploadError(data.error || 'Error al subir'); return; }
+    setDsSpinner(false, '✓ Subido');
+    _currentServerPath = data.path;
+    setDsMeta(data.file_size_bytes, data.uploaded_at);
+    renderDsProfile(data);
+  } catch (e) {
+    setDsSpinner(false, '');
+    showUploadError('Error de red: ' + e.message);
+  }
+}
+
+function hideProfileSteps() {
+  document.getElementById('step-2').style.display = 'none';
+  document.getElementById('step-3').style.display = 'none';
+  document.getElementById('ds-ready-banner').style.display = 'none';
+}
+
+function setDsSpinner(on, text) {
+  document.getElementById('ds-spinner').style.display = on ? '' : 'none';
+  document.getElementById('ds-status-text').textContent = text;
+}
+
+function showUploadError(msg) {
+  const el = document.getElementById('ds-upload-error');
+  el.innerHTML = `<i class="bi bi-exclamation-circle me-1"></i>${escapeHtml(msg)}`;
+  el.style.display = '';
+}
+
+function renderDsProfile(profile) {
+  _datasetProfile = profile;
+  document.getElementById('ds-n-rows').textContent = profile.n_rows.toLocaleString();
+  document.getElementById('ds-n-cols').textContent = profile.n_cols;
+
+  document.getElementById('ds-preview-head').innerHTML = profile.fieldnames.map(c => `<th title="${escapeHtml(c)}">${escapeHtml(dsTrunc(c, 20))}</th>`).join('');
+  document.getElementById('ds-preview-body').innerHTML = profile.preview.map(row =>
+    '<tr>' + profile.fieldnames.map(c => `<td title="${escapeHtml(row[c]||'')}">${escapeHtml(dsTrunc(row[c]||'', 45))}</td>`).join('') + '</tr>'
+  ).join('');
+
+  const statBase = Math.min(profile.n_rows, 10000);
+  document.getElementById('ds-info-body').innerHTML = profile.columns.map((col, i) => `
+    <tr>
+      <td class="text-secondary">${i}</td>
+      <td class="fw-semibold text-light" title="${escapeHtml(col.name)}">${escapeHtml(dsTrunc(col.name, 28))}</td>
+      <td><span class="col-type-badge ${col.type}">${col.type === 'number' ? 'numero' : 'texto'}</span></td>
+      <td>${col.non_null.toLocaleString()} / ${statBase.toLocaleString()}</td>
+      <td class="text-end"><span class="${col.fill_pct >= 99 ? 'text-success' : col.fill_pct >= 75 ? 'text-warning' : 'text-danger'}">${col.fill_pct}%</span></td>
+      <td class="text-secondary" style="font-style:italic">${col.sample.map(s => escapeHtml(dsTrunc(s, 55))).join(' · ')}</td>
+    </tr>`).join('');
+
+  const numCols = profile.columns.filter(c => c.stats);
+  if (!numCols.length) {
+    document.getElementById('ds-stats-empty').style.display = '';
+    document.getElementById('ds-stats-wrap').style.display = 'none';
+  } else {
+    document.getElementById('ds-stats-empty').style.display = 'none';
+    document.getElementById('ds-stats-wrap').style.display = '';
+    document.getElementById('ds-stats-head').innerHTML = '<th>Estadistica</th>' + numCols.map(c => `<th title="${escapeHtml(c.name)}">${escapeHtml(dsTrunc(c.name, 15))}</th>`).join('');
+    const statRows = [['count','Conteo'],['mean','Media'],['std','Desv. estandar'],['min','Minimo'],['q25','25%'],['q50','Mediana'],['q75','75%'],['max','Maximo']];
+    document.getElementById('ds-stats-body').innerHTML = statRows.map(([k, label]) =>
+      `<tr><td class="text-secondary fw-semibold" style="white-space:nowrap">${label}</td>` + numCols.map(c => `<td>${dsFmtNum(c.stats[k])}</td>`).join('') + '</tr>'
+    ).join('');
+  }
+
+  const colSel = document.getElementById('ds-column');
+  colSel.innerHTML = '<option value="">(selecciona una columna)</option>' +
+    profile.columns.map(c => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)} [${c.type === 'number' ? '#' : 'A'}]</option>`).join('');
+
+  const sheetGroup = document.getElementById('ds-sheet-group');
+  const sheetSel = document.getElementById('ds-sheet');
+  if (profile.is_excel && profile.sheets.length > 1) {
+    sheetSel.innerHTML = '<option value="">(primera hoja)</option>' + profile.sheets.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+    sheetGroup.style.display = '';
+    if (_savedDatasetConfig?.sheet) sheetSel.value = _savedDatasetConfig.sheet;
+  } else {
+    sheetGroup.style.display = 'none';
+  }
+
+  if (_savedDatasetConfig?.text_column) {
+    colSel.value = _savedDatasetConfig.text_column;
+    onColumnChange();
+    showReadyBanner(_savedDatasetConfig);
+    document.getElementById('step-3-num').className = 'ds-step-num done';
+  }
+
+  document.getElementById('step-2').style.display = '';
+  document.getElementById('step-3').style.display = '';
+  document.getElementById('step-1-num').className = 'ds-step-num done';
+  document.getElementById('step-2-num').className = 'ds-step-num done';
+  switchDsTab('preview');
+}
+
+function switchDsTab(tab) {
+  ['preview', 'info', 'stats'].forEach(t => {
+    document.getElementById(`tab-${t}`).style.display = t === tab ? '' : 'none';
+    document.getElementById(`tab-btn-${t}`).classList.toggle('active', t === tab);
+  });
+}
+
+function onColumnChange() {
+  const col = document.getElementById('ds-column').value;
+  const detail = document.getElementById('ds-col-detail');
+  if (!col || !_datasetProfile) { detail.style.display = 'none'; return; }
+  const info = _datasetProfile.columns.find(c => c.name === col);
+  if (!info) { detail.style.display = 'none'; return; }
+  const tb = document.getElementById('ds-col-type');
+  tb.textContent = info.type === 'number' ? 'numero' : 'texto';
+  tb.className = `col-type-badge ${info.type}`;
+  document.getElementById('ds-col-fill').textContent = info.fill_pct;
+  document.getElementById('ds-col-nonnull').textContent = info.non_null.toLocaleString();
+  document.getElementById('ds-col-samples').innerHTML = info.sample.length
+    ? info.sample.map(s => `<div class="ds-col-sample-item">${escapeHtml(s)}</div>`).join('')
+    : '<div class="text-secondary small fst-italic">Sin valores de muestra</div>';
+  detail.style.display = '';
+}
+
+async function onSheetChange() {
+  if (!_currentServerPath) return;
+  const sheet = document.getElementById('ds-sheet').value;
+  setDsSpinner(true, 'Cargando hoja...');
+  try {
+    const res = await fetch(APP_BASE + '/api/dataset/profile', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ file: _currentServerPath, sheet }),
+    });
+    const data = await res.json();
+    if (res.ok) renderDsProfile(data);
+    else showUploadError(data.error || 'Error al cargar hoja');
+  } catch (_) {}
+  setDsSpinner(false, '✓ Subido');
+}
+
+async function confirmColumn() {
+  const col = document.getElementById('ds-column').value;
+  if (!col) { showToast('Selecciona una columna', 'warn'); return; }
+  const inputFile = _currentServerPath || _savedDatasetConfig?.input_file || '';
+  if (!inputFile) { showToast('Primero sube un archivo', 'error'); return; }
+  const sheet = document.getElementById('ds-sheet').value;
+  const res = await fetch(APP_BASE + '/api/dataset/config', {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ input_file: inputFile, sheet, text_column: col }),
+  });
+  const data = await res.json();
+  if (!res.ok) { showToast(data.error || 'Error al guardar', 'error'); return; }
+  _savedDatasetConfig = data;
+  document.getElementById('step-3-num').className = 'ds-step-num done';
+  showToast('Dataset configurado. Listo para ejecutar.');
+  showReadyBanner(data);
+  loadConfigSummary();
+}
+
+function showReadyBanner(cfg) {
+  if (!cfg?.input_file || !cfg?.text_column) return;
+  const fname = cfg.input_file.split(/[\\/]/).pop();
+  const sheet = cfg.sheet ? ` · hoja: ${escapeHtml(cfg.sheet)}` : '';
+  document.getElementById('ds-ready-detail').innerHTML =
+    `${escapeHtml(fname)}${sheet} &nbsp;·&nbsp; columna: <strong>${escapeHtml(cfg.text_column)}</strong>`;
+  document.getElementById('ds-ready-banner').style.display = '';
+}
+
+function resetUpload() {
+  _currentServerPath = '';
+  _savedDatasetConfig = null;
+  _datasetProfile = null;
+  document.getElementById('ds-upload-bar').style.display = 'none';
+  document.getElementById('ds-upload-error').style.display = 'none';
+  document.getElementById('ds-file-input').value = '';
+  hideProfileSteps();
+  document.getElementById('step-1-num').className = 'ds-step-num active';
+  document.getElementById('step-2-num').className = 'ds-step-num active';
+  document.getElementById('step-3-num').className = 'ds-step-num active';
+  setDsSpinner(false, '');
+}
+
+async function loadDatasetConfig() {
+  try {
+    const res = await fetch(APP_BASE + '/api/dataset/config');
+    const cfg = await res.json();
+    if (!res.ok || !cfg.input_file) return;
+    _savedDatasetConfig = cfg;
+    _currentServerPath = cfg.input_file;
+    document.getElementById('ds-fname').textContent = cfg.input_file.split(/[\\/]/).pop();
+    setDsMeta(cfg.file_size_bytes ?? null, cfg.uploaded_at ?? null);
+    document.getElementById('ds-upload-bar').style.display = '';
+    setDsSpinner(true, 'Cargando...');
+    const res2 = await fetch(APP_BASE + '/api/dataset/profile', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ file: cfg.input_file, sheet: cfg.sheet || '' }),
+    });
+    setDsSpinner(false, '✓ Listo');
+    if (res2.ok) renderDsProfile(await res2.json());
+  } catch (_) { setDsSpinner(false, ''); }
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+function formatUploadTime(unixTs) {
+  const d = new Date(unixTs * 1000);
+  return d.toLocaleDateString('es-MX', { day:'2-digit', month:'short', year:'numeric' })
+    + ' ' + d.toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit' });
+}
+function setDsMeta(sizeBytes, unixTs) {
+  const parts = [];
+  if (sizeBytes != null) parts.push(formatBytes(sizeBytes));
+  if (unixTs != null) parts.push('Cargado: ' + formatUploadTime(unixTs));
+  document.getElementById('ds-fsize').textContent = parts.join(' · ') || '';
+}
+function dsFmtNum(n) {
+  if (n === null || n === undefined) return '-';
+  const v = Number(n);
+  return isNaN(v) ? String(n) : (Number.isInteger(v) ? v.toLocaleString() : v.toFixed(2));
+}
+function dsTrunc(str, max) {
+  const s = String(str ?? '');
+  return s.length > max ? s.slice(0, max) + '…' : s;
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  document.getElementById('ds-dropzone')?.addEventListener('click', e => {
+    if (!e.target.closest('button')) document.getElementById('ds-file-input').click();
+  });
+  loadDatasetConfig();
+});
 
 // ---------- init ----------
 initCharts();

@@ -16,7 +16,7 @@
         <div>
           <label class="form-label small text-secondary" for="profile-email">Email de recuperacion futura</label>
           <input class="form-control" id="profile-email" type="email" autocomplete="email">
-          <div class="form-text text-secondary">Por ahora no hay recuperacion por email. Queda guardado para despues.</div>
+          <div class="form-text text-secondary">El email se usa para que el administrador pueda contactarte al generar un enlace de restablecimiento.</div>
         </div>
         <hr style="border-color:#2d3148">
         <div>
@@ -59,7 +59,8 @@
 let currentProfile = null;
 
 function avatarSrc(user) {
-  return user?.avatar_url || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="88" height="88"%3E%3Crect width="88" height="88" fill="%23252b3d"/%3E%3Ctext x="44" y="50" text-anchor="middle" font-size="32" fill="%2394a3b8"%3E?%3C/text%3E%3C/svg%3E';
+  const fallback = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="88" height="88"%3E%3Crect width="88" height="88" fill="%23252b3d"/%3E%3Ctext x="44" y="50" text-anchor="middle" font-size="32" fill="%2394a3b8"%3E?%3C/text%3E%3C/svg%3E';
+  return user?.avatar_url ? (APP_BASE + user.avatar_url) : fallback;
 }
 
 async function loadProfile() {

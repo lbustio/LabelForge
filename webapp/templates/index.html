@@ -100,12 +100,23 @@ function buildModals() {
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body" id="arbModalBody"></div>
+      <div id="arbHwCheck" style="display:none;padding:0 1rem 1rem">
+        <hr style="border-color:#2d3148;margin-bottom:.75rem">
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <i class="bi bi-cpu" style="color:#38bdf8;font-size:.9rem"></i>
+          <span style="font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#64748b">Compatibilidad con hardware local</span>
+        </div>
+        <div id="arbHwCheckBody"></div>
+      </div>
       <div class="modal-footer border-top border-secondary">
         <button class="btn btn-primary" id="arbModalModifyBtn">
           <i class="bi bi-pencil-square me-1"></i>Modificar
         </button>
         <button class="btn btn-danger-soft" id="arbModalDeleteBtn">
           <i class="bi bi-trash me-1"></i>Eliminar
+        </button>
+        <button class="btn btn-outline-info btn-sm" id="arbModalHwBtn" onclick="checkArbiterHardware()">
+          <i class="bi bi-cpu me-1"></i>Verificar hardware
         </button>
         <button class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
       </div>
@@ -147,6 +158,8 @@ let _currentArbId = null;
 function showArbiterModal(arb) {
   _currentArbId = arb.id;
   document.getElementById('arbModalTitle').textContent = arb.name;
+  document.getElementById('arbHwCheck').style.display = 'none';
+  document.getElementById('arbHwCheckBody').innerHTML = '';
 
   const p = arb.provider || {};
   const gc = arb.generation_config || {};
@@ -164,7 +177,7 @@ function showArbiterModal(arb) {
   `;
 
   document.getElementById('arbModalModifyBtn').onclick = () => {
-    window.location.href = '/arbiters';
+    window.location.href = APP_BASE + '/arbiters';
   };
   document.getElementById('arbModalDeleteBtn').onclick = async () => {
     if (!confirm(`Eliminar arbitro "${arb.name}"?`)) return;
@@ -180,6 +193,122 @@ function showArbiterModal(arb) {
   };
 
   new bootstrap.Modal(document.getElementById('arbiterModal')).show();
+}
+
+async function checkArbiterHardware() {
+  if (!_currentArbId) return;
+  const panel = document.getElementById('arbHwCheck');
+  const body  = document.getElementById('arbHwCheckBody');
+  panel.style.display = '';
+  body.innerHTML = `<div class="d-flex align-items-center gap-2 text-secondary small">
+    <div class="spinner-border spinner-border-sm" role="status"></div> Verificando...
+  </div>`;
+
+  try {
+    const r    = await fetch(`${APP_BASE}/api/arbiters/${encodeURIComponent(_currentArbId)}/hw-check`);
+    const data = await r.json();
+
+    if (!r.ok) {
+      body.innerHTML = `<div class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(data.error || 'Error')}</div>`;
+      return;
+    }
+
+    if (!data.is_local) {
+      const labels = {
+        gemini: 'Google Gemini', anthropic: 'Anthropic Claude',
+        openai: 'OpenAI', vertex_gemini: 'Google Vertex AI', openai_compat: 'API externa',
+      };
+      const label = labels[data.provider_type] || data.provider_type;
+      body.innerHTML = `<div class="d-flex align-items-start gap-2">
+        <i class="bi bi-cloud text-info" style="margin-top:.15rem;flex-shrink:0"></i>
+        <span class="text-secondary small">Este arbitro usa <strong style="color:#e2e8f0">${escapeHtml(label)}</strong> como proveedor en la nube. El hardware local no afecta su rendimiento.</span>
+      </div>`;
+      return;
+    }
+
+    const fitColor = {
+      full_gpu:      '#34d399', partial_gpu:   '#38bdf8',
+      cpu_only:      '#fbbf24', cpu_fallback:  '#fbbf24',
+      ollama_gpu:    '#34d399', ollama_cpu:    '#fbbf24',
+      compat_local:  '#38bdf8', missing:       '#f87171',
+      no_model_path: '#f87171', no_hw_profile: '#fbbf24',
+    };
+    const fitIcon = {
+      full_gpu:      'bi-gpu-card',   partial_gpu:   'bi-gpu-card',
+      cpu_only:      'bi-cpu',        cpu_fallback:  'bi-cpu',
+      ollama_gpu:    'bi-gpu-card',   ollama_cpu:    'bi-cpu',
+      compat_local:  'bi-plug',       missing:       'bi-exclamation-triangle',
+      no_model_path: 'bi-exclamation-triangle', no_hw_profile: 'bi-question-circle',
+    };
+    const fit   = data.fit || 'no_hw_profile';
+    const color = fitColor[fit] || '#94a3b8';
+    const icon  = fitIcon[fit]  || 'bi-cpu';
+
+    // Chips de hardware
+    let chips = '';
+    if (data.hw && !data.no_hw_profile) {
+      const hw = data.hw;
+      const gpuText = hw.gpu_detected
+        ? escapeHtml((hw.gpu_name || 'GPU') + (hw.vram_gb ? ` · ${hw.vram_gb} GB VRAM` : '') + (hw.gpu_shared ? ' (mem. compartida)' : ''))
+        : 'Sin GPU';
+      const utilPct = data.utilization_pct;
+      const utilChip = utilPct != null
+        ? `<span class="soft-chip" style="--row-rgb:${utilPct < 30 ? '251,113,133' : utilPct < 60 ? '245,158,11' : '52,211,153'}">
+             uso VRAM: ${utilPct}%
+           </span>`
+        : '';
+      chips = `<div class="d-flex flex-wrap gap-2 mt-2">
+        <span class="soft-chip" style="--row-rgb:56,189,248"><i class="bi bi-memory me-1"></i>${hw.ram_gb || '?'} GB RAM</span>
+        <span class="soft-chip" style="--row-rgb:${hw.gpu_detected ? '52,211,153' : '148,163,184'}">${gpuText}</span>
+        ${data.optimal_params != null ? `<span class="soft-chip" style="--row-rgb:168,139,250">capas GPU: ${data.optimal_params.n_gpu_layers === -1 ? 'todas' : data.optimal_params.n_gpu_layers}</span>` : ''}
+        ${data.model_size_gb != null ? `<span class="soft-chip" style="--row-rgb:245,158,11">modelo: ${data.model_size_gb} GB</span>` : ''}
+        ${utilChip}
+      </div>`;
+    }
+
+    // Alerta de infrautilizacion
+    let underuseAlert = '';
+    if (data.utilization_pct != null && data.utilization_pct < 30 && data.suggestions?.length) {
+      underuseAlert = `<div class="d-flex align-items-start gap-2 mt-2 p-2 rounded" style="background:rgba(251,113,133,.1);border:1px solid rgba(251,113,133,.3)">
+        <i class="bi bi-exclamation-triangle-fill" style="color:#fb7185;flex-shrink:0;margin-top:.1rem"></i>
+        <span class="small" style="color:#fda4af">Solo estas usando el <strong>${data.utilization_pct}%</strong> de la memoria disponible (${data.effective_mem_gb} GB).
+        Tu hardware puede ejecutar modelos mucho mas potentes.</span>
+      </div>`;
+    }
+
+    // Sugerencias de modelos mejores
+    let suggestionsHtml = '';
+    if (data.suggestions?.length) {
+      const cards = data.suggestions.map(m => {
+        const tierLabel = {micro:'Micro',small:'Pequeno',medium:'Mediano',large:'Grande',xlarge:'Muy grande'}[m.tier] || m.tier;
+        const dlBtn = m.downloaded
+          ? `<span class="small" style="color:#34d399"><i class="bi bi-check-circle me-1"></i>Descargado</span>`
+          : `<a href="${APP_BASE}/arbiters" class="btn btn-sm" style="font-size:.72rem;padding:.2rem .55rem;background:rgba(56,189,248,.15);border:1px solid rgba(56,189,248,.35);color:#38bdf8">
+               <i class="bi bi-download me-1"></i>Descargar
+             </a>`;
+        return `<div class="d-flex align-items-center justify-content-between gap-2 py-1" style="border-bottom:1px solid #252b3d">
+          <div class="min-w-0">
+            <div class="small fw-semibold text-truncate" style="color:#e2e8f0;max-width:260px" title="${escapeHtml(m.filename)}">${escapeHtml(m.filename.replace(/\.gguf$/i,''))}</div>
+            <div style="font-size:.72rem;color:#64748b">${m.size_gb} GB${tierLabel ? ' · ' + tierLabel : ''}${m.description ? ' — ' + escapeHtml(m.description.slice(0,60)) : ''}</div>
+          </div>
+          <div class="flex-shrink-0">${dlBtn}</div>
+        </div>`;
+      }).join('');
+      suggestionsHtml = `<div class="mt-2">
+        <div style="font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#64748b;margin-bottom:.4rem">
+          <i class="bi bi-stars me-1" style="color:#c4b5fd"></i>Modelos mas capaces para tu hardware
+        </div>
+        ${cards}
+      </div>`;
+    }
+
+    body.innerHTML = `<div class="d-flex align-items-start gap-2 mb-1">
+      <i class="bi ${icon}" style="color:${color};margin-top:.2rem;flex-shrink:0"></i>
+      <span class="small" style="color:#e2e8f0">${escapeHtml(data.fit_msg || '')}</span>
+    </div>${chips}${underuseAlert}${suggestionsHtml}`;
+  } catch (err) {
+    body.innerHTML = `<div class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>Error de red: ${escapeHtml(err.message)}</div>`;
+  }
 }
 
 // --- Clic en resultado / modal ---

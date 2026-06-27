@@ -1,0 +1,550 @@
+{
+  "account_defaults": {
+    "anthropic": {
+      "lite": {
+        "itpm": null,
+        "otpm": null,
+        "rpd": null,
+        "rpm": 60
+      },
+      "mid": {
+        "itpm": null,
+        "otpm": null,
+        "rpd": null,
+        "rpm": 40
+      },
+      "other": {
+        "itpm": null,
+        "otpm": null,
+        "rpd": null,
+        "rpm": 30
+      },
+      "pro": {
+        "itpm": null,
+        "otpm": null,
+        "rpd": null,
+        "rpm": 20
+      }
+    },
+    "ollama": {
+      "lite": {
+        "rpd": null,
+        "rpm": 120,
+        "tpm": null
+      },
+      "mid": {
+        "rpd": null,
+        "rpm": 60,
+        "tpm": null
+      },
+      "other": {
+        "rpd": null,
+        "rpm": 60,
+        "tpm": null
+      },
+      "pro": {
+        "rpd": null,
+        "rpm": 30,
+        "tpm": null
+      }
+    },
+    "openai": {
+      "lite": {
+        "rpd": null,
+        "rpm": 240,
+        "tpm": null
+      },
+      "mid": {
+        "rpd": null,
+        "rpm": 120,
+        "tpm": null
+      },
+      "other": {
+        "rpd": null,
+        "rpm": 60,
+        "tpm": null
+      },
+      "pro": {
+        "rpd": null,
+        "rpm": 60,
+        "tpm": null
+      }
+    },
+    "openai_compat": {
+      "lite": {
+        "rpd": null,
+        "rpm": 240,
+        "tpm": null
+      },
+      "mid": {
+        "rpd": null,
+        "rpm": 120,
+        "tpm": null
+      },
+      "other": {
+        "rpd": null,
+        "rpm": 60,
+        "tpm": null
+      },
+      "pro": {
+        "rpd": null,
+        "rpm": 60,
+        "tpm": null
+      }
+    },
+    "vertex_gemini": {
+      "lite": {
+        "rpd": null,
+        "rpm": 240,
+        "tpm": null
+      },
+      "mid": {
+        "rpd": null,
+        "rpm": 120,
+        "tpm": null
+      },
+      "other": {
+        "rpd": null,
+        "rpm": 60,
+        "tpm": null
+      },
+      "pro": {
+        "rpd": null,
+        "rpm": 60,
+        "tpm": null
+      }
+    }
+  },
+  "account_model_limits": {
+    "anthropic": {
+      "claude-3-5-haiku": {
+        "itpm": null,
+        "otpm": null,
+        "rpd": null,
+        "rpm": 60
+      },
+      "claude-3-5-sonnet": {
+        "itpm": null,
+        "otpm": null,
+        "rpd": null,
+        "rpm": 40
+      },
+      "claude-3-opus": {
+        "itpm": null,
+        "otpm": null,
+        "rpd": null,
+        "rpm": 20
+      },
+      "claude-haiku-4-5": {
+        "itpm": null,
+        "otpm": null,
+        "rpd": null,
+        "rpm": 60
+      },
+      "claude-opus-4-0": {
+        "itpm": null,
+        "otpm": null,
+        "rpd": null,
+        "rpm": 20
+      },
+      "claude-opus-4-5": {
+        "itpm": null,
+        "otpm": null,
+        "rpd": null,
+        "rpm": 20
+      },
+      "claude-sonnet-4-0": {
+        "itpm": null,
+        "otpm": null,
+        "rpd": null,
+        "rpm": 40
+      },
+      "claude-sonnet-4-5": {
+        "itpm": null,
+        "otpm": null,
+        "rpd": null,
+        "rpm": 40
+      }
+    },
+    "ollama": {},
+    "openai": {
+      "gpt-3.5-turbo": {
+        "rpd": null,
+        "rpm": 240,
+        "tpm": null
+      },
+      "gpt-4": {
+        "rpd": null,
+        "rpm": 60,
+        "tpm": null
+      },
+      "gpt-4-turbo": {
+        "rpd": null,
+        "rpm": 60,
+        "tpm": null
+      },
+      "gpt-4o": {
+        "rpd": null,
+        "rpm": 60,
+        "tpm": null
+      },
+      "gpt-4o-mini": {
+        "rpd": null,
+        "rpm": 240,
+        "tpm": null
+      },
+      "o1": {
+        "rpd": null,
+        "rpm": 30,
+        "tpm": null
+      },
+      "o1-mini": {
+        "rpd": null,
+        "rpm": 120,
+        "tpm": null
+      },
+      "o3": {
+        "rpd": null,
+        "rpm": 30,
+        "tpm": null
+      },
+      "o3-mini": {
+        "rpd": null,
+        "rpm": 120,
+        "tpm": null
+      },
+      "o4": {
+        "rpd": null,
+        "rpm": 30,
+        "tpm": null
+      }
+    },
+    "openai_compat": {},
+    "vertex_gemini": {
+      "gemini-1.5-flash": {
+        "rpd": null,
+        "rpm": 120,
+        "tpm": null
+      },
+      "gemini-1.5-pro": {
+        "rpd": null,
+        "rpm": 60,
+        "tpm": null
+      },
+      "gemini-2.0-flash": {
+        "rpd": null,
+        "rpm": 120,
+        "tpm": null
+      },
+      "gemini-2.0-flash-lite": {
+        "rpd": null,
+        "rpm": 240,
+        "tpm": null
+      },
+      "gemini-2.5-flash": {
+        "rpd": null,
+        "rpm": 120,
+        "tpm": null
+      },
+      "gemini-2.5-flash-lite": {
+        "rpd": null,
+        "rpm": 240,
+        "tpm": null
+      },
+      "gemini-2.5-pro": {
+        "rpd": null,
+        "rpm": 60,
+        "tpm": null
+      },
+      "gemini-3-flash-preview": {
+        "rpd": null,
+        "rpm": 120,
+        "tpm": null
+      },
+      "gemini-3-pro-preview": {
+        "rpd": null,
+        "rpm": 30,
+        "tpm": null
+      },
+      "gemini-3.1-flash-lite": {
+        "rpd": null,
+        "rpm": 240,
+        "tpm": null
+      },
+      "gemini-3.1-pro-preview": {
+        "rpd": null,
+        "rpm": 30,
+        "tpm": null
+      },
+      "gemini-3.5-flash": {
+        "rpd": null,
+        "rpm": 120,
+        "tpm": null
+      },
+      "gemini-flash-latest": {
+        "rpd": null,
+        "rpm": 120,
+        "tpm": null
+      },
+      "gemini-flash-lite-latest": {
+        "rpd": null,
+        "rpm": 240,
+        "tpm": null
+      },
+      "gemini-pro-latest": {
+        "rpd": null,
+        "rpm": 60,
+        "tpm": null
+      }
+    }
+  },
+  "gemini": {
+    "_default": {
+      "free": {
+        "rpd": 500,
+        "rpm": 10,
+        "tpm": 250000
+      },
+      "paid": {
+        "rpd": null,
+        "rpm": 500,
+        "tpm": 2000000
+      }
+    },
+    "gemini-1.5-flash": {
+      "free": {
+        "rpd": 1500,
+        "rpm": 15,
+        "tpm": 1000000
+      },
+      "paid": {
+        "rpd": null,
+        "rpm": 1000,
+        "tpm": 4000000
+      }
+    },
+    "gemini-1.5-pro": {
+      "free": {
+        "rpd": 50,
+        "rpm": 2,
+        "tpm": 32000
+      },
+      "paid": {
+        "rpd": null,
+        "rpm": 360,
+        "tpm": 4000000
+      }
+    },
+    "gemini-2.0-flash": {
+      "free": {
+        "rpd": 1500,
+        "rpm": 15,
+        "tpm": 1000000
+      },
+      "paid": {
+        "rpd": null,
+        "rpm": 2000,
+        "tpm": 4000000
+      }
+    },
+    "gemini-2.0-flash-lite": {
+      "free": {
+        "rpd": 1500,
+        "rpm": 30,
+        "tpm": 1000000
+      },
+      "paid": {
+        "rpd": null,
+        "rpm": 4000,
+        "tpm": 4000000
+      }
+    },
+    "gemini-2.5-flash": {
+      "free": {
+        "rpd": 500,
+        "rpm": 10,
+        "tpm": 250000
+      },
+      "paid": {
+        "rpd": null,
+        "rpm": 1000,
+        "tpm": 4000000
+      }
+    },
+    "gemini-2.5-flash-lite": {
+      "free": {
+        "rpd": 1500,
+        "rpm": 30,
+        "tpm": 1000000
+      },
+      "paid": {
+        "rpd": null,
+        "rpm": 2000,
+        "tpm": 4000000
+      }
+    },
+    "gemini-2.5-pro": {
+      "free": {
+        "rpd": 25,
+        "rpm": 5,
+        "tpm": 250000
+      },
+      "paid": {
+        "rpd": null,
+        "rpm": 150,
+        "tpm": 2000000
+      }
+    },
+    "gemini-3": {
+      "free": {
+        "rpd": 25,
+        "rpm": 5,
+        "tpm": 250000
+      },
+      "paid": {
+        "rpd": null,
+        "rpm": 150,
+        "tpm": 2000000
+      }
+    },
+    "gemma": {
+      "free": {
+        "rpd": 1500,
+        "rpm": 30,
+        "tpm": 1000000
+      },
+      "paid": {
+        "rpd": null,
+        "rpm": 1000,
+        "tpm": 4000000
+      }
+    }
+  },
+  "openai": {
+    "_default": {
+      "rpd": 50,
+      "rpm": 10,
+      "tpm": 100000
+    },
+    "gpt-3.5-turbo": {
+      "rpd": 50,
+      "rpm": 3,
+      "tpm": 40000
+    },
+    "gpt-4.1": {
+      "rpd": 50,
+      "rpm": 3,
+      "tpm": 10000
+    },
+    "gpt-4.1-mini": {
+      "rpd": 50,
+      "rpm": 10,
+      "tpm": 60000
+    },
+    "gpt-4.1-nano": {
+      "rpd": 50,
+      "rpm": 10,
+      "tpm": 60000
+    },
+    "gpt-4o": {
+      "rpd": 50,
+      "rpm": 3,
+      "tpm": 10000
+    },
+    "gpt-4o-mini": {
+      "rpd": 50,
+      "rpm": 10,
+      "tpm": 60000
+    },
+    "gpt-5": {
+      "rpd": 50,
+      "rpm": 3,
+      "tpm": 10000
+    },
+    "gpt-5-mini": {
+      "rpd": 50,
+      "rpm": 10,
+      "tpm": 60000
+    },
+    "gpt-5-nano": {
+      "rpd": 50,
+      "rpm": 10,
+      "tpm": 40000
+    },
+    "gpt-5-pro": {
+      "rpd": 50,
+      "rpm": 10,
+      "tpm": 30000
+    },
+    "gpt-5.1": {
+      "rpd": 50,
+      "rpm": 3,
+      "tpm": 10000
+    },
+    "gpt-5.2": {
+      "rpd": 50,
+      "rpm": 3,
+      "tpm": 10000
+    },
+    "gpt-5.2-pro": {
+      "rpd": 50,
+      "rpm": 3,
+      "tpm": 10000
+    },
+    "gpt-5.3": {
+      "rpd": 50,
+      "rpm": 3,
+      "tpm": 10000
+    },
+    "gpt-5.4": {
+      "rpd": 50,
+      "rpm": 3,
+      "tpm": 10000
+    },
+    "gpt-5.4-mini": {
+      "rpd": 50,
+      "rpm": 10,
+      "tpm": 100000
+    },
+    "gpt-5.4-nano": {
+      "rpd": 50,
+      "rpm": 10,
+      "tpm": 60000
+    },
+    "gpt-5.4-pro": {
+      "rpd": 50,
+      "rpm": 3,
+      "tpm": 10000
+    },
+    "gpt-5.5": {
+      "rpd": 50,
+      "rpm": 3,
+      "tpm": 10000
+    },
+    "gpt-5.5-pro": {
+      "rpd": 50,
+      "rpm": 3,
+      "tpm": 10000
+    },
+    "o1": {
+      "rpd": 50,
+      "rpm": 10,
+      "tpm": 100000
+    },
+    "o3": {
+      "rpd": 50,
+      "rpm": 3,
+      "tpm": 100000
+    },
+    "o3-mini": {
+      "rpd": null,
+      "rpm": 150,
+      "tpm": 1000000
+    },
+    "o4-mini": {
+      "rpd": 50,
+      "rpm": 3,
+      "tpm": 100000
+    }
+  }
+}

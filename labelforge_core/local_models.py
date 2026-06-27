@@ -884,29 +884,58 @@ def _sha256_file(path: Path, chunk_size: int = 1 << 20) -> str:
 
 def _resolve_gguf_filename(repo_id: str, filename: str) -> str:
     """
-    Si el filename exacto no existe en el repo, busca coincidencia insensible
-    a mayusculas entre los archivos .gguf del repositorio.
-    Retorna el nombre correcto o el original si no se puede resolver.
+    Busca el nombre real de un archivo GGUF en el repo cuando el nombre exacto
+    no existe. Estrategias en orden de preferencia:
+      1. Coincidencia exacta ignorando mayusculas/minusculas
+      2. Mismo sufijo de cuantizacion (ej. Q4_K_M.gguf) — cubre el caso donde
+         el LLM omite el prefijo "Meta-" u otro prefijo del nombre real
+      3. Mas palabras en comun con el nombre solicitado
     """
     try:
         from huggingface_hub import HfApi
-        api = HfApi()
+        api = HfApi(token=_hf_token())
         files = list(api.list_repo_files(repo_id))
         gguf_files = [f for f in files if f.endswith(".gguf")]
+        if not gguf_files:
+            return filename
+
         filename_lower = filename.lower()
-        matches = [f for f in gguf_files if f.lower() == filename_lower]
-        if matches:
-            log.warning(
-                "[local_models] Nombre corregido para %s: %s  ->  %s",
-                repo_id, filename, matches[0],
-            )
-            return matches[0]
-        # Listar los disponibles para el mensaje de error
-        log.warning(
-            "[local_models] '%s' no encontrado en %s. Archivos GGUF disponibles: %s",
-            filename, repo_id, ", ".join(gguf_files[:10]),
-        )
+
+        # 1. Exacto case-insensitive
+        exact = [f for f in gguf_files if f.lower() == filename_lower]
+        if exact:
+            log.warning("[local_models] Nombre corregido (case) %s: %s -> %s", repo_id, filename, exact[0])
+            return exact[0]
+
+        # 2. Mismo sufijo de cuantizacion (todo lo que hay tras el ultimo guion antes de .gguf)
+        # ej. "Q4_K_M.gguf" de "Llama-3.1-8B-Instruct-Q4_K_M.gguf"
+        import re
+        quant_match = re.search(r'(Q\d[^.]*\.gguf|IQ\d[^.]*\.gguf|f16\.gguf|f32\.gguf)$', filename, re.I)
+        if quant_match:
+            quant_suffix = quant_match.group(1).lower()
+            quant_matches = [f for f in gguf_files if f.lower().endswith(quant_suffix)]
+            if len(quant_matches) == 1:
+                log.warning("[local_models] Nombre corregido (quant) %s: %s -> %s", repo_id, filename, quant_matches[0])
+                return quant_matches[0]
+            if quant_matches:
+                # Elegir el que tenga mas palabras en comun con el filename pedido
+                stem = re.sub(r'\.gguf$', '', filename_lower)
+                words = set(re.split(r'[-_.]', stem))
+                best = max(quant_matches, key=lambda f: len(words & set(re.split(r'[-_.]', f.lower()))))
+                log.warning("[local_models] Nombre corregido (quant+sim) %s: %s -> %s", repo_id, filename, best)
+                return best
+
+        log.warning("[local_models] '%s' no encontrado en %s. Disponibles: %s",
+                    filename, repo_id, ", ".join(gguf_files[:10]))
     except Exception as exc:
+        exc_str = str(exc)
+        # Propagar errores de acceso para que el usuario sepa que hacer
+        if any(k in exc_str for k in ("gated", "access", "restricted", "401", "403", "forbidden", "unauthorized")):
+            raise RuntimeError(
+                f"No se pudo acceder al repositorio '{repo_id}'. "
+                "Si es un modelo de Meta (Llama), debes aceptar la licencia en "
+                "huggingface.co/meta-llama/Llama-3.1-8B-Instruct y luego reintenta."
+            ) from exc
         log.debug("[local_models] No se pudo listar archivos de %s: %s", repo_id, exc)
     return filename
 
@@ -956,6 +985,20 @@ def _stream_download(url: str, dest: Path, progress_callback=None) -> None:
             log.info("[local_models] Archivo ya completo en .part, renombrando")
             tmp.rename(dest)
             return
+
+        if r.status_code == 401:
+            if token:
+                raise RuntimeError(
+                    "Acceso denegado (401). El token HF_TOKEN es valido pero no tienes permiso "
+                    "para este modelo. Acepta la licencia en huggingface.co (busca el repo "
+                    "original de Meta y haz clic en 'Agree and access repository')."
+                )
+            else:
+                raise RuntimeError(
+                    "Acceso denegado (401). Este modelo es privado o de acceso restringido. "
+                    "Agrega tu token de HuggingFace como HF_TOKEN en secrets/secrets.env "
+                    "y reinicia la aplicacion."
+                )
 
         r.raise_for_status()
 
@@ -1034,29 +1077,50 @@ def download_model(
         raise
     except Exception as exc:
         exc_str = str(exc)
-        # 404  ->  intentar con nombre corregido (diferencias de mayusculas/minusculas)
         if any(k in exc_str for k in ("404", "Not Found", "not found")):
-            corrected = _resolve_gguf_filename(repo_id, filename)
-            if corrected != filename:
-                dest = MODELS_DIR / corrected
-                url  = _hf_download_url(repo_id, corrected)
+            # Intentar corregir el nombre del archivo (case, quant-suffix, etc.)
+            corrected_file = _resolve_gguf_filename(repo_id, filename)
+
+            # Si el repo mismo no existe, probar variantes comunes del repo_id
+            # (ej. el LLM omite el prefijo "Meta-" del nombre del repo)
+            repo_to_use = repo_id
+            if corrected_file == filename:
+                repo_name = repo_id.split("/", 1)[-1]
+                alt_repos = []
+                if not repo_name.startswith("Meta-"):
+                    alt_repos.append(f"{repo_id.split('/')[0]}/Meta-{repo_name}")
+                for alt in alt_repos:
+                    try:
+                        alt_file = _resolve_gguf_filename(alt, filename)
+                        repo_to_use = alt
+                        corrected_file = alt_file
+                        log.warning("[local_models] Repo corregido: %s -> %s (archivo: %s)",
+                                    repo_id, alt, corrected_file)
+                        break
+                    except Exception:
+                        pass
+
+            if corrected_file != filename or repo_to_use != repo_id:
+                dest = MODELS_DIR / corrected_file
+                url  = _hf_download_url(repo_to_use, corrected_file)
                 if dest.exists():
                     log.info("[local_models] Modelo corregido ya existe en cache: %s", dest.name)
-                    _update_models_json(dest, repo_id=repo_id, description=description)
+                    _update_models_json(dest, repo_id=repo_to_use, description=description)
                     return dest
                 try:
                     _stream_download(url, dest, progress_callback=progress_callback)
-                    filename = corrected
+                    filename = corrected_file
+                    repo_id  = repo_to_use
                 except DownloadCancelled:
                     raise
                 except Exception as exc2:
                     raise RuntimeError(
-                        f"Descarga fallida para {repo_id}/{corrected}: {exc2}"
+                        f"Descarga fallida para {repo_to_use}/{corrected_file}: {exc2}"
                     ) from exc2
             else:
                 try:
                     from huggingface_hub import HfApi
-                    files = [f for f in HfApi().list_repo_files(repo_id) if f.endswith(".gguf")]
+                    files = [f for f in HfApi(token=_hf_token()).list_repo_files(repo_id) if f.endswith(".gguf")]
                     hint = f" Archivos disponibles: {', '.join(files[:6])}" if files else ""
                 except Exception:
                     hint = ""

@@ -1,202 +1,49 @@
 {% extends "base.html" %}
-{% block title %}Procesamiento - LabelForge{% endblock %}
+{% block title %}Configuracion del proceso - LabelForge{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/theme/dracula.min.css">
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/javascript/javascript.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/edit/matchbrackets.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/edit/closebrackets.min.js"></script>
+<style>
+  .CodeMirror {
+    height: 520px;
+    font-size: .82rem;
+    font-family: 'Fira Mono', 'Cascadia Code', 'Consolas', monospace;
+    border-radius: 0 0 .4rem .4rem;
+  }
+  .CodeMirror-scroll { padding-bottom: .5rem; }
+</style>
+{% endblock %}
+
 {% block content %}
 <style>
-  .field-label-row {
-    display: flex;
-    align-items: center;
-    gap: .35rem;
-    margin-bottom: .35rem;
-  }
-  .field-label-row .form-label {
-    margin-bottom: 0;
-  }
+  .field-label-row { display:flex; align-items:center; gap:.35rem; margin-bottom:.35rem; }
+  .field-label-row .form-label { margin-bottom:0; }
   .field-help-btn {
-    width: 1.25rem;
-    height: 1.25rem;
-    padding: 0;
-    border-color: #2d3148;
-    color: #8aa0bc;
-    border-radius: 50%;
-    font-size: .78rem;
-    line-height: 1;
+    width:1.25rem; height:1.25rem; padding:0; border-color:#2d3148; color:#8aa0bc;
+    border-radius:50%; font-size:.78rem; line-height:1;
   }
-  .field-help-btn:hover,
-  .field-help-btn:focus {
-    border-color: rgb(var(--tone-amber));
-    color: #e2e8f0;
-    background: rgba(var(--tone-amber), .12);
+  .field-help-btn:hover, .field-help-btn:focus {
+    border-color:rgb(var(--tone-amber)); color:#e2e8f0;
+    background:rgba(var(--tone-amber),.12);
   }
-  .processing-popover {
-    background: #1a1d27;
-    border: 1px solid rgba(var(--tone-amber), .34);
-  }
+  .processing-popover { background:#1a1d27; border:1px solid rgba(var(--tone-amber),.34); }
   .processing-popover .popover-header {
-    background: rgba(var(--tone-amber), .12);
-    border-bottom: 1px solid rgba(var(--tone-amber), .28);
-    color: #fbbf24;
-    font-size: .82rem;
+    background:rgba(var(--tone-amber),.12);
+    border-bottom:1px solid rgba(var(--tone-amber),.28);
+    color:#fbbf24; font-size:.82rem;
   }
-  .processing-popover .popover-body {
-    color: #94a3b8;
-    font-size: .82rem;
-  }
+  .processing-popover .popover-body { color:#94a3b8; font-size:.82rem; }
 </style>
 
-<div class="page-title">Procesamiento y conjunto de datos</div>
-
-<!-- =====================================================================
-     PANEL: Conjunto de Datos de Entrada
-====================================================================== -->
-<style>
-  .ds-dropzone {
-    border: 2px dashed rgba(var(--tone-cyan, 34,211,238), .4);
-    border-radius: .75rem;
-    padding: 2rem 1.5rem;
-    text-align: center;
-    cursor: pointer;
-    transition: background .2s, border-color .2s;
-    background: rgba(var(--tone-cyan, 34,211,238), .03);
-    position: relative;
-  }
-  .ds-dropzone:hover, .ds-dropzone.drag-over {
-    background: rgba(var(--tone-cyan, 34,211,238), .09);
-    border-color: rgba(var(--tone-cyan, 34,211,238), .75);
-  }
-  .ds-dropzone.drag-over {
-    box-shadow: 0 0 0 3px rgba(var(--tone-cyan, 34,211,238), .25);
-  }
-  .ds-dropzone-icon { font-size: 2.2rem; opacity: .55; }
-  .ds-file-info {
-    display:none;
-    background: rgba(255,255,255,.04);
-    border: 1px solid rgba(var(--tone-cyan, 34,211,238), .25);
-    border-radius: .5rem;
-    padding: .6rem 1rem;
-    margin-top: .75rem;
-    font-size: .85rem;
-  }
-  .ds-file-info .ds-fname { font-weight: 600; color: #e2e8f0; }
-  .ds-file-info .ds-fsize { color: #64748b; font-size: .78rem; }
-  .ds-ready-card {
-    display: none;
-    background: linear-gradient(135deg, rgba(var(--tone-emerald,16,185,129), .11), rgba(var(--tone-cyan,34,211,238), .08));
-    border: 1px solid rgba(var(--tone-emerald,16,185,129), .34);
-    border-radius: .65rem;
-    padding: .85rem 1rem;
-    margin-bottom: 1rem;
-  }
-  .ds-ready-title {
-    color: #d1fae5;
-    font-weight: 700;
-    font-size: .92rem;
-  }
-  .ds-ready-path {
-    color: #e2e8f0;
-    font-size: .86rem;
-    word-break: break-word;
-  }
-  .ds-ready-meta {
-    color: #94a3b8;
-    font-size: .78rem;
-  }
-</style>
-
-<div class="card-dark accent-panel accent-cyan mb-4">
-  <div class="card-header-label">
-    <i class="bi bi-database me-2"></i>Conjunto de datos de entrada
-  </div>
-
-  <!-- Estado del archivo que ya quedo guardado para ejecucion -->
-  <div class="ds-ready-card" id="ds-ready-card">
-    <div class="d-flex align-items-start gap-3">
-      <div class="rounded-circle d-flex align-items-center justify-content-center flex-shrink-0"
-           style="width:38px;height:38px;background:rgba(var(--tone-emerald,16,185,129),.16);border:1px solid rgba(var(--tone-emerald,16,185,129),.34);color:#34d399">
-        <i class="bi bi-check2-circle"></i>
-      </div>
-      <div style="min-width:0;flex:1">
-        <div class="ds-ready-title">Archivo listo para procesar</div>
-        <div class="ds-ready-path" id="ds-ready-path">-</div>
-        <div class="ds-ready-meta mt-1" id="ds-ready-meta"></div>
-      </div>
-      <button type="button" class="btn btn-outline-info btn-sm flex-shrink-0"
-              onclick="document.getElementById('ds-file-input').click()">
-        <i class="bi bi-arrow-repeat me-1"></i>Cambiar
-      </button>
-    </div>
-  </div>
-
-  <!-- Selector de archivo oculto -->
-  <input type="file" id="ds-file-input" accept=".csv,.xlsx,.xls"
-         style="display:none" onchange="onFileSelected(this.files)">
-
-  <!-- Zona para arrastrar y soltar -->
-  <div class="ds-dropzone" id="ds-dropzone"
-       ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
-    <div class="ds-dropzone-icon mb-2"><i class="bi bi-cloud-upload"></i></div>
-    <div class="fw-semibold text-light mb-1">Arrastra tu archivo aqui</div>
-    <div class="text-secondary small mb-3">o haz clic para abrir el explorador</div>
-    <button type="button" class="btn btn-outline-info btn-sm px-3"
-            onclick="document.getElementById('ds-file-input').click()">
-      <i class="bi bi-folder2-open me-1"></i>Seleccionar archivo
-    </button>
-    <div class="text-secondary mt-2" style="font-size:.75rem">
-      Formatos soportados: .csv &nbsp; - &nbsp; .xlsx &nbsp; - &nbsp; .xls
-    </div>
-  </div>
-
-  <!-- Informacion del archivo seleccionado -->
-  <div class="ds-file-info" id="ds-file-info">
-    <div class="d-flex align-items-center gap-2">
-      <i class="bi bi-file-earmark-spreadsheet text-info fs-5"></i>
-      <div>
-        <div class="ds-fname" id="ds-fname">-</div>
-        <div class="ds-fsize" id="ds-fsize"></div>
-      </div>
-      <div class="ms-auto" id="ds-upload-status">
-        <span class="spinner-border spinner-border-sm text-info" style="display:none" id="ds-spinner"></span>
-        <span id="ds-status-text" class="small"></span>
-      </div>
-    </div>
-    <div id="ds-file-feedback" class="mt-2 small"></div>
-  </div>
-
-  <!-- Listas de hoja y columna -->
-  <div class="row g-3 mt-1 align-items-end" id="ds-selectors" style="display:none!important">
-
-    <div class="col-md-5" id="ds-sheet-group" style="display:none">
-      <label class="form-label small text-secondary" for="ds-sheet">Hoja de calculo</label>
-      <select class="form-select" id="ds-sheet" onchange="onSheetChange()">
-        <option value="">(primera hoja)</option>
-      </select>
-      <div class="form-text text-secondary">Solo aplicable a archivos Excel.</div>
-    </div>
-
-    <div class="col-md-5" id="ds-column-group">
-      <label class="form-label small text-secondary" for="ds-column">Columna de texto a etiquetar</label>
-      <select class="form-select" id="ds-column">
-        <option value="">(primero selecciona un archivo)</option>
-      </select>
-    </div>
-
-    <div class="col-md-2 d-flex align-items-end">
-      <button class="btn btn-primary btn-sm w-100" onclick="saveDatasetConfig()">
-        <i class="bi bi-floppy me-1"></i>Guardar
-      </button>
-    </div>
-
-  </div>
-
-  <!-- Ruta guardada actualmente -->
-  <div id="ds-current-banner" class="mt-3 p-2 rounded small"
-       style="background:rgba(var(--tone-cyan,34,211,238),.08);border:1px solid rgba(var(--tone-cyan,34,211,238),.25);display:none">
-    <i class="bi bi-info-circle me-1 text-info"></i>
-    <span id="ds-current-text" class="text-secondary"></span>
-  </div>
-</div>
+<div class="page-title">Configuracion del proceso</div>
 
 <div class="card-dark accent-panel accent-amber">
-  <div class="card-header-label">Configuracion del proceso</div>
+  <div class="card-header-label">Parametros del proceso</div>
   <form id="proc-form" onsubmit="saveProcessing(event)">
     <div class="row g-4">
 
@@ -342,6 +189,29 @@
     </button>
   </form>
 </div>
+
+<div class="card-dark accent-panel accent-cyan">
+  <div class="d-flex align-items-center justify-content-between mb-2">
+    <div class="card-header-label mb-0">Limites de peticiones por modelo</div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-sm btn-outline-secondary" onclick="resetRlConfig()">
+        <i class="bi bi-arrow-counterclockwise me-1"></i>Restablecer defaults
+      </button>
+      <button class="btn btn-sm btn-primary" onclick="saveRlConfig()">
+        <i class="bi bi-floppy me-1"></i>Guardar
+      </button>
+    </div>
+  </div>
+  <p class="text-secondary small mb-2">
+    Edita los RPM, TPM y RPD por modelo. Cuatro secciones:
+    <code>gemini</code> (tiers <em>free</em> / <em>paid</em>),
+    <code>openai</code> (Tier 1, un nivel),
+    <code>account_defaults</code> (fallback por clase de modelo para Anthropic, Vertex, Ollama, etc.) y
+    <code>account_model_limits</code> (overrides por modelo para esos mismos proveedores).
+  </p>
+  <div id="rl-config-error" class="alert alert-danger py-2 mb-2 small" style="display:none"></div>
+  <div id="rl-config-editor" style="border:1px solid #2d3148;border-radius:.4rem;overflow:hidden"></div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -356,9 +226,7 @@ let rateLimitSummary = null;
 function initProcessingHelpPopovers() {
   document.querySelectorAll('[data-bs-toggle="popover"]').forEach(el => {
     bootstrap.Popover.getOrCreateInstance(el, {
-      container: 'body',
-      customClass: 'processing-popover',
-      html: false,
+      container: 'body', customClass: 'processing-popover', html: false,
     });
   });
 }
@@ -368,10 +236,7 @@ async function loadProcessing() {
     fetch(APP_BASE + '/api/processing').then(r => r.json()),
     fetch(APP_BASE + '/api/rate-limits/summary?tier=free').then(r => r.json()).catch(() => null),
   ]);
-  FIELDS.forEach(f => {
-    const el = document.getElementById(f);
-    if (el) el.value = data[f] ?? '';
-  });
+  FIELDS.forEach(f => { const el = document.getElementById(f); if (el) el.value = data[f] ?? ''; });
   rateLimitSummary = limits;
   renderRateLimitSummary();
   validateDelayInput();
@@ -385,13 +250,18 @@ function renderRateLimitSummary() {
     el.textContent = 'No se pudieron cargar los limites de peticiones. Revisa la configuracion de arbitros.';
     return;
   }
-  const tone = rateLimitSummary.global_alert === 'danger' ? 'text-danger' : (rateLimitSummary.global_alert === 'warning' ? 'text-warning' : 'text-info');
+  const tone = rateLimitSummary.global_alert === 'danger' ? 'text-danger'
+    : (rateLimitSummary.global_alert === 'warning' ? 'text-warning' : 'text-info');
   el.className = `form-text ${tone} mt-2`;
   const safeDelay = Number(rateLimitSummary.global_safe_delay || 0);
   const action = safeDelay > 0
     ? ` <button type="button" class="btn btn-link btn-sm p-0 align-baseline" onclick="useSafeDelay()">Usar espera segura</button>`
     : '';
   el.innerHTML = `${escapeHtml(rateLimitSummary.global_msg)}${action}`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]));
 }
 
 function useSafeDelay() {
@@ -417,10 +287,7 @@ async function saveProcessing(e) {
     return;
   }
   const payload = {};
-  FIELDS.forEach(f => {
-    const el = document.getElementById(f);
-    if (el) payload[f] = el.value;
-  });
+  FIELDS.forEach(f => { const el = document.getElementById(f); if (el) payload[f] = el.value; });
   const res = await fetch(APP_BASE + '/api/processing', {
     method: 'PUT', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(payload),
@@ -430,267 +297,97 @@ async function saveProcessing(e) {
   showToast('Parametros guardados');
 }
 
-/* Inicializar cuando el DOM este listo */
-document.addEventListener('DOMContentLoaded', function() {
-  try { initProcessingHelpPopovers(); } catch(e) { console.warn('Popovers no disponibles:', e); }
-  loadProcessing();
-  loadDatasetConfig();
-});
-
-/* -----------------------------------------------------------------------
-   Conjunto de datos: arrastrar, soltar, seleccionar y subir
------------------------------------------------------------------------ */
-
-let _currentServerPath = '';   // ruta en el servidor del archivo subido o configurado
-let _savedDatasetConfig = null;
-
-/* --- Arrastrar y soltar ------------------------------------------------- */
-function onDragOver(e) {
-  e.preventDefault();
-  e.stopPropagation();
-  document.getElementById('ds-dropzone').classList.add('drag-over');
-}
-function onDragLeave(e) {
-  e.preventDefault();
-  e.stopPropagation();
-  document.getElementById('ds-dropzone').classList.remove('drag-over');
-}
-function onDrop(e) {
-  e.preventDefault();
-  e.stopPropagation();
-  document.getElementById('ds-dropzone').classList.remove('drag-over');
-  const files = e.dataTransfer.files;
-  if (files && files.length > 0) onFileSelected(files);
-}
-
-/* --- Clic en la zona para abrir el selector de archivos ----------------- */
-document.addEventListener('DOMContentLoaded', function() {
-  const dropzone = document.getElementById('ds-dropzone');
-  if (dropzone) {
-    dropzone.addEventListener('click', function(e) {
-      // Evita abrir dos veces el selector al pulsar el boton o sus hijos.
-      if (e.target.closest('button')) return;
-      document.getElementById('ds-file-input').click();
-    });
+async function loadRlConfig() {
+  try {
+    const r    = await fetch(APP_BASE + '/api/rate-limits/config');
+    const data = await r.json();
+    rlEditor.setValue(JSON.stringify(data, null, 2));
+    document.getElementById('rl-config-error').style.display = 'none';
+  } catch (err) {
+    _showRlError('Error al cargar la configuracion: ' + err.message);
   }
-});
+}
 
-/* --- Seleccion de archivo ---------------------------------------------- */
-function onFileSelected(files) {
-  if (!files || files.length === 0) return;
-  const file = files[0];
-  const allowed = ['.csv', '.xlsx', '.xls'];
-  const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
-  if (!allowed.includes(ext)) {
-    setFeedback(`Formato '${ext}' no soportado. Usa .csv, .xlsx o .xls`, 'danger');
+async function saveRlConfig() {
+  const raw = rlEditor.getValue();
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    _showRlError('JSON invalido: ' + err.message);
     return;
   }
-  showFileInfo(file);
-  uploadAndInspect(file);
-}
-
-function showFileInfo(file) {
-  document.getElementById('ds-fname').textContent = file.name;
-  document.getElementById('ds-fsize').textContent = formatBytes(file.size);
-  document.getElementById('ds-file-info').style.display = '';
-  document.getElementById('ds-file-feedback').innerHTML = '';
-  setUploadStatus('', false);
-}
-
-function formatBytes(bytes) {
-  if (bytes < 1024)      return bytes + ' B';
-  if (bytes < 1048576)   return (bytes/1024).toFixed(1) + ' KB';
-  return (bytes/1048576).toFixed(1) + ' MB';
-}
-
-function setUploadStatus(text, spinning) {
-  document.getElementById('ds-spinner').style.display = spinning ? '' : 'none';
-  document.getElementById('ds-status-text').textContent = text;
-}
-
-function setFeedback(msg, type) {
-  const fb = document.getElementById('ds-file-feedback');
-  const icon = type === 'success' ? 'bi-check-circle' : 'bi-exclamation-circle';
-  fb.innerHTML = `<span class="text-${type}"><i class="bi ${icon} me-1"></i>${escapeHtml(msg)}</span>`;
-}
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
-function basename(path) {
-  return String(path || '').split(/[\\/]/).pop();
-}
-
-/* --- Subir e inspeccionar ---------------------------------------------- */
-async function uploadAndInspect(file) {
-  setUploadStatus('Subiendo...', true);
-  const selectors = document.getElementById('ds-selectors');
-  selectors.style.setProperty('display', 'none', 'important');
-
-  const formData = new FormData();
-  formData.append('file', file);
-
-  try {
-    const res = await fetch(APP_BASE + '/api/dataset/upload', { method: 'POST', body: formData });
-    const data = await res.json();
-    if (!res.ok) {
-      setUploadStatus('', false);
-      setFeedback(data.error || 'Error al subir el archivo', 'danger');
-      return;
-    }
-
-    _currentServerPath = data.path;
-    setUploadStatus('OK Listo', false);
-    setFeedback(
-      `${data.columns.length} columnas detectadas` +
-      (data.is_excel ? ` &mdash; ${data.sheets.length} hoja(s)` : '') +
-      `. Selecciona la columna y pulsa Guardar para usar este archivo.`,
-      'success'
-    );
-
-    // Lista de hojas
-    const sheetSel   = document.getElementById('ds-sheet');
-    const sheetGroup = document.getElementById('ds-sheet-group');
-    if (data.is_excel && data.sheets.length > 0) {
-      sheetSel.innerHTML = '<option value="">(primera hoja)</option>' +
-        data.sheets.map(s => `<option value="${s}">${s}</option>`).join('');
-      sheetGroup.style.display = '';
-    } else {
-      sheetSel.innerHTML = '<option value="">(primera hoja)</option>';
-      sheetGroup.style.display = 'none';
-    }
-
-    // Lista de columnas
-    populateColumnDropdown(data.columns, '');
-
-    // Mostrar seccion de selects
-    selectors.style.removeProperty('display');
-
-  } catch (e) {
-    setUploadStatus('', false);
-    setFeedback('Error de red: ' + e.message, 'danger');
-  }
-}
-
-/* --- Cambio de hoja ----------------------------------------------------- */
-async function onSheetChange() {
-  const sheet = document.getElementById('ds-sheet').value;
-  if (!_currentServerPath) return;
-  try {
-    const res = await fetch(APP_BASE + '/api/dataset/inspect', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({file: _currentServerPath, sheet}),
-    });
-    const data = await res.json();
-    if (res.ok) populateColumnDropdown(data.columns, '');
-  } catch (_) {}
-}
-
-/* --- Poblar columnas --------------------------------------------------- */
-function populateColumnDropdown(columns, current) {
-  const sel = document.getElementById('ds-column');
-  sel.innerHTML = columns
-    .map(c => `<option value="${c}" ${c === current ? 'selected' : ''}>${c}</option>`)
-    .join('');
-}
-
-/* --- Guardar configuracion --------------------------------------------- */
-async function saveDatasetConfig() {
-  const inputFile  = _currentServerPath || _savedDatasetConfig?.input_file || '';
-  const sheet      = document.getElementById('ds-sheet').value;
-  const textColumn = document.getElementById('ds-column').value;
-
-  if (!inputFile) { showToast('Primero selecciona un archivo', 'error'); return; }
-  if (!textColumn) { showToast('Selecciona la columna de texto', 'error'); return; }
-
-  const res = await fetch(APP_BASE + '/api/dataset/config', {
+  const r    = await fetch(APP_BASE + '/api/rate-limits/config', {
     method: 'PUT',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({input_file: inputFile, sheet, text_column: textColumn}),
+    body: JSON.stringify(parsed),
   });
-  const data = await res.json();
-  if (!res.ok) { showToast(data.error || 'Error al guardar', 'error'); return; }
-  _savedDatasetConfig = data;
-  showToast('Configuracion guardada OK');
-  renderDatasetBanner(data);
-  renderDatasetReady(data);
+  const data = await r.json();
+  if (!r.ok) { _showRlError(data.error || 'Error al guardar'); return; }
+  document.getElementById('rl-config-error').style.display = 'none';
+
+  showToast('Limites de peticiones guardados');
+  loadProcessing();
 }
 
-/* --- Cargar configuracion existente ------------------------------------ */
-async function loadDatasetConfig() {
+async function resetRlConfig() {
+  if (!confirm('Restablecer los limites a los valores predeterminados?\nEsto sobreescribira los cambios actuales en el editor (no en disco hasta que guardes).')) return;
   try {
-    const res = await fetch(APP_BASE + '/api/dataset/config');
-    const data = await res.json();
-    if (!res.ok || !data.input_file) return;
-    _savedDatasetConfig = data;
-    _currentServerPath = data.input_file;
-    renderDatasetBanner(data);
-    renderDatasetReady(data);
-
-    // Intenta inspeccionar el archivo ya configurado para mostrar informacion.
-    const res2 = await fetch(APP_BASE + '/api/dataset/inspect', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({file: data.input_file, sheet: data.sheet || ''}),
-    });
-    if (res2.ok) {
-      const info = await res2.json();
-      // Muestra informacion del archivo previamente configurado.
-      document.getElementById('ds-fname').textContent = basename(data.input_file);
-      document.getElementById('ds-fsize').textContent = `ya configurado en el servidor`;
-      document.getElementById('ds-file-info').style.display = '';
-      setFeedback(
-        `${info.columns.length} columnas detectadas` +
-        (info.is_excel ? ` &mdash; ${info.sheets.length} hoja(s)` : ''),
-        'success'
-      );
-
-      const sheetSel   = document.getElementById('ds-sheet');
-      const sheetGroup = document.getElementById('ds-sheet-group');
-      if (info.is_excel && info.sheets.length > 0) {
-        sheetSel.innerHTML = '<option value="">(primera hoja)</option>' +
-          info.sheets.map(s => `<option value="${s}" ${s===data.sheet?'selected':''}>${s}</option>`).join('');
-        sheetGroup.style.display = '';
-      }
-      populateColumnDropdown(info.columns, data.text_column || '');
-
-      const selectors = document.getElementById('ds-selectors');
-      selectors.style.removeProperty('display');
-    }
-  } catch (_) {}
-}
-
-function renderDatasetReady(data) {
-  const card = document.getElementById('ds-ready-card');
-  const path = document.getElementById('ds-ready-path');
-  const meta = document.getElementById('ds-ready-meta');
-  if (!data || !data.input_file) {
-    card.style.display = 'none';
-    return;
+    const r    = await fetch(APP_BASE + '/api/rate-limits/config/defaults');
+    const data = await r.json();
+    rlEditor.setValue(JSON.stringify(data, null, 2));
+    document.getElementById('rl-config-error').style.display = 'none';
+    showToast('Valores predeterminados cargados en el editor (no guardados aun)', 'warn');
+  } catch (err) {
+    _showRlError('Error al obtener defaults: ' + err.message);
   }
-
-  const sheet = data.sheet ? `Hoja: ${escapeHtml(data.sheet)}` : 'Hoja: primera/disponible';
-  const col = data.text_column ? `Columna: ${escapeHtml(data.text_column)}` : 'Columna: pendiente';
-  path.innerHTML = `<i class="bi bi-file-earmark-spreadsheet me-1 text-info"></i>${escapeHtml(data.input_file)}`;
-  meta.innerHTML = `${sheet} <span class="mx-2"> - </span> ${col} <span class="mx-2"> - </span> Se usara en la proxima ejecucion`;
-  card.style.display = '';
 }
 
-function renderDatasetBanner(data) {
-  const banner = document.getElementById('ds-current-banner');
-  const text   = document.getElementById('ds-current-text');
-  if (!data.input_file) { banner.style.display = 'none'; return; }
-  const sheet  = data.sheet ? ` &mdash; hoja: <strong>${data.sheet}</strong>` : '';
-  const col    = data.text_column ? ` &mdash; columna: <strong>${data.text_column}</strong>` : '';
-  text.innerHTML = `<strong>${data.input_file}</strong>${sheet}${col}`;
-  banner.style.display = '';
+function _showRlError(msg) {
+  const el = document.getElementById('rl-config-error');
+  el.textContent = msg;
+  el.style.display = '';
 }
+
+var rlEditor;
+
+function _rlEditorInit() {
+  const container = document.getElementById('rl-config-editor');
+  if (typeof CodeMirror !== 'undefined') {
+    rlEditor = CodeMirror(container, {
+      mode:              { name: 'javascript', json: true },
+      theme:             'dracula',
+      lineNumbers:       true,
+      matchBrackets:     true,
+      autoCloseBrackets: true,
+      tabSize:           2,
+      indentWithTabs:    false,
+      lineWrapping:      false,
+      extraKeys: {
+        'Ctrl-S': saveRlConfig,
+        'Tab': cm => cm.execCommand('indentMore'),
+      },
+    });
+  } else {
+    // Fallback: textarea si CodeMirror no cargo
+    const ta = document.createElement('textarea');
+    ta.id = 'rl-config-textarea-fallback';
+    ta.style.cssText = 'width:100%;height:520px;font-family:monospace;font-size:.8rem;background:#1e1e2e;color:#f8f8f2;border:none;padding:.5rem;resize:vertical';
+    ta.spellcheck = false;
+    container.appendChild(ta);
+    rlEditor = {
+      getValue: () => ta.value,
+      setValue: (v) => { ta.value = v; },
+    };
+    console.warn('[LabelForge] CodeMirror no disponible, usando textarea de fallback');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  try { initProcessingHelpPopovers(); } catch (e) { console.warn('Popovers:', e); }
+  loadProcessing();
+  _rlEditorInit();
+  loadRlConfig();
+});
 </script>
 {% endblock %}

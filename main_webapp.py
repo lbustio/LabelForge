@@ -74,6 +74,10 @@ def main():
         "--debug", action="store_true", default=False,
         help="Activar modo debug de Flask (no usar en produccion)"
     )
+    parser.add_argument(
+        "--reload", action="store_true", default=False,
+        help="Recargar automaticamente al editar codigo (desarrollo; sin debugger)"
+    )
     args = parser.parse_args()
 
     if args.debug and args.host not in ("127.0.0.1", "localhost", "::1"):
@@ -96,13 +100,27 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     app.logger.setLevel(logging.INFO)
 
-    app.run(
-        host=args.host,
-        port=args.port,
-        debug=args.debug,
-        threaded=True,
-        use_reloader=args.debug,
-    )
+    if args.debug:
+        app.run(
+            host=args.host,
+            port=args.port,
+            debug=True,
+            threaded=True,
+            use_reloader=True,
+        )
+    elif args.reload:
+        print(f"  Servidor    ->  Flask dev + auto-reload (edicion en vivo)")
+        app.run(
+            host=args.host,
+            port=args.port,
+            debug=False,
+            threaded=True,
+            use_reloader=True,
+        )
+    else:
+        from waitress import serve
+        print(f"  Servidor    ->  waitress (produccion)")
+        serve(app, host=args.host, port=args.port, threads=8)
 
 
 if __name__ == "__main__":

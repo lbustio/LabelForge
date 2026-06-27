@@ -38,6 +38,7 @@ config/*.private.json
 *.private.json
 *secret*.json
 *credentials*.json
+__trash__/
 
 # ---------------------------------------------------------------------------
 # Datos locales, datasets grandes y material que no debe publicarse
@@ -156,6 +157,12 @@ artifacts/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# ---------------------------------------------------------------------------
+# Servicio Windows (WinSW) — rutas hardcodeadas a la máquina local
+# ---------------------------------------------------------------------------
+labelforge-service.exe
+labelforge-service.xml
 
 # ---------------------------------------------------------------------------
 # Claude Code memory y archivos temporales de herramientas

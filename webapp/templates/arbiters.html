@@ -11,9 +11,21 @@
     <button class="btn btn-outline-secondary btn-sm" onclick="openExportModal()" title="Exportar arbitros cifrados">
       <i class="bi bi-box-arrow-up me-1"></i>Exportar
     </button>
+    <button class="btn btn-outline-info btn-sm" onclick="openDownloadModal()">
+      <i class="bi bi-cpu me-1"></i>Modelos GGUF
+    </button>
+    <button class="btn btn-outline-warning btn-sm" onclick="togglePageHwPanel()">
+      <i class="bi bi-stars me-1"></i>Mejor modelo para mi HW
+    </button>
     <button class="btn btn-primary btn-sm" onclick="openModal()">
       <i class="bi bi-plus-lg me-1"></i>Nuevo arbitro
     </button>
+  </div>
+</div>
+
+<div id="page-hw-panel" class="card-dark mb-3 p-3 rounded" style="display:none;background:#0f1117;border:1px solid #2d3148">
+  <div id="page-hw-body" class="text-secondary" style="font-size:.84rem">
+    <div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm"></div> Analizando hardware y catalogo...</div>
   </div>
 </div>
 
@@ -97,11 +109,16 @@
               <input type="number" id="arb-n-ctx" class="form-control" value="4096" min="512" max="131072" step="512">
               <div class="form-text text-secondary">Ventana de contexto maximo del modelo</div>
             </div>
-            <div class="col-12">
+            <div class="col-12 d-flex align-items-center gap-2 flex-wrap">
               <button type="button" class="btn btn-sm btn-outline-info" onclick="openDownloadModal()">
                 <i class="bi bi-download me-1"></i>Descargar modelos recomendados
               </button>
-              <span class="text-secondary small ms-2">Descarga modelos GGUF optimizados para tu hardware</span>
+              <button type="button" class="btn btn-sm btn-outline-warning" onclick="checkLocalGgufHardware()">
+                <i class="bi bi-stars me-1"></i>Verificar mejor modelo para este hardware
+              </button>
+            </div>
+            <div class="col-12" id="gguf-hw-check-panel" style="display:none">
+              <div id="gguf-hw-check-body" class="p-2 rounded" style="background:#0f1117;border:1px solid #2d3148;font-size:.84rem"></div>
             </div>
           </div>
 
@@ -311,28 +328,6 @@
           </button>
         </div>
         <div id="cached-models-list" class="mb-3">
-          <div class="text-secondary small">Cargando...</div>
-        </div>
-
-        <!-- Modelos archivados -->
-        <div class="d-flex align-items-center justify-content-between mb-2">
-          <div class="fw-semibold small text-secondary"><i class="bi bi-archive me-1"></i>Archivados <span class="text-secondary fw-normal" style="font-size:.7rem">(models/archive/)</span></div>
-          <button class="btn btn-sm btn-outline-secondary" onclick="loadArchivedModels()" title="Refrescar modelos archivados">
-            <i class="bi bi-arrow-clockwise me-1"></i>Refrescar
-          </button>
-        </div>
-        <div id="archived-models-list" class="mb-3">
-          <div class="text-secondary small">Cargando...</div>
-        </div>
-
-        <!-- Modelos externos -->
-        <div class="d-flex align-items-center justify-content-between mb-2">
-          <div class="fw-semibold small text-secondary"><i class="bi bi-folder-symlink me-1"></i>Externos <span class="text-secondary fw-normal" style="font-size:.7rem">(movidos fuera del cache)</span></div>
-          <button class="btn btn-sm btn-outline-secondary" onclick="loadExternalModels()" title="Refrescar modelos externos">
-            <i class="bi bi-arrow-clockwise me-1"></i>Refrescar
-          </button>
-        </div>
-        <div id="external-models-list" class="mb-3">
           <div class="text-secondary small">Cargando...</div>
         </div>
 
@@ -818,6 +813,86 @@ async function loadRateLimitInfo() {
 }
 
 // ---------------------------------------------------------------------------
+// Verificacion de hardware para el arbitro Local GGUF en edicion
+// ---------------------------------------------------------------------------
+async function checkLocalGgufHardware() {
+  const panel  = document.getElementById('gguf-hw-check-panel');
+  const body   = document.getElementById('gguf-hw-check-body');
+  const arbId  = document.getElementById('arb-editing-id').value.trim();
+
+  panel.style.display = '';
+  if (!arbId) {
+    body.innerHTML = `<span class="text-warning"><i class="bi bi-info-circle me-1"></i>Guarda el arbitro primero para poder verificar el hardware.</span>`;
+    return;
+  }
+
+  body.innerHTML = `<div class="d-flex align-items-center gap-2 text-secondary">
+    <div class="spinner-border spinner-border-sm"></div> Analizando hardware y catalogo de modelos...
+  </div>`;
+
+  try {
+    const r    = await fetch(`${APP_BASE}/api/arbiters/${encodeURIComponent(arbId)}/hw-check`);
+    const data = await r.json();
+    if (!r.ok) { body.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(data.error || 'Error')}</span>`; return; }
+
+    if (!data.is_local) {
+      body.innerHTML = `<span class="text-secondary"><i class="bi bi-cloud me-1"></i>Este proveedor es remoto; el hardware local no aplica.</span>`;
+      return;
+    }
+
+    // Linea de estado principal
+    const fitColor = { full_gpu:'#34d399', partial_gpu:'#38bdf8', cpu_only:'#fbbf24', cpu_fallback:'#fbbf24', missing:'#f87171', no_model_path:'#f87171', no_hw_profile:'#fbbf24' };
+    const fitIcon  = { full_gpu:'bi-gpu-card', partial_gpu:'bi-gpu-card', cpu_only:'bi-cpu', cpu_fallback:'bi-cpu', missing:'bi-exclamation-triangle', no_model_path:'bi-exclamation-triangle', no_hw_profile:'bi-question-circle' };
+    const fit   = data.fit || 'no_hw_profile';
+    const color = fitColor[fit] || '#94a3b8';
+    const icon  = fitIcon[fit]  || 'bi-cpu';
+
+    let html = `<div class="d-flex align-items-start gap-2 mb-2">
+      <i class="bi ${icon}" style="color:${color};flex-shrink:0;margin-top:.15rem"></i>
+      <span style="color:#e2e8f0">${escapeHtml(data.fit_msg || '')}</span>
+    </div>`;
+
+    // Chips de HW + utilizacion
+    if (data.hw && !data.no_hw_profile) {
+      const hw  = data.hw;
+      const pct = data.utilization_pct;
+      const pctColor = pct == null ? '#94a3b8' : pct < 30 ? '#fb7185' : pct < 60 ? '#fbbf24' : '#34d399';
+      const gpuText = hw.gpu_detected
+        ? escapeHtml((hw.gpu_name || 'GPU') + (hw.vram_gb ? ` ${hw.vram_gb} GB VRAM` : '') + (hw.gpu_shared ? ' (compartida)' : ''))
+        : 'Sin GPU';
+      html += `<div class="d-flex flex-wrap gap-2 mb-2">
+        <span class="soft-chip" style="--row-rgb:56,189,248"><i class="bi bi-memory me-1"></i>${hw.ram_gb || '?'} GB RAM</span>
+        <span class="soft-chip" style="--row-rgb:${hw.gpu_detected ? '52,211,153' : '148,163,184'}">${gpuText}</span>
+        ${data.model_size_gb != null ? `<span class="soft-chip" style="--row-rgb:245,158,11">modelo actual: ${data.model_size_gb} GB</span>` : ''}
+        ${pct != null ? `<span class="soft-chip" style="--row-rgb:${pctColor.replace('#','').match(/../g)?.map(h=>parseInt(h,16)).join(',') || '148,163,184'}">uso memoria: ${pct}%</span>` : ''}
+      </div>`;
+    }
+
+    // Alerta de infrautilizacion
+    if (data.utilization_pct != null && data.utilization_pct < 30 && data.suggestions?.length) {
+      html += `<div class="d-flex align-items-start gap-2 mb-2 p-2 rounded" style="background:rgba(251,113,133,.1);border:1px solid rgba(251,113,133,.28)">
+        <i class="bi bi-exclamation-triangle-fill" style="color:#fb7185;flex-shrink:0"></i>
+        <span style="color:#fda4af;font-size:.82rem">Solo estas usando el <strong>${data.utilization_pct}%</strong> de la memoria disponible (${data.effective_mem_gb} GB util).
+        Tu hardware puede correr modelos mucho mas capaces.</span>
+      </div>`;
+    }
+
+    // Sugerencias de modelos mejores
+    if (data.suggestions?.length) {
+      html += `<div style="font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#64748b;margin-bottom:.4rem">
+        <i class="bi bi-stars me-1" style="color:#c4b5fd"></i>Modelos mas capaces compatibles con tu hardware
+      </div>`;
+      html += data.suggestions.map(m => ggufCard(m, 'recommended', {downloaded: m.downloaded})).join('');
+    } else if (!data.fit?.startsWith('no') && !data.fit?.includes('missing')) {
+      html += `<div class="text-secondary" style="font-size:.82rem"><i class="bi bi-check2-circle me-1 text-success"></i>El modelo configurado es apropiado para este hardware o no hay alternativas mas grandes en el catalogo.</div>`;
+    }
+
+    body.innerHTML = html;
+  } catch (err) {
+    body.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>Error de red: ${escapeHtml(err.message)}</span>`;
+  }
+}
+
 // Lista de arbitros
 // ---------------------------------------------------------------------------
 async function loadArbiters() {
@@ -977,6 +1052,8 @@ function openModal(arbId = null) {
 
   document.getElementById('arb-editing-id').value = arbId || '';
   document.getElementById('arb-id').disabled = !!arbId;
+  document.getElementById('gguf-hw-check-panel').style.display = 'none';
+  document.getElementById('gguf-hw-check-body').innerHTML = '';
   document.getElementById('model-grid').innerHTML =
     `<div class="col-12 text-center text-secondary py-4" id="model-grid-placeholder">
       <i class="bi bi-arrow-up-circle me-1"></i>Selecciona un proveedor para ver los modelos disponibles
@@ -1004,12 +1081,14 @@ function openModal(arbId = null) {
     document.querySelectorAll('.provider-tab').forEach(b =>
       b.classList.toggle('active', b.dataset.provider === activeProvider)
     );
-    const needKey = !["llama_cpp", "vertex_gemini"].includes(activeProvider);
-    const needUrl = ["openai_compat"].includes(activeProvider);
+    const needKey   = !["llama_cpp", "vertex_gemini"].includes(activeProvider);
+    const needUrl   = ["openai_compat"].includes(activeProvider);
     const needVertex = activeProvider === "vertex_gemini";
-    document.getElementById('apikey-section').style.setProperty('display', needKey ? '' : 'none', 'important');
-    document.getElementById('baseurl-section').style.setProperty('display', needUrl ? '' : 'none', 'important');
+    const needLocal  = activeProvider === "llama_cpp";
+    document.getElementById('apikey-section').style.setProperty('display', needKey    ? '' : 'none', 'important');
+    document.getElementById('baseurl-section').style.setProperty('display', needUrl   ? '' : 'none', 'important');
     document.getElementById('vertex-section').style.setProperty('display', needVertex ? '' : 'none', 'important');
+    document.getElementById('local-gguf-section').style.setProperty('display', needLocal ? '' : 'none', 'important');
     updateApiKeyHelp();
     updateApiKeyStatus(arbId);
     // Cargar modelos y mostrar el seleccionado
@@ -1082,10 +1161,15 @@ async function saveArbiter() {
     showToast('El ID es requerido', 'error'); return;
   }
 
-  const url    = editingId ? `/api/arbiters/${editingId}` : '/api/arbiters';
+  const url    = editingId ? `${APP_BASE}/api/arbiters/${editingId}` : `${APP_BASE}/api/arbiters`;
   const method = editingId ? 'PUT' : 'POST';
-  const res    = await fetch(url, {method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
-  const data   = await res.json();
+  let res, data;
+  try {
+    res  = await fetch(url, {method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+    data = await res.json();
+  } catch(e) {
+    showToast('Error de red al guardar: ' + e.message, 'error'); return;
+  }
   if (!res.ok) { showToast(data.error || 'Error al guardar', 'error'); return; }
 
   bootstrap.Modal.getOrCreateInstance(document.getElementById('arbModal')).hide();
@@ -1286,6 +1370,57 @@ async function importArbiters() {
 loadArbiters();
 
 // ---------------------------------------------------------------------------
+// Panel de HW / mejor modelo — pagina principal de arbitros
+// ---------------------------------------------------------------------------
+let _pageHwLoaded = false;
+
+function togglePageHwPanel() {
+  const panel = document.getElementById('page-hw-panel');
+  const visible = panel.style.display !== 'none';
+  panel.style.display = visible ? 'none' : '';
+  if (!visible && !_pageHwLoaded) checkPageHardware();
+}
+
+async function checkPageHardware() {
+  const body = document.getElementById('page-hw-body');
+  try {
+    const [hw, recs] = await Promise.all([
+      fetch(APP_BASE + '/api/local/hardware').then(r => r.json()),
+      fetch(APP_BASE + '/api/local/recommended').then(r => r.json()),
+    ]);
+
+    let html = '';
+
+    if (hw && !hw.error) {
+      const gpu = hw.gpu || {};
+      const gpuText = gpu.detected
+        ? escapeHtml((gpu.name || 'GPU') + (gpu.vram_gb ? ` ${gpu.vram_gb} GB VRAM` : '') + (gpu.shared_memory ? ' (compartida)' : ''))
+        : 'Sin GPU';
+      html += `<div class="d-flex flex-wrap gap-2 mb-3">
+        <span class="soft-chip" style="--row-rgb:56,189,248"><i class="bi bi-memory me-1"></i>${hw.ram_gb || '?'} GB RAM</span>
+        <span class="soft-chip" style="--row-rgb:${gpu.detected ? '52,211,153' : '148,163,184'}">${gpuText}</span>
+        <span class="soft-chip" style="--row-rgb:148,163,184"><i class="bi bi-cpu me-1"></i>${escapeHtml((hw.best_backend || 'cpu').toUpperCase())}</span>
+      </div>`;
+    }
+
+    const compatible = Array.isArray(recs) ? recs.filter(m => m.fits_in_memory !== false) : [];
+    if (compatible.length) {
+      html += `<div style="font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#64748b;margin-bottom:.5rem">
+        <i class="bi bi-stars me-1" style="color:#c4b5fd"></i>Modelos compatibles con tu hardware (pendientes de descargar)
+      </div>`;
+      html += compatible.slice(0, 4).map(m => ggufCard(m, 'recommended', {downloaded: m.downloaded})).join('');
+    } else {
+      html += `<div class="text-secondary small"><i class="bi bi-check2-circle me-1 text-success"></i>No hay modelos pendientes — todo lo recomendado para tu hardware ya esta descargado.</div>`;
+    }
+
+    body.innerHTML = html;
+    _pageHwLoaded = true;
+  } catch(e) {
+    body.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>Error: ${escapeHtml(e.message)}</span>`;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Modal GGUF: tarjetas gestionables, progreso por modelo y descargas paralelas
 // ---------------------------------------------------------------------------
 const ggufActiveDownloads = new Map();
@@ -1351,23 +1486,11 @@ function ggufCard(model, kind, options = {}) {
 
   if (kind === 'cached') {
     actions = `
-      <button class="btn btn-sm btn-outline-secondary" onclick="archiveModel('${escapeHtml(filename)}', this)" title="Guardar para despues"><i class="bi bi-archive"></i></button>
-      <button class="btn btn-sm btn-outline-warning" onclick="moveModel('${escapeHtml(filename)}', this)" title="Mover a otra carpeta"><i class="bi bi-folder-symlink"></i></button>
       <button class="btn btn-sm btn-outline-danger" onclick="deleteModel('${escapeHtml(filename)}', this)" title="Eliminar"><i class="bi bi-trash3"></i></button>`;
-  } else if (kind === 'archived') {
-    actions = `
-      <button class="btn btn-sm btn-outline-success" onclick="restoreModel('${escapeHtml(filename)}', this)" title="Cargar de nuevo"><i class="bi bi-box-arrow-in-down"></i></button>
-      <button class="btn btn-sm btn-outline-danger" onclick="deleteArchivedModel('${escapeHtml(filename)}', this)" title="Eliminar guardado"><i class="bi bi-trash3"></i></button>`;
-  } else if (kind === 'external') {
-    const existsWarning = model.exists === false
-      ? `<span class="text-warning ms-1" title="El archivo ya no esta en la ruta registrada"><i class="bi bi-exclamation-triangle"></i></span>`
-      : '';
-    actions = `
-      <button class="btn btn-sm btn-outline-success" onclick="restoreExternalModel('${escapeHtml(filename)}', this)" title="Restaurar a models/"${model.exists === false ? ' disabled' : ''}><i class="bi bi-box-arrow-in-down me-1"></i>Restaurar</button>
-      <button class="btn btn-sm btn-outline-secondary" onclick="unregisterExternalModel('${escapeHtml(filename)}', this)" title="Quitar del registro"><i class="bi bi-x-circle"></i></button>
-      ${existsWarning}`;
   } else if (kind === 'recommended') {
-    actions = `<button class="btn btn-sm btn-outline-info" onclick="startDownload('${escapeHtml(repoId)}','${escapeHtml(filename)}',this,decodeURIComponent('${encodeURIComponent(description)}'))"><i class="bi bi-download me-1"></i>Descargar</button>`;
+    actions = options.downloaded
+      ? `<span style="font-size:.72rem;color:#34d399"><i class="bi bi-check-circle me-1"></i>Ya descargado</span>`
+      : `<button class="btn btn-sm btn-outline-info" onclick="startDownload('${escapeHtml(repoId)}','${escapeHtml(filename)}',this,decodeURIComponent('${encodeURIComponent(description)}'))"><i class="bi bi-download me-1"></i>Descargar</button>`;
   }
 
   return `
@@ -1418,7 +1541,7 @@ async function openDownloadModal() {
     hwBody.innerHTML = `<span class="text-danger">Error al cargar hardware: ${escapeHtml(e.message)}</span>`;
   }
 
-  await Promise.all([loadCachedModels(), loadArchivedModels(), loadExternalModels(), loadRecommended(false)]);
+  await Promise.all([loadCachedModels(), loadRecommended(false)]);
 }
 
 async function loadCachedModels() {
@@ -1436,21 +1559,6 @@ async function loadCachedModels() {
   }
 }
 
-async function loadArchivedModels() {
-  const listEl = document.getElementById('archived-models-list');
-  if (!listEl) return;
-  listEl.innerHTML = '<div class="text-secondary small"><div class="spinner-border spinner-border-sm me-2"></div>Cargando...</div>';
-  try {
-    const models = await fetch(APP_BASE + '/api/local/archive').then(r => r.json());
-    if (models.error) throw new Error(models.error);
-    listEl.innerHTML = models.length
-      ? models.map(m => ggufCard(m, 'archived', {border: '#3a3520'})).join('')
-      : '<div class="text-secondary small">No hay modelos guardados para despues.</div>';
-  } catch(e) {
-    listEl.innerHTML = `<div class="text-danger small">${escapeHtml(e.message)}</div>`;
-  }
-}
-
 async function deleteModel(filename, btn) {
   if (!confirm(`Eliminar ${filename}?`)) return;
   btn.disabled = true;
@@ -1459,112 +1567,6 @@ async function deleteModel(filename, btn) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al eliminar');
     await Promise.all([loadCachedModels(), loadModels(), loadRecommended(false)]);
-  } catch(e) {
-    ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}`);
-    btn.disabled = false;
-  }
-}
-
-async function archiveModel(filename, btn) {
-  btn.disabled = true;
-  try {
-    const res = await fetch(`${APP_BASE}/api/local/model/${encodeURIComponent(filename)}/archive`, {method: 'POST'});
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Error al guardar');
-    await Promise.all([loadCachedModels(), loadArchivedModels(), loadModels(), loadRecommended(false)]);
-  } catch(e) {
-    ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}`);
-    btn.disabled = false;
-  }
-}
-
-async function moveModel(filename, btn) {
-  const destinationDir = prompt(
-    `Carpeta destino absoluta para mover ${filename}:`,
-    ''
-  );
-  if (!destinationDir) return;
-  btn.disabled = true;
-  ggufSetStatus(filename, 'canceling', 25, `<i class="bi bi-folder-symlink me-1"></i>Moviendo a ${escapeHtml(destinationDir)}...`);
-  try {
-    const res = await fetch(`${APP_BASE}/api/local/model/${encodeURIComponent(filename)}/move`, {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({destination_dir: destinationDir}),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Error al mover');
-    ggufSetStatus(filename, 'done', 100, `<i class="bi bi-check2-circle me-1"></i>Movido a ${escapeHtml(data.destination || destinationDir)}`);
-    await Promise.all([loadCachedModels(), loadModels(), loadRecommended(false)]);
-  } catch(e) {
-    ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}`);
-    btn.disabled = false;
-  }
-}
-
-async function restoreModel(filename, btn) {
-  btn.disabled = true;
-  try {
-    const res = await fetch(`${APP_BASE}/api/local/archive/${encodeURIComponent(filename)}/restore`, {method: 'POST'});
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Error al cargar');
-    await Promise.all([loadCachedModels(), loadArchivedModels(), loadModels(), loadRecommended(false)]);
-  } catch(e) {
-    ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}`);
-    btn.disabled = false;
-  }
-}
-
-async function loadExternalModels() {
-  const listEl = document.getElementById('external-models-list');
-  if (!listEl) return;
-  listEl.innerHTML = '<div class="text-secondary small"><div class="spinner-border spinner-border-sm me-2"></div>Cargando...</div>';
-  try {
-    const models = await fetch(APP_BASE + '/api/local/external').then(r => r.json());
-    if (models.error) throw new Error(models.error);
-    listEl.innerHTML = models.length
-      ? models.map(m => ggufCard(m, 'external', {border: '#2d3a3a'})).join('')
-      : '<div class="text-secondary small">No hay modelos registrados fuera del cache.</div>';
-  } catch(e) {
-    listEl.innerHTML = `<div class="text-danger small">${escapeHtml(e.message)}</div>`;
-  }
-}
-
-async function restoreExternalModel(filename, btn) {
-  btn.disabled = true;
-  try {
-    const res = await fetch(`${APP_BASE}/api/local/external/${encodeURIComponent(filename)}/restore`, {method: 'POST'});
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Error al restaurar');
-    await Promise.all([loadCachedModels(), loadExternalModels(), loadModels(), loadRecommended(false)]);
-  } catch(e) {
-    ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}`);
-    btn.disabled = false;
-  }
-}
-
-async function unregisterExternalModel(filename, btn) {
-  if (!confirm(`Quitar "${filename}" del registro? El archivo no se elimina.`)) return;
-  btn.disabled = true;
-  try {
-    const res = await fetch(`${APP_BASE}/api/local/external/${encodeURIComponent(filename)}`, {method: 'DELETE'});
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Error al desregistrar');
-    await Promise.all([loadExternalModels(), loadRecommended(false)]);
-  } catch(e) {
-    ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}`);
-    btn.disabled = false;
-  }
-}
-
-async function deleteArchivedModel(filename, btn) {
-  if (!confirm(`Eliminar definitivamente ${filename}?`)) return;
-  btn.disabled = true;
-  try {
-    const res = await fetch(`${APP_BASE}/api/local/archive/${encodeURIComponent(filename)}`, {method: 'DELETE'});
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Error al eliminar');
-    await Promise.all([loadArchivedModels(), loadRecommended(false)]);
   } catch(e) {
     ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}`);
     btn.disabled = false;
@@ -1602,8 +1604,10 @@ async function loadRecommended(forceRefresh) {
   listEl.innerHTML = `<div class="text-secondary small"><div class="spinner-border spinner-border-sm me-2"></div>${forceRefresh ? 'Consultando LLMs configurados...' : 'Cargando recomendaciones...'}</div>`;
   if (sourceEl) sourceEl.textContent = '';
   try {
-    const url = '/api/local/recommended' + (forceRefresh ? '?refresh=1' : '');
-    const models = await fetch(url).then(r => r.json());
+    const url = APP_BASE + '/api/local/recommended' + (forceRefresh ? '?refresh=1' : '');
+    const r0  = await fetch(url);
+    if (!r0.headers.get('content-type')?.includes('application/json')) throw new Error(await r0.text());
+    const models = await r0.json();
     if (models.error) throw new Error(models.error);
     if (!models.length) {
       listEl.innerHTML = '<div class="text-secondary small">No hay modelos recomendados pendientes para descargar.</div>';

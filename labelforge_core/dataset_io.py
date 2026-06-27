@@ -146,6 +146,109 @@ def load_dataset(
     return rows, fieldnames
 
 
+def profile_dataset(
+    input_path: str | Path,
+    sheet: str | int | None = "",
+    max_preview_rows: int = 8,
+    max_stats_rows: int = 10_000,
+) -> dict:
+    """
+    Devuelve un perfil rico del dataset: forma, tipos de columna, tasa de relleno,
+    valores de muestra, estadisticas numericas y una vista previa de las primeras filas.
+    Equivalente a combinar df.info(), df.describe() y df.head().
+    """
+    path = Path(input_path)
+    suffix = path.suffix.lower()
+
+    if suffix in EXCEL_SUFFIXES:
+        rows, fieldnames, sheets, resolved_sheet = _excel_rows(path, sheet)
+        is_excel = True
+    elif suffix in CSV_SUFFIXES:
+        rows, fieldnames = _csv_rows(path)
+        sheets, resolved_sheet = [], ""
+        is_excel = False
+    else:
+        raise DatasetError(f"Formato no soportado: '{suffix}'. Usa {_format_suffixes()}.")
+
+    n_rows = len(rows)
+    stat_rows = rows[:max_stats_rows]
+
+    columns: list[dict] = []
+    for col in fieldnames:
+        values = [r.get(col) for r in stat_rows]
+        non_null = sum(1 for v in values if v not in (None, ""))
+
+        numeric_vals: list[float] = []
+        for v in values:
+            if v not in (None, ""):
+                try:
+                    numeric_vals.append(float(v))
+                except (ValueError, TypeError):
+                    pass
+
+        is_numeric = bool(numeric_vals) and (len(numeric_vals) / max(non_null, 1)) >= 0.8
+        col_type = "number" if is_numeric else "text"
+
+        stats: dict | None = None
+        if is_numeric:
+            nv = sorted(numeric_vals)
+            n = len(nv)
+            mean = sum(nv) / n
+            std = (sum((x - mean) ** 2 for x in nv) / n) ** 0.5 if n > 1 else 0.0
+
+            def _pct(lst: list[float], p: float) -> float:
+                i = min(int(p * len(lst)), len(lst) - 1)
+                return round(lst[i], 4)
+
+            stats = {
+                "count": n,
+                "mean": round(mean, 4),
+                "std": round(std, 4),
+                "min": round(nv[0], 4),
+                "q25": _pct(nv, 0.25),
+                "q50": _pct(nv, 0.50),
+                "q75": _pct(nv, 0.75),
+                "max": round(nv[-1], 4),
+            }
+
+        sample: list[str] = []
+        seen: set[str] = set()
+        for v in values:
+            sv = str(v).strip() if v not in (None, "") else ""
+            if sv and sv not in seen:
+                seen.add(sv)
+                sample.append(sv[:120])
+            if len(sample) >= 3:
+                break
+
+        columns.append({
+            "name": col,
+            "type": col_type,
+            "non_null": non_null,
+            "null_count": len(stat_rows) - non_null,
+            "fill_pct": round(non_null / len(stat_rows) * 100, 1) if stat_rows else 0,
+            "sample": sample,
+            "stats": stats,
+        })
+
+    preview = [
+        {col: str(row.get(col) or "")[:200] for col in fieldnames}
+        for row in rows[:max_preview_rows]
+    ]
+
+    return {
+        "n_rows": n_rows,
+        "n_cols": len(fieldnames),
+        "fieldnames": fieldnames,
+        "is_excel": is_excel,
+        "sheets": sheets,
+        "resolved_sheet": resolved_sheet,
+        "columns": columns,
+        "preview": preview,
+        "truncated_stats": n_rows > max_stats_rows,
+    }
+
+
 def inspect_dataset(input_path: str | Path, sheet: str | int | None = "") -> dict:
     path = Path(input_path)
     suffix = path.suffix.lower()

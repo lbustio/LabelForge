@@ -21,21 +21,68 @@
       </div>
       <div>
         <label class="form-label small text-secondary" for="loginPassword">Contrasena</label>
-        <input class="form-control" id="loginPassword" name="password" type="password"
-               autocomplete="current-password">
+        <div class="position-relative">
+          <input class="form-control pe-5" id="loginPassword" name="password" type="password"
+                 autocomplete="current-password">
+          <button type="button" class="btn btn-link position-absolute top-50 end-0 translate-middle-y me-1 p-0 text-secondary"
+                  style="width:2rem;" onclick="togglePassword('loginPassword', this)" tabindex="-1"
+                  aria-label="Mostrar/ocultar contraseña">
+            <i class="bi bi-eye"></i>
+          </button>
+        </div>
+        <div id="capsLockWarning" class="text-warning small mt-1 d-none">
+          <i class="bi bi-exclamation-triangle-fill"></i> Bloq Mayus activado
+        </div>
       </div>
       {% if first_setup %}
       <div>
         <label class="form-label small text-secondary" for="loginPasswordConfirm">Confirmar contrasena</label>
-        <input class="form-control" id="loginPasswordConfirm" name="password_confirm" type="password"
-               autocomplete="new-password">
+        <div class="position-relative">
+          <input class="form-control pe-5" id="loginPasswordConfirm" name="password_confirm" type="password"
+                 autocomplete="new-password">
+          <button type="button" class="btn btn-link position-absolute top-50 end-0 translate-middle-y me-1 p-0 text-secondary"
+                  style="width:2rem;" onclick="togglePassword('loginPasswordConfirm', this)" tabindex="-1"
+                  aria-label="Mostrar/ocultar contraseña">
+            <i class="bi bi-eye"></i>
+          </button>
+        </div>
       </div>
       {% endif %}
       {% if login_error %}
       <div class="alert alert-danger py-2 mb-0">{{ login_error }}</div>
       {% endif %}
       <button class="btn btn-primary" type="submit">{{ 'Crear usuario' if first_setup else 'Entrar' }}</button>
+      {% if not first_setup %}
+      <div class="text-center mt-1">
+        <a href="{{ url_for('page_forgot_password') }}" class="text-secondary small">¿Olvidaste tu contrasena?</a>
+      </div>
+      {% endif %}
     </form>
   </div>
 </div>
+
+<script>
+function togglePassword(inputId, btn) {
+  const input = document.getElementById(inputId);
+  const icon = btn.querySelector('i');
+  if (input.type === 'password') {
+    input.type = 'text';
+    icon.classList.replace('bi-eye', 'bi-eye-slash');
+  } else {
+    input.type = 'password';
+    icon.classList.replace('bi-eye-slash', 'bi-eye');
+  }
+}
+
+(function () {
+  const pwField = document.getElementById('loginPassword');
+  const capsWarn = document.getElementById('capsLockWarning');
+  function checkCaps(e) {
+    const active = e.getModifierState && e.getModifierState('CapsLock');
+    capsWarn.classList.toggle('d-none', !active);
+  }
+  pwField.addEventListener('keydown', checkCaps);
+  pwField.addEventListener('keyup', checkCaps);
+})();
+</script>
 {% endblock %}
