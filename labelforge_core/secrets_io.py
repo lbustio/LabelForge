@@ -73,6 +73,8 @@ def set_secret_value(path: Path, key: str, value: str) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    # Establecer permisos restrictivos: solo lectura/escritura para el propietario
+    path.chmod(0o600)
     os.environ[key] = value
 
 

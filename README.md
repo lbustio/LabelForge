@@ -1,31 +1,39 @@
 # LabelForge
 
-LabelForge es una plataforma local para etiquetar textos con LLMs usando un esquema
-multi-arbitro por consenso. Nacio para una investigacion sobre principios de persuasion
-en noticias falsas, pero la arquitectura permite usar taxonomias configurables.
+Plataforma completa para etiquetado de datos con LLMs locales y remotos, con métricas de acuerdo entre anotadores, sistema de árbitros IA y interfaz web segura.
 
-El proyecto combina:
+## Características Principales
 
-- un pipeline CLI reproducible;
-- una webapp Flask para configurar, ejecutar y monitorear;
-- arbitros LLM con distintos proveedores/personas;
-- checkpoints, cola de reintentos, logs y CSV final;
-- metricas de acuerdo inter-arbitro;
-- soporte para modelos locales GGUF via `llama-cpp-python`.
+- **Soporte Multi-Proveedor**: OpenAI, Anthropic, Google Vertex AI, Gemini, Ollama, y modelos locales GGUF via `llama-cpp-python`
+- **Sistema de Árbitros**: Múltiples LLMs evaluando cada entrada con consenso por mayoría
+- **Métricas Avanzadas**: Kappa de Fleiss, Kappa de Cohen, Alfa de Krippendorff, acuerdo observado
+- **Interfaz Web Segura**: Flask con autenticación, CSRF protection, y hardening de seguridad
+- **CLI Reproducible**: Pipeline completo desde línea de comandos
+- **Checkpoints Duraderos**: Reanudación automática tras fallos
+- **Validación Segura de Archivos**: Verificación de MIME type y extensión para uploads
+- **Gestión de Secretos**: Almacenamiento seguro de API keys y credenciales
 
-## Estado actual
+## Estado Actual
 
-Funciona como herramienta de investigacion local. La app tambien tiene hardening inicial
-para exponerse en red, pero antes de ponerla en internet hay pendientes de seguridad
-descritos en `todos.md` y `context.md`.
+Proyecto en producción local con hardening de seguridad aplicado para exposición en red controlada.
 
-Configuracion actual:
+**Últimas mejoras de seguridad (2024):**
+- Validación de MIME type en subida de archivos
+- Permisos restringidos (0600) para archivos de secretos
+- Ocultamiento de errores internos en respuestas al cliente
+- Logging detallado de errores solo en servidor
+- Cookies seguras por defecto (`Secure=True`)
+- Protección contra SQL injection con queries parametrizadas
+- Cabeceras HTTP de seguridad completas (CSP, HSTS, X-Frame-Options, etc.)
 
-- config central en `config/arbiters_config.json`;
-- catalogo GGUF en `config/local_models_config.json`;
-- secretos en `secrets/secrets.env`;
-- modelos y caches locales en `models/`;
-- dataset privado y artefactos de ejecucion ignorados por Git.
+## Configuración Actual
+
+- Config central en `config/arbiters_config.json`
+- Catálogo GGUF en `config/local_models_config.json`
+- Secretos en `secrets/secrets.env` (no versionado, permisos 0600)
+- Base de datos de autenticación en `secrets/auth.db` (no versionada)
+- Modelos y caches locales en `models/`
+- Datasets privados y artefactos de ejecución ignorados por Git
 
 ## Taxonomia incluida
 
@@ -75,51 +83,78 @@ LabelForge/
 |-- archive/                     # Outputs archivados
 ```
 
-## Instalacion rapida
+## Instalación rápida
 
 Requisitos:
 
-- Python 3.10+;
-- Windows, Linux o macOS;
-- entorno virtual recomendado;
-- credenciales de proveedores si se usan LLMs cloud.
+- Python 3.10+
+- Windows, Linux o macOS
+- Entorno virtual recomendado
+- Credenciales de proveedores si se usan LLMs cloud
+- **Librería sistema `libmagic1`** (para validación segura de archivos)
 
-Con `venv`:
+### Instalación de dependencias del sistema
+
+**Linux (Debian/Ubuntu):**
+```bash
+sudo apt-get update && sudo apt-get install -y libmagic1
+```
+
+**macOS:**
+```bash
+brew install libmagic
+```
+
+**Windows:**
+Las DLLs necesarias se incluyen con `python-magic-bin` en requirements.txt
+
+### Con venv:
 
 ```bash
 python -m venv .venv
+# Windows
 .venv\Scripts\activate
+# Linux/macOS
+source .venv/bin/activate
+
 pip install -r requirements.txt
 ```
 
-Con Conda:
+### Con Conda:
 
 ```bash
 conda env create -f environment.yml
 conda activate labelforge
 ```
 
-Despues, para habilitar modelos locales GGUF:
+### Habilitar modelos locales GGUF
+
+Después de instalar las dependencias, para habilitar modelos locales GGUF:
 
 ```bash
 python setup_env.py
 ```
 
 `setup_env.py`:
+- Detecta OS/CPU/RAM/GPU/NPU
+- Instala `llama-cpp-python` con backend apropiado cuando puede: CUDA para NVIDIA, ROCm para AMD Linux, Metal para Apple Silicon, Vulkan para AMD/Intel compatibles y CPU como fallback
+- Instala OpenVINO si aplica para NPU Intel
+- Escribe `models/hw_profile.json`
+- Guarda log en `logs/setup_YYYYMMDD_HHMMSS.log`
 
-- detecta OS/CPU/RAM/GPU/NPU;
-- instala `llama-cpp-python` con backend apropiado cuando puede: CUDA para NVIDIA, ROCm para AMD Linux, Metal para Apple Silicon, Vulkan para AMD/Intel compatibles y CPU como fallback;
-- instala OpenVINO si aplica para NPU Intel;
-- escribe `models/hw_profile.json`;
-- guarda log en `logs/setup_YYYYMMDD_HHMMSS.log`.
-
-Si solo vas a usar APIs cloud, puedes omitirlo, pero las funciones GGUF avisaran que
-falta el perfil de hardware.
+Si solo vas a usar APIs cloud, puedes omitirlo, pero las funciones GGUF avisarán que falta el perfil de hardware.
 
 ## Secretos
 
 Copia la plantilla:
 
+**Linux/macOS:**
+```bash
+cp secrets/secrets.env.example secrets/secrets.env
+chmod 600 secrets/secrets.env
+```
+
+**Windows:**
 ```bash
 copy secrets\secrets.env.example secrets\secrets.env
 ```
@@ -133,18 +168,24 @@ OPENAI_API_KEY=...
 
 GOOGLE_CLOUD_PROJECT=cloud-computing-cybersec-inaoe
 VERTEX_LOCATION=us-central1
-GOOGLE_APPLICATION_CREDENTIALS=secrets\service-account.json
+GOOGLE_APPLICATION_CREDENTIALS=secrets/service-account.json
 
 LABELFORGE_HOST=127.0.0.1
 LABELFORGE_PORT=7860
-LABELFORGE_SECRET_KEY=
+
+# CRÍTICO: Genera una clave aleatoria persistente para sesiones
+# En Linux/macOS: python -c "import secrets; print(secrets.token_hex(32))"
+LABELFORGE_SECRET_KEY=tu_clave_secreta_muy_larga_y_aleatoria
 
 # Login local de la webapp. Los usuarios viven en secrets/auth.db.
+# Producción (HTTPS): LABELFORGE_COOKIE_SECURE=1
+# Desarrollo local (HTTP): LABELFORGE_COOKIE_SECURE=0
 LABELFORGE_COOKIE_SECURE=1
 ```
 
 Para Vertex AI se usan Application Default Credentials o service account JSON, no API key.
 
+**Nota de seguridad:** El archivo `secrets/secrets.env` debe tener permisos `600` (solo lectura/escritura para el propietario). La base de datos `secrets/auth.db` nunca debe versionarse en Git.
 ## Uso
 
 Webapp:
@@ -373,29 +414,67 @@ Reglas:
 
 ## Seguridad
 
-La webapp tiene:
+La webapp incluye las siguientes protecciones implementadas:
 
-- login obligatorio al abrir la webapp;
-- login local SQLite obligatorio por defecto;
-- primer arranque crea el primer usuario en `secrets/auth.db`;
-- CSRF para metodos `POST`/`PUT`/`PATCH`/`DELETE`;
-- `MAX_CONTENT_LENGTH = 50 MB`;
-- cabeceras CSP, `X-Frame-Options` y `X-Content-Type-Options`;
-- validacion de filenames GGUF;
-- validacion basica contra SSRF en `openai_compat`;
-- `/api/provider-key` solo escribe secretos desde localhost;
-- `api_key_override` no persiste en `config/arbiters_config.json`.
+### Autenticación y Sesiones
+- Login obligatorio con hash de contraseñas (werkzeug.security)
+- Base de datos local SQLite en `secrets/auth.db` (no versionada)
+- Primer usuario creado automáticamente al primer arranque
+- Cookies de sesión con flags: `HttpOnly`, `SameSite=Lax`, `Secure` (configurable)
+- Timeout de sesión configurable (idle y absoluto)
+- Invalidación de sesión al cambiar contraseña o rol
 
-Para despliegue publico:
+### Protección de Datos
+- CSRF protection para todos los métodos `POST`, `PUT`, `PATCH`, `DELETE`
+- Tokens CSRF generados por sesión con `secrets.token_urlsafe(32)`
+- Queries SQL parametrizadas para prevenir SQL injection
+- Ocultamiento de errores internos en respuestas al cliente (logging detallado solo en servidor)
 
-- usar HTTPS obligatorio con reverse proxy;
-- activar `LABELFORGE_COOKIE_SECURE=1` cuando ya sirvas por HTTPS;
-- no usar `--debug`;
-- usar `LABELFORGE_SECRET_KEY` persistente y aleatoria.
+### Subida de Archivos Segura
+- Validación de extensión (.csv, .xlsx, .xls)
+- **Validación de MIME type real** usando librería `magic` (previene archivos maliciosos disfrazados)
+- Límite de tamaño: 300MB
+- Uso de `secure_filename()` de Werkzeug
+- Prevención de path traversal
+- Archivos guardados en directorio controlado (`data/uploads/`)
 
-La autenticacion vive solo en la webapp. El CLI y los modulos en `labelforge_core/`
-siguen pensados para ejecucion local y no dependen de sesiones web.
+### Cabeceras HTTP de Seguridad
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `Referrer-Policy: same-origin`
+- `Permissions-Policy: camera=(), microphone=(), geolocation=()`
+- `Content-Security-Policy` (con script-src 'self')
+- `Strict-Transport-Security` (en HTTPS)
+- `Cache-Control: no-store` (para páginas autenticadas)
 
+### Control de Acceso
+- Sistema de roles (admin/user)
+- Protección de rutas admin con decoradores
+- Rate limiting configurado por proveedor de LLM
+- `/api/provider-key` solo escribe secretos desde localhost
+
+### Gestión de Secretos
+- API keys almacenadas en `secrets/secrets.env` (no versionado)
+- **Permisos de archivo restringidos (0600)** aplicados automáticamente
+- Plantilla `secrets.env.example` sin valores reales
+- Función `resolve_gcp_credentials()` para manejo seguro de credenciales GCP
+- `api_key_override` no persiste en config
+
+### Para despliegue público (producción)
+
+**CRÍTICO:**
+- Usar HTTPS obligatorio con reverse proxy (nginx, traefik, etc.)
+- Configurar `LABELFORGE_COOKIE_SECURE=1` en `secrets/secrets.env`
+- Establecer `LABELFORGE_SECRET_KEY` persistente y aleatoria (ej. 64 caracteres hex)
+- **Nunca** usar `--debug` en producción
+
+**Recomendado:**
+- Implementar rate limiting general con Flask-Limiter
+- Configurar HSTS preload
+- Revisar logs regularmente
+- Mantener dependencias actualizadas
+
+La autenticación vive solo en la webapp. El CLI y los módulos en `labelforge_core/` siguen pensados para ejecución local y no dependen de sesiones web.
 ## Tests
 
 ```bash
