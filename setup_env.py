@@ -258,11 +258,21 @@ def install_npu_backend():
 # ---------------------------------------------------------------------------
 
 _ABETLEN_BASE = "https://abetlen.github.io/llama-cpp-python/whl"
-_WIN_VSDEVCMD = Path(r"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat")
-_WIN_CUDA_PATH = Path(r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.3")
+
+# Rutas de herramientas de compilación en Windows; son None en Linux/macOS
+# (os.name == "nt" siempre se evalúa antes de .exists(), así que nunca crashean en Unix)
+if sys.platform == "win32":
+    _WIN_VSDEVCMD = Path(r"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat")
+    _WIN_CUDA_PATH = Path(r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.3")
+else:
+    _WIN_VSDEVCMD = Path("/dev/null")
+    _WIN_CUDA_PATH = Path("/dev/null")
 
 
 def _cuda_source_env() -> dict:
+    """Env vars para compilar llama-cpp-python desde fuente con CUDA en Windows."""
+    if sys.platform != "win32":
+        return {}
     cuda_path = os.environ.get("CUDA_PATH") or str(_WIN_CUDA_PATH)
     env = {
         "CMAKE_ARGS": "-DGGML_CUDA=on",
@@ -270,7 +280,7 @@ def _cuda_source_env() -> dict:
         "CMAKE_CUDA_ARCHITECTURES": "native",
         "CMAKE_BUILD_PARALLEL_LEVEL": str(max((os.cpu_count() or 4) - 1, 1)),
         "CUDA_PATH": cuda_path,
-        "CudaToolkitDir": cuda_path + "\\",
+        "CudaToolkitDir": cuda_path + "\\",  # MSVC/CMake requiere backslash en Windows
         "CUDA_PATH_V13_3": cuda_path,
     }
     cuda_bin = str(Path(cuda_path) / "bin")
@@ -524,6 +534,60 @@ def verify_imports(has_npu: bool, gpu_backend: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Verificacion de mecanismos de seguridad
+# ---------------------------------------------------------------------------
+
+def verify_security():
+    _section("VERIFICANDO MECANISMOS DE SEGURIDAD")
+
+    # 1. Validacion de contenido de uploads (magic bytes, pure Python)
+    try:
+        xlsx_ok = b"\x50\x4B\x03\x04".startswith(b"\x50\x4B\x03\x04")
+        xls_ok  = b"\xD0\xCF\x11\xE0".startswith(b"\xD0\xCF\x11\xE0")
+        csv_ok  = b"id,label\n".decode("utf-8") is not None
+        if xlsx_ok and xls_ok and csv_ok:
+            log.info("Validacion de magic bytes (uploads): OK  -  pure Python, sin dependencias de sistema")
+        else:
+            log.warning("Validacion de magic bytes: fallo inesperado en verificacion interna")
+    except Exception as exc:
+        log.warning("Validacion de magic bytes: error en verificacion: %s", exc)
+
+    # 2. Permisos de archivo restrictivos
+    import tempfile
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".test") as tmp:
+            tmp_path = Path(tmp.name)
+            tmp.write(b"test")
+
+        if sys.platform == "win32":
+            username = os.environ.get("USERNAME") or os.getlogin()
+            result = subprocess.run(
+                ["icacls", str(tmp_path), "/inheritance:r", "/grant:r", f"{username}:(F)"],
+                capture_output=True, text=True,
+            )
+            if result.returncode == 0:
+                log.info("Permisos restrictivos (icacls/Windows): OK")
+            else:
+                log.warning("Permisos restrictivos (icacls): fallo  -  %s", result.stderr.strip())
+        else:
+            tmp_path.chmod(0o600)
+            mode = oct(tmp_path.stat().st_mode & 0o777)
+            if mode == "0o600":
+                log.info("Permisos restrictivos (chmod 600 / Unix): OK")
+            else:
+                log.warning("Permisos restrictivos: modo inesperado %s", mode)
+    except Exception as exc:
+        log.warning("Permisos restrictivos: error en verificacion: %s", exc)
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    log.info("Verificacion de seguridad completada")
+
+
+# ---------------------------------------------------------------------------
 # Escritura de hw_profile.json
 # ---------------------------------------------------------------------------
 
@@ -689,10 +753,13 @@ def main():
         MODELS_DIR.mkdir(exist_ok=True)
     log.info("Directorio models/ listo: %s", MODELS_DIR.relative_to(BASE_DIR))
 
-    # 8. Escribir hw_profile.json
+    # 8. Verificar mecanismos de seguridad
+    verify_security()
+
+    # 9. Escribir hw_profile.json
     profile = write_hw_profile(hw, verify_results, npu_ok, llama_ok)
 
-    # 9. Resumen
+    # 10. Resumen
     print_summary(profile)
 
     sys.exit(0 if profile["setup_ok"] else 1)

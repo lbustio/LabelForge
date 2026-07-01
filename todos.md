@@ -4,7 +4,7 @@ Este archivo es el backlog vivo del proyecto. No es historico; para decisiones y
 tomadas usar `bitacora.md`. Antes de cambiar codigo, revisar arquitectura,
 detectar duplicaciones/riesgos y proponer la solucion para aprobacion.
 
-Ultima revision: 2026-06-23.
+Ultima revision: 2026-06-30.
 
 ## Regla de trabajo
 
@@ -18,14 +18,26 @@ Ultima revision: 2026-06-23.
 - [ ] Pedir confirmacion antes de modificar codigo cuando el cambio toque
   arquitectura, persistencia, seguridad o ejecucion del pipeline.
 
+## Pendiente inmediato (antes del proximo push)
+
+- [ ] Commit y push de todos los archivos modificados en las sesiones
+  2026-06-30 y siguientes:
+  - `webapp/app.py`, `labelforge_core/secrets_io.py`,
+    `labelforge_core/cuda_init.py`, `setup_env.py`
+  - `labelforge_core/local_models.py` (WARNING→INFO en logs de catálogo)
+  - `main_tui.py` (nuevo — TUI interactiva estilo menús numerados)
+  - `requirements.txt` (agrega `rich`, elimina `python-magic`)
+  - `README.md`, `bitacora.md`, `context.md`, `todos.md`
+- [ ] Eliminar rama remota obsoleta `revisión-de-proyecto-7044f` del
+  repositorio GitHub (sus cambios ya estan integrados en `main`).
+
 ## Prioridad alta
 
-- [ ] Consolidar arquitectura de ejecucion sin romper CLI ni webapp:
-  - mantener el nucleo como autoridad de dataset, checkpoints, reporting,
-    metricas, prompting, parsing de respuestas LLM y uso/tokens/latencias;
-  - antes de nuevas migraciones, disenar contrato y aprobarlo;
-  - mantener compatibilidad con CSV final, checkpoints existentes y `/run`;
-  - cubrir con tests antes de quitar helpers duplicados.
+- [x] Consolidar arquitectura de ejecucion sin romper CLI ni webapp:
+  - nucleo como autoridad de dataset, checkpoints, reporting, metricas,
+    prompting, parsing y uso/tokens: HECHO (ver modulos en labelforge_core/).
+  - regla vigente: disenar contrato y pedir aprobacion antes de nuevas
+    migraciones; no duplicar logica entre webapp y nucleo.
 
 - [ ] Ejecutar pipeline completo sobre el dataset de investigacion y guardar:
   - CSV final en `output/`;
@@ -65,12 +77,10 @@ Ultima revision: 2026-06-23.
   - aplicado en: tarjetas de arbiters.html, tarjetas de index.html, dropdown de
     principles.html, y log de arranque en label_persuasion.py.
 
-- [ ] Revisar politica de almacenamiento:
-  - `config/` versionable;
-  - `secrets/` privado;
-  - `models/` para GGUF/cache/hardware local;
-  - `data/`, `output/`, `checkpoints/`, `logs/`, `archive/` locales;
-  - confirmar `.gitignore` y que no haya datos privados rastreados.
+- [x] Revisar politica de almacenamiento:
+  - `config/` versionable ✓; `secrets/` privado ✓; `models/` local ✓;
+  - `data/uploads/`, `output/`, `checkpoints/`, `logs/`, `archive/`
+    cubiertos por `.gitignore` ✓; sin datos privados rastreados ✓.
 
 ## Prioridad baja
 
@@ -106,6 +116,22 @@ Ultima revision: 2026-06-23.
 
 ## Hecho recientemente
 
+- [x] TUI interactiva (2026-06-30): `main_tui.py` con navegación por menús
+  numerados usando `rich`. Menú hardware/modelos, etiquetado con streaming
+  real, árbitros (lectura + abrir en editor del sistema), resultados y
+  checkpoints. Descarga GGUF con barra de progreso `rich`.
+- [x] Corrección de nivel de logs (2026-06-30): fallos de proveedor al
+  consultar catálogo GGUF (Gemini 429, Anthropic 401, OpenAI 401, fallback)
+  degradados de WARNING a INFO en `labelforge_core/local_models.py`. La
+  TUI (logging en WARNING) ya no los muestra; el CLI los conserva para
+  diagnóstico.
+- [x] Hardening de seguridad (2026-06-30): cookies `Secure=True` por
+  defecto, warning si falta `LABELFORGE_SECRET_KEY`, errores internos
+  no expuestos al cliente, validación de contenido en uploads.
+- [x] Compatibilidad multiplataforma real (2026-06-30): magic bytes puro
+  Python en uploads (sin libmagic), `icacls` en Windows para permisos de
+  archivo, constantes de rutas CUDA con guardia de plataforma, pathlib en
+  `cuda_init.py`, `verify_security()` en `setup_env.py`.
 - [x] CLI probado con dataset de webapp, columna `claim`, tres arbitros locales
   y `--limit 10`; genero CSV, log, metricas y estado completed.
 - [x] Checkpoints centralizados en `labelforge_core/checkpoint_io.py`; el

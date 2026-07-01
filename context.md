@@ -1,6 +1,6 @@
 # LabelForge - contexto tecnico de transferencia
 
-Ultima actualizacion: 2026-06-23.
+Ultima actualizacion: 2026-06-30.
 
 Este documento es para retomar desarrollo rapido. El README explica uso general; esta
 nota explica como esta organizado el sistema, que decisiones importan y donde estan
@@ -39,16 +39,29 @@ Rama principal: `main`.
 
 Repo remoto conocido: `https://github.com/lbustio/LabelForge`.
 
-Cambios recientes no necesariamente pusheados:
+Cambios recientes no pusheados (working tree limpio salvo estos 8 archivos):
 
-- configuracion movida a `config/`;
-- `labelforge_core/paths.py` agregado;
-- gestion GGUF expandida con cancelar descarga, archivo, restauracion y mover fuera del cache;
-- prueba CLI con dataset de webapp, columna `claim`, tres arbitros locales y
-  `--limit 10`;
-- auditoria de arquitectura con duplicaciones detectadas en preflight,
-  checkpoints, dataset y reporting;
-- docs actualizadas.
+- `webapp/app.py`: hardening de seguridad + validación de uploads por magic
+  bytes puro Python (sin dependencias de sistema).
+- `labelforge_core/secrets_io.py`: permisos restrictivos de archivo
+  cross-platform (`icacls` en Windows, `chmod 0o600` en Unix).
+- `labelforge_core/cuda_init.py`: rutas de DLLs con pathlib en lugar de
+  strings con backslash.
+- `labelforge_core/local_models.py`: mensajes de fallo de proveedores al
+  consultar catálogo GGUF degradados de WARNING a INFO (Gemini 429,
+  Anthropic 401, OpenAI 401 y mensaje "fallback catalog"). Son fallos
+  esperados y manejados; no merecen WARNING.
+- `setup_env.py`: constantes de rutas Windows con guardia de plataforma,
+  `_cuda_source_env()` con retorno anticipado en non-Windows, nuevo paso
+  `verify_security()`.
+- `requirements.txt`: eliminados `python-magic` y `python-magic-bin`;
+  agregado `rich>=12.0.0`.
+- `main_tui.py` (nuevo): TUI interactiva estilo menús numerados para el
+  CLI. Navegación sin flags. Requiere `rich`. Entrypoint: `python main_tui.py`.
+- `README.md`: documentación actualizada (TUI, seguridad, árbitros reales).
+
+Rama remota obsoleta pendiente de eliminar: `revisión-de-proyecto-7044f`
+(sus cambios útiles ya están integrados en `main`).
 
 Siempre revisar:
 
@@ -64,6 +77,7 @@ No revertir cambios ajenos sin pedir confirmacion.
 setup_env.py
 main_cli.py
 main_webapp.py
+main_tui.py
 config/
   arbiters_config.json
   local_models_config.json
@@ -171,12 +185,13 @@ Safety actual:
 - `pause_on_quota_error`: true;
 - `pause_on_network_error`: true.
 
-## 6. Pipeline CLI
+## 6. Pipeline CLI y TUI
 
-Entrypoint:
+Entrypoints:
 
 ```bash
-python main_cli.py
+python main_cli.py     # CLI directo con flags
+python main_tui.py     # TUI interactiva con menús numerados
 ```
 
 `main_cli.py`:
@@ -364,19 +379,33 @@ Implementado:
 
 - login local SQLite obligatorio por defecto;
 - en primer arranque, `/login` crea el primer usuario en `secrets/auth.db`;
-- `LABELFORGE_SECRET_KEY` recomendado para sesiones persistentes;
-- cookies `HttpOnly`, `SameSite=Lax`, y `Secure` configurable con `LABELFORGE_COOKIE_SECURE=1`;
-- limite upload 50 MB;
-- CSP basica, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`;
+- `LABELFORGE_SECRET_KEY` obligatoria en produccion; emite `WARNING` si no
+  esta configurada en desarrollo (ya no genera clave silenciosamente);
+- cookies `HttpOnly`, `SameSite=Lax`, `Secure=True` por defecto (antes era
+  `False`); desactivar explicitamente con `LABELFORGE_COOKIE_SECURE=0` solo
+  en desarrollo local HTTP;
+- limite upload 300 MB;
+- validacion de contenido real de uploads por magic bytes puro Python:
+  XLSX (`\x50\x4B\x03\x04`), XLS (OLE2 `\xD0\xCF\x11\xE0`), CSV con
+  rechazo de 11 firmas binarias conocidas y umbral de texto imprimible;
+  sin dependencias de sistema (`libmagic` eliminado);
+- permisos restrictivos en `secrets/secrets.env`: `icacls /inheritance:r`
+  en Windows, `chmod 0o600` en Linux/macOS;
+- errores internos de excepcion no se exponen en respuestas HTTP; se
+  loguean en servidor con `exc_info=True`;
+- CSP completa, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: same-origin`, HSTS en HTTPS;
 - validacion de filename GGUF contra traversal;
-- bloqueo SSRF basico en `openai_compat` para link-local/metadata.
+- bloqueo SSRF basico en `openai_compat` para link-local/metadata;
 - CSRF para `POST`/`PUT`/`PATCH`/`DELETE`;
 - `/api/provider-key` solo escribe secretos desde localhost;
-- `api_key_override` se trata como transitorio y no persiste en `config/arbiters_config.json`.
+- `api_key_override` se trata como transitorio y no persiste en
+  `config/arbiters_config.json`.
 
-La autenticacion esta encapsulada en `webapp/app.py` y plantillas. `main_cli.py` y
-los modulos en `labelforge_core/` siguen agnosticos al login web y pensados para
-ejecucion local o para ser llamados por la webapp en servidor.
+La autenticacion esta encapsulada en `webapp/app.py` y plantillas.
+`main_cli.py` y los modulos en `labelforge_core/` siguen agnosticos al
+login web y pensados para ejecucion local o para ser llamados por la
+webapp en servidor.
 
 Pendiente:
 
@@ -451,6 +480,12 @@ Endpoints GGUF:
 | `DELETE /api/local/archive/<filename>` | elimina archivado |
 
 Nota de seguridad: mover a ruta arbitraria solo se permite desde localhost.
+
+Nota de nivel de logs: los fallos de proveedor al consultar el catálogo
+(Gemini 429, Anthropic 401, OpenAI 401, fallback a catálogo local) se
+emiten a nivel INFO, no WARNING. Son fallos esperados y manejados. El
+CLI (logging en INFO) los ve para diagnóstico; la TUI (logging en WARNING)
+los filtra automáticamente y el terminal queda limpio.
 
 ## 12. Interfaz de arbitros
 

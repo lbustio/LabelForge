@@ -40,6 +40,7 @@ openpyxl>=3.1.0
 
 # --- Utils ---
 python-dotenv>=1.0.0
+rich>=12.0.0
 
 # --- NPU / OpenVINO (solo en maquinas con Intel AI Boost - instala setup_env.py) ---
 # openvino>=2024.5.0

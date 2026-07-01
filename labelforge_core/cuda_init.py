@@ -47,7 +47,7 @@ def _ensure_cuda_ready() -> bool:
 
     for cv in sorted(cuda_root.glob("v*"), reverse=True):
         os.environ.setdefault("CUDA_PATH", str(cv))
-        for sub in ("bin\\x64", "bin"):
+        for sub in (Path("bin") / "x64", Path("bin")):
             d = cv / sub
             if not d.exists():
                 continue

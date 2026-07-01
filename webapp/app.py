@@ -20,6 +20,51 @@ from dotenv import load_dotenv
 from flask import Flask, Response, g, jsonify, redirect, render_template, request, send_from_directory, session, stream_with_context, url_for
 from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
+# Firmas de magic bytes para validacion de uploads (pure Python, sin dependencias de sistema)
+_UPLOAD_MAGIC: dict[str, bytes] = {
+    ".xlsx": b"\x50\x4B\x03\x04",        # ZIP/OOXML
+    ".xls":  b"\xD0\xCF\x11\xE0",        # OLE2 compound document
+}
+
+# Firmas binarias que nunca pueden ser un CSV de texto plano
+_BINARY_SIGNATURES: tuple[bytes, ...] = (
+    b"\x50\x4B\x03\x04",    # ZIP / XLSX / JAR / DOCX
+    b"\xD0\xCF\x11\xE0",    # OLE2 / XLS / DOC
+    b"\x7F\x45\x4C\x46",    # ELF (ejecutable Linux/Android)
+    b"MZ",                   # PE / COFF (ejecutable Windows / DLL)
+    b"\xCA\xFE\xBA\xBE",    # Mach-O fat binary (macOS)
+    b"\xFE\xED\xFA\xCE",    # Mach-O 32-bit (macOS)
+    b"\xFE\xED\xFA\xCF",    # Mach-O 64-bit (macOS)
+    b"\x89PNG\r\n\x1a\n",   # PNG
+    b"\xFF\xD8\xFF",         # JPEG
+    b"GIF8",                 # GIF
+    b"%PDF",                 # PDF
+)
+
+def _validate_upload_content(header: bytes, suffix: str) -> bool:
+    """Verifica que el contenido real del archivo coincida con la extension declarada."""
+    sig = _UPLOAD_MAGIC.get(suffix)
+    if sig:
+        return header.startswith(sig)
+
+    # CSV: rechazar primero cualquier firma binaria conocida
+    for bin_sig in _BINARY_SIGNATURES:
+        if header.startswith(bin_sig):
+            return False
+
+    # Intentar como UTF-8 (encoding moderno estandar para CSV)
+    try:
+        header.decode("utf-8")
+        return True
+    except (UnicodeDecodeError, ValueError):
+        pass
+
+    # Fallback para CSV legacy (Windows-1252, latin-1, etc.):
+    # latin-1 decodifica cualquier byte, así que verificamos adicionalmente
+    # que el contenido sea mayoritariamente texto imprimible (umbral 70%)
+    sample = header[:512]
+    printable = sum(1 for b in sample if 0x20 <= b <= 0x7E or b in (0x09, 0x0A, 0x0D))
+    return (printable / len(sample)) > 0.70 if sample else False
 
 # ---------------------------------------------------------------------------
 # Inicializacion de CUDA (debe ir antes de cualquier import que use llama_cpp)
@@ -247,13 +292,23 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 
 # Secret key para sesiones Flask (necesaria para cookies seguras)
-app.secret_key = os.environ.get("LABELFORGE_SECRET_KEY") or _sec.token_hex(32)
+# En produccion, LABELFORGE_SECRET_KEY debe estar configurada obligatoriamente
+_secret_key_env = os.environ.get("LABELFORGE_SECRET_KEY")
+if not _secret_key_env:
+    # Solo generar temporalmente en desarrollo si no esta configurada
+    app.logger.warning("LABELFORGE_SECRET_KEY no configurada. Usando clave temporal (NO RECOMENDADO EN PRODUCCION).")
+    app.secret_key = _sec.token_hex(32)
+else:
+    app.secret_key = _secret_key_env
+
 _SESSION_IDLE_SECONDS = int(os.environ.get("LABELFORGE_SESSION_IDLE_SECONDS", "3600"))
 _SESSION_ABSOLUTE_SECONDS = int(os.environ.get("LABELFORGE_SESSION_ABSOLUTE_SECONDS", "28800"))
+
+# Cookie Secure: activada por defecto en produccion. Desactivar solo en desarrollo local HTTP.
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE=os.environ.get("LABELFORGE_COOKIE_SAMESITE", "Lax"),
-    SESSION_COOKIE_SECURE=_env_bool("LABELFORGE_COOKIE_SECURE", False),
+    SESSION_COOKIE_SECURE=_env_bool("LABELFORGE_COOKIE_SECURE", True),  # Default True para seguridad
     PERMANENT_SESSION_LIFETIME=timedelta(seconds=_SESSION_ABSOLUTE_SECONDS),
     SESSION_REFRESH_EACH_REQUEST=True,
     TEMPLATES_AUTO_RELOAD=True,
@@ -1618,7 +1673,8 @@ def api_models():
         else:
             return jsonify({"error": f"Proveedor desconocido: {provider}"}), 400
     except Exception as e:
-        return jsonify({"error": str(e)[:300]}), 502
+        logger.error(f"Error al listar modelos para {provider}: {e}", exc_info=True)
+        return jsonify({"error": "Error interno del servidor."}), 502
 
     _models_cache[cache_key] = {"data": result, "ts": now}
     return jsonify(result)
@@ -1653,7 +1709,8 @@ def api_provider_key():
         else:
             return jsonify({"error": f"Proveedor desconocido: {provider}"}), 400
     except Exception as exc:
-        return jsonify({"error": f"No se pudo verificar la clave: {str(exc)[:260]}"}), 400
+        logger.error(f"Error al verificar clave para {provider}: {exc}", exc_info=True)
+        return jsonify({"error": "No se pudo verificar la clave."}), 400
 
     set_secret_value(SECRETS_ENV_PATH, env_var, api_key)
     load_dotenv(SECRETS_ENV_PATH, override=True)
@@ -1963,9 +2020,11 @@ def api_rate_limits_config_put():
     try:
         _rl_save_config(data)
     except ValueError as exc:
+        logger.warning(f"Error de validacion al guardar config rate-limit: {exc}")
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
-        return jsonify({"error": f"Error al guardar: {exc}"}), 500
+        logger.error(f"Error al guardar config rate-limit: {exc}", exc_info=True)
+        return jsonify({"error": "Error al guardar la configuracion."}), 500
     return jsonify({"ok": True})
 
 
@@ -2001,7 +2060,8 @@ def api_local_recommended():
         result = [m for m in result if m.get("filename", "").lower() not in downloaded_lower]
         return jsonify(result)
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+        logger.error(f"Error al listar modelos recomendados: {exc}", exc_info=True)
+        return jsonify({"error": "Error al obtener modelos recomendados."}), 500
 
 
 @app.route("/api/local/cached", methods=["GET"])
@@ -2011,7 +2071,8 @@ def api_local_cached():
         from labelforge_core.local_models import list_cached_models
         return jsonify(list_cached_models())
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+        logger.error(f"Error al listar modelos cacheados: {exc}", exc_info=True)
+        return jsonify({"error": "Error al obtener modelos cacheados."}), 500
 
 
 _download_jobs: dict = {}
@@ -2176,13 +2237,17 @@ def api_local_move_model(filename: str):
         _log.info("Modelo local movido fuera del cache: %s -> %s", filename, destination)
         return jsonify({"ok": True, "moved": filename, "destination": str(destination)})
     except ValueError as exc:
+        logger.warning(f"Error de validacion al mover modelo {filename}: {exc}")
         return jsonify({"error": str(exc)}), 400
     except FileNotFoundError as exc:
-        return jsonify({"error": str(exc)}), 404
+        logger.warning(f"Modelo no encontrado {filename}: {exc}")
+        return jsonify({"error": "Modelo no encontrado."}), 404
     except FileExistsError as exc:
-        return jsonify({"error": str(exc)}), 409
+        logger.warning(f"El archivo ya existe al mover {filename}: {exc}")
+        return jsonify({"error": "El archivo ya existe en el destino."}), 409
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+        logger.error(f"Error interno al mover modelo {filename}: {exc}", exc_info=True)
+        return jsonify({"error": "Error interno al mover el modelo."}), 500
 
 
 @app.route("/api/local/archive", methods=["GET"])
@@ -2192,7 +2257,8 @@ def api_local_archive():
         from labelforge_core.local_models import list_archived_models
         return jsonify(list_archived_models())
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+        logger.error(f"Error al listar modelos archivados: {exc}", exc_info=True)
+        return jsonify({"error": "Error al obtener modelos archivados."}), 500
 
 
 @app.route("/api/local/model/<filename>/archive", methods=["POST"])
@@ -2206,11 +2272,14 @@ def api_local_archive_model(filename: str):
         _log.info("Modelo local archivado: %s", filename)
         return jsonify({"ok": True, "archived": filename})
     except FileNotFoundError as exc:
-        return jsonify({"error": str(exc)}), 404
+        logger.warning(f"Modelo no encontrado para archivar {filename}: {exc}")
+        return jsonify({"error": "Modelo no encontrado."}), 404
     except FileExistsError as exc:
-        return jsonify({"error": str(exc)}), 409
+        logger.warning(f"El archivo ya existe al archivar {filename}: {exc}")
+        return jsonify({"error": "El archivo ya existe en el destino."}), 409
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+        logger.error(f"Error interno al archivar modelo {filename}: {exc}", exc_info=True)
+        return jsonify({"error": "Error interno al archivar el modelo."}), 500
 
 
 @app.route("/api/local/archive/<filename>/restore", methods=["POST"])
@@ -2224,11 +2293,14 @@ def api_local_restore_model(filename: str):
         _log.info("Modelo local restaurado: %s", filename)
         return jsonify({"ok": True, "restored": filename})
     except FileNotFoundError as exc:
-        return jsonify({"error": str(exc)}), 404
+        logger.warning(f"Modelo no encontrado para restaurar {filename}: {exc}")
+        return jsonify({"error": "Modelo no encontrado."}), 404
     except FileExistsError as exc:
-        return jsonify({"error": str(exc)}), 409
+        logger.warning(f"El archivo ya existe al restaurar {filename}: {exc}")
+        return jsonify({"error": "El archivo ya existe en el destino."}), 409
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+        logger.error(f"Error interno al restaurar modelo {filename}: {exc}", exc_info=True)
+        return jsonify({"error": "Error interno al restaurar el modelo."}), 500
 
 
 @app.route("/api/local/archive/<filename>", methods=["DELETE"])
@@ -2242,9 +2314,11 @@ def api_local_delete_archived_model(filename: str):
         _log.info("Modelo local archivado eliminado: %s", filename)
         return jsonify({"ok": True, "deleted": filename})
     except FileNotFoundError as exc:
-        return jsonify({"error": str(exc)}), 404
+        logger.warning(f"Modelo archivado no encontrado {filename}: {exc}")
+        return jsonify({"error": "Modelo no encontrado."}), 404
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+        logger.error(f"Error interno al eliminar modelo archivado {filename}: {exc}", exc_info=True)
+        return jsonify({"error": "Error interno al eliminar el modelo."}), 500
 
 
 @app.route("/api/local/external", methods=["GET"])
@@ -2254,7 +2328,8 @@ def api_local_external():
         from labelforge_core.local_models import list_external_models
         return jsonify(list_external_models())
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+        logger.error(f"Error al listar modelos externos: {exc}", exc_info=True)
+        return jsonify({"error": "Error al obtener modelos externos."}), 500
 
 
 @app.route("/api/local/external/<filename>/restore", methods=["POST"])
@@ -2268,11 +2343,14 @@ def api_local_restore_external_model(filename: str):
         _log.info("Modelo externo restaurado a cache: %s", filename)
         return jsonify({"ok": True, "restored": filename})
     except FileNotFoundError as exc:
-        return jsonify({"error": str(exc)}), 404
+        logger.warning(f"Modelo externo no encontrado {filename}: {exc}")
+        return jsonify({"error": "Modelo no encontrado."}), 404
     except FileExistsError as exc:
-        return jsonify({"error": str(exc)}), 409
+        logger.warning(f"El archivo ya existe al restaurar externo {filename}: {exc}")
+        return jsonify({"error": "El archivo ya existe en el destino."}), 409
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+        logger.error(f"Error interno al restaurar modelo externo {filename}: {exc}", exc_info=True)
+        return jsonify({"error": "Error interno al restaurar el modelo."}), 500
 
 
 @app.route("/api/local/external/<filename>", methods=["DELETE"])
@@ -2286,9 +2364,11 @@ def api_local_unregister_external_model(filename: str):
         _log.info("Modelo externo desregistrado: %s", filename)
         return jsonify({"ok": True, "unregistered": filename})
     except FileNotFoundError as exc:
-        return jsonify({"error": str(exc)}), 404
+        logger.warning(f"Modelo externo no encontrado para desregistrar {filename}: {exc}")
+        return jsonify({"error": "Modelo no encontrado."}), 404
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+        logger.error(f"Error interno al desregistrar modelo externo {filename}: {exc}", exc_info=True)
+        return jsonify({"error": "Error interno al desregistrar el modelo."}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -2357,8 +2437,10 @@ def api_update_dataset_config():
     try:
         resolved = _resolve_allowed_dataset_path(raw_input)
     except PermissionError as exc:
-        return jsonify({"error": str(exc)}), 403
+        logger.warning(f"Permiso denegado para ruta de dataset {raw_input}: {exc}")
+        return jsonify({"error": "Permiso denegado para acceder al archivo."}), 403
     except ValueError as exc:
+        logger.warning(f"Ruta de dataset invalida {raw_input}: {exc}")
         return jsonify({"error": str(exc)}), 400
     if "input_file" in updated:
         updated["input_file"] = str(resolved.relative_to(BASE_DIR)).replace("\\", "/")
@@ -2385,8 +2467,10 @@ def api_dataset_inspect():
     try:
         path = _resolve_allowed_dataset_path(raw_path)
     except PermissionError as exc:
-        return jsonify({"error": str(exc)}), 403
+        logger.warning(f"Permiso denegado para ruta de dataset {raw_path}: {exc}")
+        return jsonify({"error": "Permiso denegado para acceder al archivo."}), 403
     except ValueError as exc:
+        logger.warning(f"Ruta de dataset invalida {raw_path}: {exc}")
         return jsonify({"error": str(exc)}), 400
 
     if not path.exists():
@@ -2395,9 +2479,11 @@ def api_dataset_inspect():
     try:
         return jsonify(inspect_dataset(path, sheet=data.get("sheet", "")))
     except DatasetError as exc:
+        logger.warning(f"Error de dataset en inspect {path}: {exc}")
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
-        return jsonify({"error": f"Error al leer dataset: {exc}"}), 500
+        logger.error(f"Error interno al leer dataset {path}: {exc}", exc_info=True)
+        return jsonify({"error": "Error interno al leer el dataset."}), 500
 
 
 @app.route("/api/dataset/profile", methods=["POST"])
@@ -2414,17 +2500,21 @@ def api_dataset_profile():
     try:
         path = _resolve_allowed_dataset_path(raw_path)
     except PermissionError as exc:
-        return jsonify({"error": str(exc)}), 403
+        logger.warning(f"Permiso denegado para ruta de dataset {raw_path}: {exc}")
+        return jsonify({"error": "Permiso denegado para acceder al archivo."}), 403
     except ValueError as exc:
+        logger.warning(f"Ruta de dataset invalida {raw_path}: {exc}")
         return jsonify({"error": str(exc)}), 400
     if not path.exists():
         return jsonify({"error": "Archivo no encontrado."}), 404
     try:
         return jsonify(profile_dataset(path, sheet=data.get("sheet", "")))
     except DatasetError as exc:
+        logger.warning(f"Error de dataset en profile {path}: {exc}")
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
-        return jsonify({"error": f"Error al perfilar dataset: {exc}"}), 500
+        logger.error(f"Error interno al perfilar dataset {path}: {exc}", exc_info=True)
+        return jsonify({"error": "Error interno al perfilar el dataset."}), 500
 
 
 @app.route("/api/dataset/upload", methods=["POST"])
@@ -2449,6 +2539,13 @@ def api_dataset_upload():
     if suffix not in (".csv", ".xlsx", ".xls"):
         return jsonify({"error": f"Formato '{suffix}' no soportado. Usa .csv, .xlsx o .xls."}), 400
 
+    # Validar contenido real del archivo mediante magic bytes (pure Python, sin dependencias de sistema)
+    f.stream.seek(0)
+    file_header = f.stream.read(1024)
+    f.stream.seek(0)
+    if not _validate_upload_content(file_header, suffix):
+        return jsonify({"error": f"El contenido del archivo no corresponde a un {suffix} valido."}), 400
+
     upload_dir = BASE_DIR / "data" / "uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
@@ -2463,9 +2560,11 @@ def api_dataset_upload():
     try:
         profile = profile_dataset(save_path)
     except DatasetError as exc:
+        logger.warning(f"Error de dataset en upload {save_path}: {exc}")
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
-        return jsonify({"error": f"Error al leer dataset: {exc}"}), 500
+        logger.error(f"Error interno al leer dataset subido {save_path}: {exc}", exc_info=True)
+        return jsonify({"error": "Error interno al procesar el archivo subido."}), 500
     return jsonify({
         **profile,
         "path": rel_path,
@@ -3104,11 +3203,12 @@ def api_run_start():
                 _process_state["exit_code"] = proc.returncode
         except Exception as e:
             app.logger.error("[run/start] Excepcion en subprocess: %s", e)
-            err_msg = f"--- Error en proceso: {e} ---"
+            err_msg = "--- Error en proceso ---"
             _push_run_log(err_msg)
             with _process_state["state_lock"]:
                 _process_state["exit_code"] = "ERROR"
-                _process_state["last_error"] = str(e)
+                # No exponer detalles internos del error al cliente
+                _process_state["last_error"] = "Error interno en el proceso de etiquetado"
         finally:
             with _process_state["state_lock"]:
                 _process_state["running"] = False

@@ -305,7 +305,7 @@ def _query_gemini(hw: dict) -> list[dict]:
         )
         return _parse_llm_catalog_response(response.text)
     except Exception as exc:
-        log.warning("[catalog] Gemini fallo: %s", exc)
+        log.info("[catalog] Gemini no disponible: %s", exc)
         return []
 
 
@@ -325,7 +325,7 @@ def _query_anthropic(hw: dict) -> list[dict]:
         )
         return _parse_llm_catalog_response(message.content[0].text)
     except Exception as exc:
-        log.warning("[catalog] Anthropic fallo: %s", exc)
+        log.info("[catalog] Anthropic no disponible: %s", exc)
         return []
 
 
@@ -348,7 +348,7 @@ def _query_openai(hw: dict) -> list[dict]:
         )
         return _parse_llm_catalog_response(response.choices[0].message.content)
     except Exception as exc:
-        log.warning("[catalog] OpenAI fallo: %s", exc)
+        log.info("[catalog] OpenAI no disponible: %s", exc)
         return []
 
 
@@ -526,7 +526,7 @@ def build_dynamic_catalog(hw_profile: dict, force: bool = False) -> list[dict]:
                 log.warning("[catalog] %s error: %s", name, exc)
 
     if not responses:
-        log.warning("[catalog] Ningun LLM respondio  -  usando catalogo fallback")
+        log.info("[catalog] Ningun LLM respondio  -  usando catalogo fallback")
         return _FALLBACK_CATALOG
 
     catalog = _synthesize_catalog(responses)

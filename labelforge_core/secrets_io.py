@@ -1,7 +1,24 @@
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
+
+
+def _restrict_file_permissions(path: Path) -> None:
+    """Restringe el acceso al archivo solo al propietario actual (cross-platform)."""
+    if sys.platform == "win32":
+        try:
+            username = os.environ.get("USERNAME") or os.getlogin()
+            subprocess.run(
+                ["icacls", str(path), "/inheritance:r", "/grant:r", f"{username}:(F)"],
+                check=True, capture_output=True,
+            )
+        except Exception:
+            pass  # No crítico; icacls falla silenciosamente en algunos entornos
+    else:
+        path.chmod(0o600)
 
 
 PROVIDER_API_KEY_ENV = {
@@ -73,6 +90,7 @@ def set_secret_value(path: Path, key: str, value: str) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    _restrict_file_permissions(path)
     os.environ[key] = value
 
 

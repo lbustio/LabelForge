@@ -2961,6 +2961,165 @@ rapido, usar `README.md`, `context.md` y `todos.md`.
 
 ---
 
+### 2026-06-30 - Hardening de seguridad e independencia total de plataforma
+
+**Autor/agente:** Claude Sonnet 4.6.
+
+**Objetivo:** integrar mejoras de seguridad detectadas en la rama remota
+`revisión-de-proyecto-7044f` y garantizar que todo el codebase funcione
+correctamente en Windows, Linux y macOS sin dependencias de sistema
+específicas de plataforma.
+
+**Contexto observado:**
+
+La rama remota `revisión-de-proyecto-7044f` contenía un commit
+(`a06798b`) con hardening de seguridad que no estaba en `main`. Se hizo
+una fusión selectiva excluyendo el `.gitignore` de esa rama, que era una
+versión genérica generada por IA que eliminaba cobertura específica del
+proyecto (datasets de investigación, modelos GGUF, `.claude/`, etc.).
+
+La auditoría de compatibilidad multiplataforma posterior detectó que
+algunas de las mejoras aplicadas usaban dependencias de sistema
+(`libmagic`) o funciones de permisos sin soporte en Windows (`chmod`).
+
+**Decisiones y cambios aplicados:**
+
+**Seguridad — de la rama remota:**
+
+1. `webapp/app.py`: cookies `SESSION_COOKIE_SECURE` ahora `True` por
+   defecto. `LABELFORGE_SECRET_KEY` emite `WARNING` si no está
+   configurada en lugar de fallar silenciosamente. Errores internos de
+   excepción ya no se exponen en respuestas HTTP al cliente; se loguean
+   en servidor con `exc_info=True`. Validación real de contenido en
+   uploads.
+
+2. `labelforge_core/secrets_io.py`: después de escribir `secrets.env`,
+   se aplican permisos restrictivos al archivo (ver abajo).
+
+**Compatibilidad multiplataforma — correcciones:**
+
+3. **Validación MIME en uploads (`webapp/app.py`)**: se descartó
+   `python-magic` (requería `libmagic1` en Linux, `brew install libmagic`
+   en macOS, `python-magic-bin` en Windows). Se implementó validación por
+   magic bytes en Python puro:
+   - XLSX: cabecera ZIP `\x50\x4B\x03\x04`
+   - XLS: cabecera OLE2 `\xD0\xCF\x11\xE0`
+   - CSV: rechazo de 11 firmas binarias conocidas (ELF, PE/COFF, Mach-O,
+     ZIP, OLE2, JPEG, PNG, GIF, PDF), luego decodificación UTF-8 y como
+     fallback latin-1 con umbral 70% de caracteres imprimibles.
+   Se eliminaron `python-magic>=0.4.27` y `python-magic-bin` de
+   `requirements.txt`.
+
+4. **Permisos de archivo (`labelforge_core/secrets_io.py`)**: función
+   `_restrict_file_permissions()` que usa `icacls /inheritance:r /grant`
+   en Windows y `chmod 0o600` en Linux/macOS. `chmod` es ignorado en
+   Windows porque el modelo de permisos es ACL, no Unix.
+
+5. **Rutas de compilación CUDA (`setup_env.py`)**: `_WIN_VSDEVCMD` y
+   `_WIN_CUDA_PATH` ahora son `Path("/dev/null")` en Linux/macOS (antes
+   eran constantes globales con rutas Windows sin guardia). `_cuda_source_env()`
+   tiene retorno anticipado `if sys.platform != "win32": return {}`.
+
+6. **`labelforge_core/cuda_init.py`**: `"bin\\x64"` reemplazado por
+   `Path("bin") / "x64"` para consistencia con pathlib.
+
+7. **`setup_env.py`**: nuevo paso `verify_security()` (paso 8 del flujo)
+   que verifica en vivo que la validación de magic bytes y los permisos
+   restrictivos funcionen correctamente en la plataforma actual.
+
+**Rama remota:**
+
+Los cambios útiles de `revisión-de-proyecto-7044f` ya están integrados
+en `main` sin hacer merge formal. La rama puede eliminarse del remoto.
+El único cambio descartado fue el `.gitignore`, que fue reemplazado por
+una versión genérica que perdía cobertura del proyecto.
+
+**Pendiente en esta sesión:** commit y push de los cambios. Los 5
+archivos modificados están en el working tree sin commitear.
+
+**Archivos tocados:**
+
+- `README.md`
+- `webapp/app.py`
+- `labelforge_core/secrets_io.py`
+- `labelforge_core/cuda_init.py`
+- `setup_env.py`
+- `requirements.txt`
+
+---
+
+### 2026-06-30 - TUI interactiva y corrección de nivel de logs
+
+**Autor/agente:** Claude Sonnet 4.6.
+
+**Objetivo:** añadir una interfaz TUI estilo menús numerados (MS-DOS) que
+permita usar el pipeline sin recordar flags de línea de comandos, y
+eliminar el ruido de mensajes WARNING en el terminal de la TUI.
+
+**Cambios realizados:**
+
+**`main_tui.py` (nuevo):**
+
+TUI completa para el CLI usando la librería `rich` (incluida en
+`requirements.txt`). Entrypoint: `python main_tui.py`. Estructura de menús:
+
+- `[1] Hardware y modelos`: informe de hardware (detect_all() in-process,
+  cacheado tras la primera llamada), modelos recomendados con estado de
+  caché, descarga de pendientes uno a uno con barra de progreso rich
+  (BarColumn, DownloadColumn, TransferSpeedColumn, TimeRemainingColumn),
+  listado de modelos descargados.
+- `[2] Etiquetado`: iniciar sobre dataset completo, iniciar con límite,
+  reanudar checkpoint (opción solo visible si existe checkpoint activo),
+  limpiar checkpoint. El etiquetado lanza `main_cli.py` como subprocess con
+  `stdout=PIPE, stderr=STDOUT, bufsize=1` y hace streaming línea a línea
+  en tiempo real. Ctrl-C termina el proceso limpiamente.
+- `[3] Árbitros`: ver árbitros configurados (solo lectura), abrir
+  `config/arbiters_config.json` en el editor del sistema (`os.startfile`
+  en Windows, `open` en macOS, `$EDITOR`/`nano` en Linux).
+- `[4] Resultados`: listar CSVs en `output/`, ver últimas líneas del log
+  más reciente.
+- `[5] Salir`.
+
+Decisiones de diseño:
+
+- `hw_profile` se cachea en `main()` tras la primera llamada a
+  `detect_all()` para evitar reiniciar subprocesos wmic/nvidia-smi en
+  cada navegación.
+- El catálogo de modelos muestra una nota de estado (con caché de
+  `models/catalog_cache.json` de 7 días) para informar sin bloquear.
+- El nivel raíz de logging se fija en WARNING para mantener la terminal
+  limpia.
+
+**`labelforge_core/local_models.py` (modificado):**
+
+Cuatro mensajes de log degradados de WARNING a INFO:
+
+- Gemini fallo 429 RESOURCE_EXHAUSTED al consultar catálogo.
+- Anthropic fallo 401 al consultar catálogo.
+- OpenAI fallo 401 al consultar catálogo.
+- "Ningun LLM respondio - usando catalogo fallback".
+
+Estos son fallos esperados y completamente manejados: cuando las APIs
+cloud no responden (sin créditos, clave inválida o sin configurar), el
+catálogo cae automáticamente al JSON local. No son condiciones de alerta
+operacional. Emitirlos como WARNING generaba cuatro líneas de ruido
+innecesario en el terminal de la TUI cada vez que se navegaba al menú
+de modelos.
+
+El CLI sigue configurado en INFO y los ve para diagnóstico cuando es útil.
+
+**Archivos tocados:**
+
+- `main_tui.py` (nuevo)
+- `labelforge_core/local_models.py`
+- `requirements.txt`
+- `README.md`
+- `context.md`
+- `bitacora.md`
+- `todos.md`
+
+---
+
 ### 2026-06-21 - Login local SQLite para la webapp
 
 **Autor/agente:** Codex.
