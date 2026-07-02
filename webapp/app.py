@@ -18,6 +18,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from flask import Flask, Response, g, jsonify, redirect, render_template, request, send_from_directory, session, stream_with_context, url_for
+from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
 # Firmas de magic bytes para validacion de uploads (pure Python, sin dependencias de sistema)
@@ -1673,8 +1674,11 @@ def api_models():
         else:
             return jsonify({"error": f"Proveedor desconocido: {provider}"}), 400
     except Exception as e:
-        logger.error(f"Error al listar modelos para {provider}: {e}", exc_info=True)
-        return jsonify({"error": "Error interno del servidor."}), 502
+        _log.error(f"Error al listar modelos para {provider}: {e}", exc_info=True)
+        msg = str(e)
+        if "401" in msg or "authentication" in msg.lower() or "api_key" in msg.lower() or "invalid" in msg.lower():
+            return jsonify({"error": f"Clave de API invalida o no configurada para {provider}. Verifica tu clave en los ajustes."}), 401
+        return jsonify({"error": f"Error al listar modelos: {msg}"}), 502
 
     _models_cache[cache_key] = {"data": result, "ts": now}
     return jsonify(result)
@@ -2576,6 +2580,16 @@ def api_dataset_upload():
 # ---------------------------------------------------------------------------
 # Error handlers
 # ---------------------------------------------------------------------------
+@app.errorhandler(Exception)
+def handle_unhandled_exception(exc):
+    if isinstance(exc, HTTPException):
+        return exc
+    _log.error("Unhandled exception in request handler: %s", exc, exc_info=True)
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "Error interno del servidor."}), 500
+    return "Error interno del servidor.", 500
+
+
 @app.errorhandler(413)
 def request_entity_too_large(e):
     return jsonify({"error": "El archivo es demasiado grande (máximo 300 MB)."}), 413

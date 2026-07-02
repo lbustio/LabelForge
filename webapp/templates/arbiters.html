@@ -612,6 +612,10 @@ async function loadModels() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      throw new Error(`Error del servidor (${res.status}). Verifica tu clave de API en los ajustes.`);
+    }
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || "Error desconocido");
     currentModels = data;
