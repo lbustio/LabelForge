@@ -87,7 +87,7 @@ def _check_llama_cpp(arb_id: str, provider: dict) -> list[str]:
     if not HW_PROFILE_PATH.exists():
         issues.append(
             f"{arb_id}: falta models/hw_profile.json. "
-            "Ejecuta 'python setup_env.py' antes de usar modelos locales."
+            "Ejecuta 'python setup/setup_env.py' antes de usar modelos locales."
         )
     else:
         try:
@@ -107,7 +107,7 @@ def _check_llama_cpp(arb_id: str, provider: dict) -> list[str]:
     except ImportError:
         issues.append(
             f"{arb_id}: llama-cpp-python no esta instalado. "
-            "Ejecuta 'python setup_env.py' para instalarlo con soporte GPU correcto."
+            "Ejecuta 'python setup/setup_env.py' para instalarlo con soporte GPU correcto."
         )
 
     # 3. model_path existe y es .gguf

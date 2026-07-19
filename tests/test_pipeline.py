@@ -26,6 +26,7 @@ from labelforge_core.agreement_metrics import (
     flatten_entry_consensus_metrics,
 )
 from labelforge_core import checkpoint_io
+from labelforge_core import rate_limits
 from labelforge_core.dataset_io import DatasetError, inspect_dataset, load_dataset, resolve_dataset_path
 from labelforge_core.llm_json import extract_first_json_object, parse_llm_json, strip_markdown_json
 from labelforge_core.run_reporting import (
@@ -40,13 +41,20 @@ from labelforge_core.prompting import (
     build_output_instruction,
     build_principles_catalog,
     build_user_prompt,
+    arbiter_context_window,
+    split_claim_for_arbiter,
 )
 from labelforge_core.usage_metrics import (
     build_entry_usage_metric_fieldnames,
     compute_entry_usage_metrics,
     entry_usage_metrics_from_row,
 )
-from labelforge_core.label_persuasion import should_reuse_run_state, validate_safety_policy
+from labelforge_core.label_persuasion import (
+    classify_llm_error,
+    populate_arbiter_major_results,
+    summarize_arbiter_checkpoints,
+    should_reuse_run_state,
+)
 from labelforge_core.arbiters_io import normalize_arbiter
 
 
@@ -82,6 +90,52 @@ class TestUtils(unittest.TestCase):
         self.assertEqual(number("12.5", 0.0), 12.5)
         self.assertEqual(number("abc", 99), 99)
         self.assertEqual(number(None, 42), 42)
+
+
+class TestLlmErrorClassification(unittest.TestCase):
+    def test_local_context_failure_is_not_a_server_error(self):
+        result = classify_llm_error(ValueError("Failed to create llama_context"))
+        self.assertEqual(result["kind"], "local_context_memory")
+        self.assertTrue(result["pause"])
+
+    def test_local_model_load_failure_is_not_an_invalid_response(self):
+        result = classify_llm_error(ValueError("Failed to load model from file: model.gguf"))
+        self.assertEqual(result["kind"], "local_model_load")
+        self.assertTrue(result["pause"])
+        self.assertFalse(result["retryable"])
+
+
+class TestExecutionOrder(unittest.TestCase):
+    @mock.patch("labelforge_core.label_persuasion.emit_run_metric")
+    @mock.patch("labelforge_core.label_persuasion.append_arbiter_result")
+    @mock.patch("labelforge_core.label_persuasion.call_arbiter")
+    def test_arbiter_major_finishes_all_rows_before_switching_model(
+        self, call_arbiter_mock, append_result_mock, _emit_mock,
+    ):
+        calls = []
+
+        def fake_call(arbiter, claim, _limiter, _task, _processing):
+            calls.append((arbiter["id"], claim))
+            return {"AUTH": 0, "AUTH_why": "", "_usage": {}, "_latency_s": 0.1}
+
+        call_arbiter_mock.side_effect = fake_call
+        cfg = {
+            "task": {"principles": {"AUTH": "Authority"}},
+            "processing": {"checkpoint_every": 10, "arbiter_major_retry_attempts": 0},
+            "arbiters": [{"id": "arb1"}, {"id": "arb2"}],
+        }
+        partial = {}
+        ok, kind, reason = populate_arbiter_major_results(
+            [{"txt": "uno"}, {"txt": "dos"}], 2, "txt", cfg,
+            {"arb1": object(), "arb2": object()}, partial, {}, "test-run",
+        )
+
+        self.assertTrue(ok, (kind, reason))
+        self.assertEqual(
+            calls,
+            [("arb1", "uno"), ("arb1", "dos"), ("arb2", "uno"), ("arb2", "dos")],
+        )
+        self.assertEqual(append_result_mock.call_count, 4)
 
 
 class TestAgreementMetrics(unittest.TestCase):
@@ -202,6 +256,49 @@ class TestPrompting(unittest.TestCase):
         self.assertIn('Return JSON only: {"AUTH":0}', prompt)
         self.assertNotIn("abcdef", prompt)
 
+    def test_build_user_prompt_zero_keeps_complete_entry(self):
+        task_cfg = {
+            "principles": {"AUTH": "Authority"},
+            "user_prompt_template": "TEXT: {item}",
+        }
+
+        prompt = build_user_prompt(task_cfg, "abcdef", max_chars=0)
+
+        self.assertIn("TEXT: abcdef", prompt)
+
+    def test_context_window_is_provider_independent(self):
+        proc = {"context_window_fallback": 8192}
+        self.assertEqual(
+            arbiter_context_window({"provider": {"type": "openai", "context_window": 128000}}, proc),
+            128000,
+        )
+        self.assertEqual(
+            arbiter_context_window({"provider": {"type": "anthropic"}}, proc),
+            8192,
+        )
+
+    def test_long_entry_is_split_without_discarding_ends(self):
+        task_cfg = {
+            "principles": {"AUTH": "Authority"},
+            "user_prompt_template": "TEXT: {item}\n{principles_catalog}\n{output_instruction}",
+        }
+        arbiter = {
+            "system_prompt": "Classify",
+            "provider": {"type": "openai", "context_window": 2048},
+            "generation_config": {"max_output_tokens": 100},
+        }
+        claim = "BEGIN " + ("persuasion sentence. " * 600) + " END"
+
+        chunks = split_claim_for_arbiter(
+            arbiter, task_cfg,
+            {"context_safety_margin_tokens": 100, "chunk_overlap_chars": 120},
+            claim,
+        )
+
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(chunks[0].startswith("BEGIN"))
+        self.assertTrue(chunks[-1].endswith("END"))
+
 
 class TestLlmJson(unittest.TestCase):
     def test_parse_direct_json(self):
@@ -303,38 +400,56 @@ class TestUsageMetrics(unittest.TestCase):
         )
 
 
-class TestSafetyPolicy(unittest.TestCase):
-    def test_validate_safety_policy_allowed(self):
-        cfg = {
-            "safety": {
-                "free_only_mode": True,
-                "allowed_provider_types": ["gemini", "vertex_gemini"],
-            },
-            "arbiters": [
-                {"id": "arb1", "provider": {"type": "gemini", "model": "gemini-2.5-pro"}},
-                {"id": "arb2", "provider": {"type": "vertex_gemini", "model": "gemini-2.5-flash"}},
-            ],
-        }
-        # Should execute without error
-        try:
-            validate_safety_policy(cfg)
-        except RuntimeError:
-            self.fail("validate_safety_policy raised RuntimeError unexpectedly!")
+class TestRateLimitsJson(unittest.TestCase):
+    def setUp(self):
+        rate_limits._config_cache = None
 
-    def test_validate_safety_policy_blocked(self):
-        cfg = {
-            "safety": {
-                "free_only_mode": True,
-                "allowed_provider_types": ["gemini"],
-            },
-            "arbiters": [
-                {"id": "arb1", "provider": {"type": "gemini", "model": "gemini-2.5-pro"}},
-                {"id": "arb2", "provider": {"type": "vertex_gemini", "model": "gemini-2.5-flash"}},
-            ],
-        }
-        # Should raise RuntimeError because vertex_gemini is not allowed
-        with self.assertRaises(RuntimeError):
-            validate_safety_policy(cfg)
+    def tearDown(self):
+        rate_limits._config_cache = None
+
+    def test_repository_json_is_the_runtime_source(self):
+        config = rate_limits.load_config(force=True)
+        self.assertIn("gemini", config)
+        self.assertIn("_default", config["gemini"])
+        profile = rate_limits.get_rate_limit_profile("gemini", "modelo-no-listado", "free")
+        self.assertEqual(profile["pattern_matched"], "_default")
+        self.assertEqual(profile["source_label"], "config/rate_limits.json")
+
+    def test_missing_json_fails_instead_of_inventing_defaults(self):
+        missing = Path(tempfile.gettempdir()) / "labelforge-missing-rate-limits.json"
+        with mock.patch.object(rate_limits, "RATE_LIMITS_CONFIG_PATH", missing):
+            with self.assertRaises(FileNotFoundError):
+                rate_limits.load_config(force=True)
+
+    def test_invalid_json_structure_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "rate_limits.json"
+            path.write_text('{"gemini": {}}', encoding="utf-8")
+            with mock.patch.object(rate_limits, "RATE_LIMITS_CONFIG_PATH", path):
+                with self.assertRaises(ValueError):
+                    rate_limits.load_config(force=True)
+
+
+class TestLocalRuntimeErrors(unittest.TestCase):
+    def test_llama_context_allocation_is_not_a_server_error(self):
+        result = classify_llm_error(ValueError("Failed to create llama_context"))
+        self.assertEqual(result["kind"], "local_context_memory")
+        self.assertTrue(result["pause"])
+        self.assertTrue(result["retryable"])
+
+
+class TestArbiterCheckpointSummary(unittest.TestCase):
+    def test_preserves_tokens_latency_evaluations_and_fragment_calls(self):
+        summary = summarize_arbiter_checkpoints({
+            "0": {"a1": {
+                "_usage": {"prompt_tokens": 10, "completion_tokens": 2},
+                "_latency_s": 1.25, "_chunks": 3,
+            }},
+        }, [{"id": "a1"}])
+        self.assertEqual(summary["total_tokens_global"], 12)
+        self.assertEqual(summary["arbiters"]["a1"]["evaluations"], 1)
+        self.assertEqual(summary["arbiters"]["a1"]["model_calls"], 3)
+        self.assertEqual(summary["arbiters"]["a1"]["latency_total_s"], 1.25)
 
 
 class TestRunResume(unittest.TestCase):
@@ -388,7 +503,10 @@ class TestCheckpointIO(unittest.TestCase):
                 path.write_text("{}", encoding="utf-8")
 
             with mock.patch.multiple(checkpoint_io, **paths):
-                cleared = checkpoint_io.clear_runtime_checkpoints(include_run_state=True)
+                cleared = checkpoint_io.clear_runtime_checkpoints(
+                    include_run_state=True,
+                    include_claim_results=True,
+                )
 
             self.assertEqual(set(cleared), {p.name for p in paths.values()})
             self.assertFalse(any(path.exists() for path in paths.values()))
@@ -522,6 +640,7 @@ class TestRunReporting(unittest.TestCase):
         self.assertEqual(stats["total_rows"], 2)
         self.assertEqual(stats["successful_rows"], 2)
         self.assertEqual(stats["total_tokens_global"], 39)
+        self.assertEqual(stats["tokens_per_processed_row"], 20)
         self.assertEqual(stats["results_count"], 1)
         self.assertEqual(stats["results"][0]["index"], 1)
         self.assertEqual(stats["arbiters"]["arb1"]["total_tokens"], 20)

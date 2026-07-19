@@ -31,7 +31,7 @@ def _get_db_path() -> Path:
 def _open_db(db_path: Path) -> sqlite3.Connection:
     if not db_path.exists():
         sys.exit(f"Error: base de datos no encontrada en {db_path}\n"
-                 "Asegurate de haber ejecutado setup_env.py y iniciado la webapp al menos una vez.")
+                 "Asegurate de haber ejecutado setup/setup_env.py y iniciado la webapp al menos una vez.")
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn

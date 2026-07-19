@@ -278,8 +278,10 @@
       flex: 1 1 0; min-height: 280px; overflow-y: auto; padding: 1rem;
     }
     .log-box .log-info  { color: #94a3b8; }
+    .log-box .log-debug { color: #64748b; }
     .log-box .log-warn  { color: #fbbf24; }
     .log-box .log-error { color: #f87171; }
+    .log-box .log-critical { color: #fb7185; font-weight: 700; background: rgba(190,18,60,.12); }
     .log-box .log-ok    { color: #34d399; }
     .status-dot {
       width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: .4rem;
@@ -311,11 +313,11 @@
     </a></li>
     {% endif %}
     {% if current_user and current_user.role == 'admin' %}
-    <li><a href="{{ url_for('page_history') }}" class="nav-link {% if request.path == '/history' %}active{% endif %}">
-      <i class="bi bi-clock-history"></i> Historial
-    </a></li>
     <li><a href="{{ url_for('page_run') }}" class="nav-link nav-run {% if request.path == '/run' %}active{% endif %}">
       <i class="bi bi-play-circle"></i> Ejecutar
+    </a></li>
+    <li><a href="{{ url_for('page_history') }}" class="nav-link {% if request.path == '/history' %}active{% endif %}">
+      <i class="bi bi-clock-history"></i> Historial
     </a></li>
     <li><a href="{{ url_for('page_users') }}" class="nav-link nav-arbiters {% if request.path == '/users' %}active{% endif %}">
       <i class="bi bi-person-gear"></i> Usuarios
@@ -347,6 +349,7 @@
     </a>
     <form method="post" action="{{ url_for('logout') }}" class="mt-2">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
       <button type="submit" class="btn btn-sm btn-outline-secondary w-100">
         <i class="bi bi-box-arrow-right"></i> Salir
       </button>
@@ -365,6 +368,38 @@
     <div class="d-flex">
       <div class="toast-body" id="toastMsg"></div>
       <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="appConfirmModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="background:#1a1d27;border:1px solid #2d3148;color:#e2e8f0">
+      <div class="modal-header border-0 pb-1">
+        <h5 class="modal-title" id="appConfirmTitle">Confirmar accion</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body text-secondary" id="appConfirmMessage" style="white-space:pre-wrap"></div>
+      <div class="modal-footer border-0 pt-1">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-danger" id="appConfirmAccept">Confirmar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="appFormModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="background:#1a1d27;border:1px solid #2d3148;color:#e2e8f0">
+      <div class="modal-header border-0 pb-1">
+        <h5 class="modal-title" id="appFormTitle">Editar</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="appFormFields"></div>
+      <div class="modal-footer border-0 pt-1">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="appFormAccept"><i class="bi bi-check2 me-1"></i>Guardar</button>
+      </div>
     </div>
   </div>
 </div>
@@ -395,6 +430,68 @@ function showToast(msg, type='success') {
   msgEl.textContent = msg;
   el.className = `toast align-items-center border-0 text-bg-${type === 'error' ? 'danger' : type === 'warn' ? 'warning' : 'success'}`;
   bootstrap.Toast.getOrCreateInstance(el, {delay: 3000}).show();
+}
+
+function togglePassword(inputId, button) {
+  const input = document.getElementById(inputId);
+  const icon = button?.querySelector('i');
+  if (!input) return;
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  if (icon) {
+    icon.classList.toggle('bi-eye', !show);
+    icon.classList.toggle('bi-eye-slash', show);
+  }
+  button?.setAttribute('aria-label', show ? 'Ocultar contrasena' : 'Mostrar contrasena');
+  button?.setAttribute('title', show ? 'Ocultar' : 'Mostrar');
+}
+
+function appConfirm(message, options = {}) {
+  return new Promise(resolve => {
+    const element = document.getElementById('appConfirmModal');
+    const modal = bootstrap.Modal.getOrCreateInstance(element);
+    const accept = document.getElementById('appConfirmAccept');
+    document.getElementById('appConfirmTitle').textContent = options.title || 'Confirmar accion';
+    document.getElementById('appConfirmMessage').textContent = message;
+    accept.textContent = options.confirmText || 'Confirmar';
+    accept.className = `btn btn-${options.tone || 'danger'}`;
+    let settled = false;
+    const finish = value => { if (!settled) { settled = true; resolve(value); } };
+    accept.onclick = () => { finish(true); modal.hide(); };
+    element.addEventListener('hidden.bs.modal', () => finish(false), {once:true});
+    modal.show();
+  });
+}
+
+function appForm(options = {}) {
+  return new Promise(resolve => {
+    const element = document.getElementById('appFormModal');
+    const modal = bootstrap.Modal.getOrCreateInstance(element);
+    const container = document.getElementById('appFormFields');
+    const accept = document.getElementById('appFormAccept');
+    document.getElementById('appFormTitle').textContent = options.title || 'Editar';
+    container.innerHTML = (options.fields || []).map((field, index) => `
+      <div class="mb-3">
+        <label class="form-label small text-secondary" for="app-form-${index}">${escapeHtml(field.label || field.name)}</label>
+        <div class="${field.type === 'password' ? 'input-group' : ''}">
+          <input id="app-form-${index}" class="form-control" type="${field.type || 'text'}"
+                 value="${escapeHtml(field.value || '')}" autocomplete="${field.autocomplete || 'off'}"
+                 ${field.placeholder ? `placeholder="${escapeHtml(field.placeholder)}"` : ''}>
+          ${field.type === 'password' ? `<button class="btn btn-outline-secondary" type="button" onclick="togglePassword('app-form-${index}', this)" title="Mostrar" aria-label="Mostrar contrasena"><i class="bi bi-eye"></i></button>` : ''}
+        </div>
+      </div>`).join('');
+    let settled = false;
+    const finish = value => { if (!settled) { settled = true; resolve(value); } };
+    accept.onclick = () => {
+      const values = {};
+      (options.fields || []).forEach((field, index) => { values[field.name] = document.getElementById(`app-form-${index}`).value; });
+      finish(values);
+      modal.hide();
+    };
+    element.addEventListener('hidden.bs.modal', () => finish(null), {once:true});
+    modal.show();
+    setTimeout(() => container.querySelector('input')?.focus(), 150);
+  });
 }
 
 function clamp01(value) {

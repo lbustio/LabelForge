@@ -1,0 +1,121 @@
+{
+  "_meta": {
+    "purpose": "Canonical project reference for the original theoretical definitions of the 5 Principles of Persuasion in Social Engineering (POPs). It is kept in docs/pop.json so nobody has to re-read the source PDFs from scratch to recall what a POP means. Pipeline code does not read this file directly; config/arbiters_config.json and every arbiter prompt must derive from it and must not broaden or contradict it. The definitions are independent of language: only the corpus text changes between English and Spanish.",
+    "sources": [
+      {
+        "short_name": "Ferreira2015",
+        "citation": "Ferreira, A., Coventry, L., & Lenzini, G. (2015). Principles of Persuasion in Social Engineering and Their Use in Phishing. In HAS 2015 (LNCS 9190, pp. 36-47). Springer.",
+        "local_copy": "biblio/chp3A10.10072F978-3-319-20376-8_4.pdf",
+        "note": "The origin of the 5 POPs and their acronyms (AUTH, SP, LSD, CRC, DIS) used throughout this project. Merges and reconciles Cialdini's, Gragg's, and Stajano & Wilson's earlier, overlapping taxonomies into one list."
+      },
+      {
+        "short_name": "Ferreira2019",
+        "citation": "Ferreira, A., & Teles, S. (2019). Persuasion: How phishing emails can influence users and bypass security measures. International Journal of Human-Computer Studies, 125, 19-31.",
+        "local_copy": "biblio/1-s2.0-S1071581918306827-main.pdf",
+        "note": "Follow-up empirical study applying the 5-principle taxonomy to real phishing email subject lines. Gives additional worked examples and marker frequencies per principle. The declared local_copy path is currently missing from this checkout and must be restored or remapped to a verified file before source-level revalidation."
+      }
+    ],
+    "how_this_was_verified": "This reference records a direct pdftotext review reportedly performed on 2026-07-13 while investigating Hallazgos 5 and 6. The referenced 2026-07-13 entries are not present in the current docs/bitacora.md, and the declared Ferreira2019 local_copy is missing from this checkout; those provenance details remain pending revalidation. Ferreira2015's declared local copy is present."
+  },
+  "pops": {
+    "authority": {
+      "acronym": "AUTH",
+      "canonical_definition": "Society trains people not to question authority so they are conditioned to respond to it. People usually follow an expert or pretense of authority and do a great deal for someone they think is an authority.",
+      "source": "Ferreira2015, p.40 (also Ferreira2019, P1, near-identical wording)",
+      "key_markers": [
+        "Official institutions (banks, universities, governments)",
+        "Titles and roles (Director, Manager, Dean, Security Department)",
+        "Formal administrative / bureaucratic tone",
+        "References to policies, regulations, credentials, signatures",
+        "Command-like modal verbs (must, required, mandated, authorized)",
+        "Imperative form to give an order"
+      ],
+      "illustrative_examples_high": [
+        "An email purporting to be from the recipient's bank, including the bank name in the subject line (Ferreira2019's own worked example).",
+        "\"Security Compliance Division: your credentials require validation in accordance with institutional policy.\" (illustrative, not a corpus quote)",
+        "\"This is an official notice from the IT Support department; you must complete verification through the authorized portal.\" (illustrative)"
+      ],
+      "illustrative_examples_low": [
+        "A casual personal message with no institutional framing, e.g. \"Just checking in, reply whenever you have time.\""
+      ],
+      "common_confusion": "Authority is about deference to institutional/organizational legitimacy and expertise -- it is NOT about threats or sanctions for non-compliance. Explicit or implicit threats of negative consequences (account suspension, legal action, judicial citation) are NOT part of Ferreira's Authority definition, even though they often co-occur with authority framing in real phishing. Confirmed real bug in this project (Hallazgo 5, 2026-07-13): an earlier arbiter-facing definition conflated authority with threat/sanction language; fixed to match this definition. Also confirmed (Hallazgo 6): the Spanish semantic anchors for Authority were, at one point, contaminated with explicit legal/judicial threat language (\"sanciones disciplinarias\", \"Citación Judicial\", \"acciones judiciales\") at a rate (40% of anchors) wildly higher than the real corpus base rate (3.4%) -- not fixed yet as of 2026-07-13, see docs/todos.md."
+    },
+    "social_proof": {
+      "acronym": "SP",
+      "canonical_definition": "People tend to mimic what the majority of people do or seem to be doing. People let their guard and suspicion down when everyone else appears to share the same behaviours and risks. In this way, they will not be held solely responsible for their actions.",
+      "source": "Ferreira2015, p.40",
+      "key_markers": [
+        "References to majority behavior / what most people do",
+        "Statistics (\"98% of users\", \"thousands of clients\")",
+        "Testimonials, ratings, reviews",
+        "Group norms, colleagues/other-customers framing"
+      ],
+      "illustrative_examples_high": [
+        "\"Join over 5 million satisfied customers; this is the new industry standard.\" (illustrative)",
+        "\"Most of your colleagues have already completed this update.\" (illustrative)"
+      ],
+      "illustrative_examples_low": [
+        "A message with no reference to what other people are doing at all."
+      ],
+      "common_confusion": "The canonical framing is about diffusion of responsibility (\"I won't be the only one at fault if I comply, since everyone else did too\"), not primarily about fear of social exclusion/isolation. A project text (the pre-Hallazgo-5 arbiter definition) leaned on \"isolation from the group if non-compliant\" -- a related but distinct emotional angle, not a direct quote from Ferreira. Minor nuance, not flagged as a confirmed bug (this POP performs well in this project's data, both languages)."
+    },
+    "liking_similarity_deception": {
+      "acronym": "LSD",
+      "canonical_definition": "People prefer to abide to whom (they think) they know or like, or to whom they are similar to or familiar with, as well as attracted to.",
+      "source": "Ferreira2015, p.40",
+      "key_markers": [
+        "Warm, friendly, personal tone",
+        "Flattery, compliments",
+        "Shared identity cues (same team, institution, country)",
+        "Nicknames, informal language",
+        "Claims of being a known contact or close relation"
+      ],
+      "illustrative_examples_high": [
+        "\"Hey buddy! It's been so long, I found this photo of us.\" (illustrative)",
+        "\"Since we both studied at the same university, I feel comfortable asking you this.\" (illustrative)"
+      ],
+      "illustrative_examples_low": [
+        "A formal, impersonal message with no attempt at familiarity or warmth."
+      ],
+      "common_confusion": "The \"Deception\" part of the name is about deceptively mimicking a trusted/familiar person (impersonation), not a license to fold in unrelated deception mechanics. This project's embedding-side instruction deliberately scopes this POP to LINGUISTIC markers only (tone, wording) -- a project arbiter-facing text once also asked for \"deceptive similarity in names, logos, or email domains\" (visual/technical spoofing), which is defensible under the POP's name but is NOT something a text-only embedding can perceive, and is not what Ferreira's short definition itself describes. Not treated as a confirmed bug, but a known scope tension (see docs/bitacora.md, 2026-07-13)."
+    },
+    "commitment_reciprocation_consistency": {
+      "acronym": "CRC",
+      "canonical_definition": "People feel more confident in their decision once they commit (publicly) to a specific action and need to follow it through until the end. This is true whether in the workplace, or in a situation when their action is illegal. People have tendency to believe what others say and need, and they want to appear consistent in what they do, for instance, when they owe a favour. There is an automatic response of repaying a favour.",
+      "source": "Ferreira2015, p.40",
+      "key_markers": [
+        "References to a PRIOR promise, agreement, or obligation",
+        "Moral duty / consistency framing (\"as you agreed\", \"as promised\")",
+        "Genuine reciprocity (\"we helped you before, now we need...\", \"in return for...\")",
+        "NOT the same as generic \"you must verify/comply\" account-security language, which has no reference to anything prior"
+      ],
+      "illustrative_examples_high": [
+        "\"As we agreed in your contract, it is necessary to renew your payment information.\" (illustrative)",
+        "\"In response to your earlier request, we are sending the exclusive access we promised.\" (illustrative)",
+        "\"As thanks for your loyalty, we've credited a special bonus to your balance.\" (illustrative)"
+      ],
+      "illustrative_examples_low": [
+        "\"No service, gift, or favor was previously provided in this communication; you are under no obligation to respond.\" (illustrative)"
+      ],
+      "common_confusion": "This is the POP most often confused with Authority in practice, precisely because both frequently appear in generic \"verify your account\" phishing templates. The defining test is whether the message references something that ALREADY happened between sender and recipient (a promise, a prior request, a favor) -- if it's just \"you must comply with our policy now\" with no backward reference, it is Authority, not CRC, regardless of how urgent or official it sounds. Confirmed real bug in this project (Hallazgo 6, 2026-07-13): 9 of 10 English-language semantic anchors for this POP are generic account-verification messages with no reference to any prior commitment or reciprocity -- effectively indistinguishable from Authority anchors. The Spanish anchors for this POP, by contrast, are well-aligned with this definition. Not fixed as of 2026-07-13 -- see docs/todos.md; no good real-corpus replacement candidates were found for English either, which may indicate the English dataset's categorical labeling for this POP is itself noisy, not just the anchors."
+    },
+    "distraction": {
+      "acronym": "DIS",
+      "canonical_definition": "People focus on one thing and ignore other things that may happen without them noticing; they focus attention on what they can gain, what they need, what they can lose or miss out on, or if that thing will soon be unavailable, has been censored, restricted or will be more expensive later. These distractions can heighten people's emotional state and make them forget other logical facts to consider when making decisions.",
+      "source": "Ferreira2015, p.40",
+      "key_markers": [
+        "GAIN-focused sub-type: sensational prizes, shocking news, exaggerated excitement, unexpected rewards",
+        "LOSS/SCARCITY-focused sub-type: time pressure, deadlines, \"last chance\", unavailability, rising cost",
+        "Either sub-type: heightened emotional state, cognitive overload, attention diverted from careful evaluation"
+      ],
+      "illustrative_examples_high": [
+        "GAIN sub-type: \"CONGRATULATIONS! You've won an iPhone 15 Pro Max, claim it here.\" (illustrative)",
+        "LOSS/SCARCITY sub-type: \"Your mailbox will be deactivated within 24 hours unless you validate your account immediately.\" (illustrative)"
+      ],
+      "illustrative_examples_low": [
+        "A calm, routine, technical notice with no urgency or excitement framing."
+      ],
+      "common_confusion": "This is explicitly a BROAD, two-sided construct in Ferreira's own definition -- it is a mistake to treat it as only sensationalism/prizes, or only urgency/scarcity; both are canonically part of Distraction. Confirmed real issue in this project (Hallazgo 6, 2026-07-13): the English embedding_instruction text describes only the gain/sensationalism sub-type, while the actual English semantic anchors are 100% the loss/scarcity sub-type (mailbox-quota-deadline templates) -- internally inconsistent with each other, and each only half of the real definition. Investigated separately (2026-07-13) whether this is fixable by better anchor curation: the English corpus (data/pop_dataset_Full(Tiltan).csv) was searched directly and found to have essentially no genuine gain/sensationalism-style messages labeled Distraction -- the loss/scarcity bias may be a genuine property of this specific corpus, not just bad curation. The Spanish anchors, by contrast, already cover both sub-types well. Not fixed as of 2026-07-13 -- see docs/todos.md."
+    }
+  }
+}

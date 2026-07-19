@@ -33,7 +33,10 @@
           </div>
           <div>
             <label class="form-label small text-secondary">Contrasena temporal</label>
-            <input class="form-control" id="new-password" type="password" autocomplete="new-password">
+            <div class="input-group">
+              <input class="form-control" id="new-password" type="password" autocomplete="new-password">
+              <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('new-password', this)" title="Mostrar" aria-label="Mostrar contrasena temporal"><i class="bi bi-eye"></i></button>
+            </div>
           </div>
           <div class="text-secondary small">Los usuarios creados aqui nacen con rol user. Para cambiar admin usa transferencia.</div>
         </div>
@@ -180,12 +183,16 @@ document.getElementById('create-user-form').addEventListener('submit', async (ev
 async function editUser(id) {
   const u = users.find(x => x.id === id);
   if (!u) return;
-  const username = prompt('Usuario:', u.username);
-  if (username === null) return;
-  const email = prompt('Email:', u.email || '');
-  if (email === null) return;
-  const password = prompt('Nueva contrasena temporal (deja vacio para no cambiar):', '');
-  if (password === null) return;
+  const values = await appForm({
+    title: `Editar usuario: ${u.username}`,
+    fields: [
+      {name:'username', label:'Usuario', value:u.username},
+      {name:'email', label:'Email', type:'email', value:u.email || ''},
+      {name:'password', label:'Nueva contrasena temporal', type:'password', autocomplete:'new-password', placeholder:'Deja vacio para no cambiar'},
+    ],
+  });
+  if (!values) return;
+  const {username, email, password} = values;
   const res = await fetch(`${APP_BASE}/api/users/${id}`, {
     method: 'PUT',
     headers: {'Content-Type': 'application/json'},
@@ -202,7 +209,7 @@ async function editUser(id) {
 
 async function transferAdmin(id) {
   const u = users.find(x => x.id === id);
-  if (!u || !confirm(`Transferir admin a ${u.username}? Tu cuenta pasara a user.`)) return;
+  if (!u || !await appConfirm(`Se transferira el rol administrador a «${u.username}» y tu cuenta pasara a usuario.`, {title:'Transferir administracion', confirmText:'Transferir', tone:'warning'})) return;
   const res = await fetch(`${APP_BASE}/api/users/${id}/transfer-admin`, {method: 'POST'});
   const data = await res.json();
   if (!res.ok) {
@@ -215,7 +222,7 @@ async function transferAdmin(id) {
 
 async function disableUser(id) {
   const u = users.find(x => x.id === id);
-  if (!u || !confirm(`Desactivar usuario ${u.username}?`)) return;
+  if (!u || !await appConfirm(`El usuario «${u.username}» perdera el acceso a LabelForge.`, {title:'Desactivar usuario', confirmText:'Desactivar'})) return;
   const res = await fetch(`${APP_BASE}/api/users/${id}`, {method: 'DELETE'});
   const data = await res.json();
   if (!res.ok) {

@@ -38,16 +38,43 @@
     color:#fbbf24; font-size:.82rem;
   }
   .processing-popover .popover-body { color:#94a3b8; font-size:.82rem; }
+  #proc-form > .row > [class*="col-"] {
+    padding:1rem; border:1px solid #293043; border-radius:.65rem; background:#111621;
+  }
+  #proc-form > .row > [class*="col-"]::before {
+    display:block; margin-bottom:.9rem; padding-bottom:.55rem; border-bottom:1px solid #293043;
+    color:#e2e8f0; font-size:.88rem; font-weight:650;
+  }
+  #proc-form > .row > [class*="col-"]:nth-child(1)::before { content:"Entrada, contexto y persistencia"; }
+  #proc-form > .row > [class*="col-"]:nth-child(2)::before { content:"Ritmo inicial y rango dinámico"; }
+  #proc-form > .row > [class*="col-"]:nth-child(3)::before { content:"Respuesta ante límites de cuota (429)"; }
+  #proc-form > .row > [class*="col-"]:nth-child(4)::before { content:"Errores del proveedor y recuperación"; }
 </style>
 
 <div class="page-title">Configuracion del proceso</div>
 
 <div class="card-dark accent-panel accent-amber">
-  <div class="card-header-label">Parametros del proceso</div>
+  <div class="card-header-label">Comportamiento de la ejecucion</div>
+  <p class="text-secondary small mb-3">Controles operativos agrupados por responsabilidad. No sustituyen ni intentan eludir las políticas de cada proveedor.</p>
   <form id="proc-form" onsubmit="saveProcessing(event)">
     <div class="row g-4">
 
       <div class="col-md-6">
+        <div class="mb-3">
+          <label class="form-label small text-secondary" for="execution_order">Orden de ejecucion</label>
+          <select class="form-select" id="execution_order">
+            <option value="arbiter_major">Por arbitro: un modelo procesa todas las entradas</option>
+            <option value="row_major">Por entrada: todos los arbitros procesan cada texto</option>
+          </select>
+          <div class="form-text text-secondary">
+            Por arbitro evita cargar y descargar modelos locales en cada texto. Cada voto se guarda inmediatamente y el consenso se calcula al terminar todas las pasadas.
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small text-secondary" for="arbiter_major_retry_attempts">Reintentos durante la pasada del arbitro</label>
+          <input type="number" class="form-control" id="arbiter_major_retry_attempts" min="0" step="1">
+          <div class="form-text text-secondary">Reintenta sin cambiar de modelo. Si sigue fallando, pausa y conserva todos los votos ya calculados.</div>
+        </div>
         <div class="mb-3">
           <div class="field-label-row">
             <label class="form-label small text-secondary" for="checkpoint_every">Punto de control cada N entradas</label>
@@ -63,18 +90,31 @@
           <div class="form-text text-secondary">El estado recuperable se guarda por entrada; este valor controla el informe de avance cada N entradas.</div>
         </div>
         <div class="mb-3">
-          <div class="field-label-row">
-            <label class="form-label small text-secondary" for="claim_max_chars">Longitud maxima de la entrada (caracteres)</label>
-            <button type="button" class="btn field-help-btn d-inline-flex align-items-center justify-content-center"
-                    data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="right"
-                    data-bs-title="Longitud maxima de la entrada"
-                    data-bs-content="Limite de caracteres que se envian al modelo de lenguaje. Ayuda a controlar tokens y tiempo; si es muy bajo puede cortar contexto util."
-                    aria-label="Ayuda: longitud maxima de la entrada">
-              <i class="bi bi-question-circle"></i>
-            </button>
+          <label class="form-label small text-secondary" for="systemic_failure_threshold">Cortacircuito de fallos repetidos</label>
+          <input type="number" class="form-control" id="systemic_failure_threshold" min="1" step="1">
+          <div class="form-text text-secondary">Pausa si el mismo árbitro repite el mismo fallo esta cantidad de veces. Conserva todos los resultados parciales.</div>
+        </div>
+        <div class="mb-3 p-3 rounded" style="background:#101722;border:1px solid rgba(56,189,248,.28)">
+          <div class="small fw-semibold text-info mb-1"><i class="bi bi-file-earmark-text me-1"></i>Politica de entradas largas</div>
+          <div class="small text-secondary">
+            LabelForge nunca recorta una entrada. Calcula el espacio disponible de cada arbitro y, si el texto no cabe,
+            lo procesa completamente en fragmentos solapados. Un principio cuenta como presente si aparece en cualquier fragmento.
           </div>
-          <input type="number" class="form-control" id="claim_max_chars" min="100" step="100">
-          <div class="form-text text-secondary">Las entradas mas largas se recortan a este limite antes de enviarlas.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small text-secondary" for="context_window_fallback">Contexto de respaldo (tokens)</label>
+          <input type="number" class="form-control" id="context_window_fallback" min="512" step="512">
+          <div class="form-text text-secondary">Solo se usa cuando el proveedor no informa la capacidad del modelo y el arbitro no tiene una ventana configurada.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small text-secondary" for="context_safety_margin_tokens">Margen de seguridad (tokens)</label>
+          <input type="number" class="form-control" id="context_safety_margin_tokens" min="0" step="128">
+          <div class="form-text text-secondary">Espacio adicional reservado para diferencias de tokenizacion y formato del proveedor.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small text-secondary" for="chunk_overlap_chars">Solapamiento entre fragmentos (caracteres)</label>
+          <input type="number" class="form-control" id="chunk_overlap_chars" min="0" step="50">
+          <div class="form-text text-secondary">Repite el borde entre fragmentos para conservar señales que crucen el punto de division.</div>
         </div>
         <div class="mb-3">
           <div class="field-label-row">
@@ -105,7 +145,7 @@
             </button>
           </div>
           <input type="number" class="form-control" id="base_delay_seconds" min="0" step="0.1" oninput="validateDelayInput()">
-          <div id="rate-limit-summary" class="form-text text-secondary mt-2">Cargando limites de peticiones...</div>
+          <div id="rate-limit-summary" class="form-text text-secondary mt-2">Cargando recomendación orientativa...</div>
         </div>
         <div class="mb-3">
           <div class="field-label-row">
@@ -192,11 +232,11 @@
 
 <div class="card-dark accent-panel accent-cyan">
   <div class="d-flex align-items-center justify-content-between mb-2">
-    <div class="card-header-label mb-0">Limites de peticiones por modelo</div>
+    <div>
+      <div class="card-header-label mb-0">Tabla orientativa de cuotas</div>
+      <div class="small text-secondary">Avanzado · no bloquea la configuración ni reemplaza la cuota real de tus credenciales.</div>
+    </div>
     <div class="d-flex gap-2">
-      <button class="btn btn-sm btn-outline-secondary" onclick="resetRlConfig()">
-        <i class="bi bi-arrow-counterclockwise me-1"></i>Restablecer defaults
-      </button>
       <button class="btn btn-sm btn-primary" onclick="saveRlConfig()">
         <i class="bi bi-floppy me-1"></i>Guardar
       </button>
@@ -209,15 +249,22 @@
     <code>account_defaults</code> (fallback por clase de modelo para Anthropic, Vertex, Ollama, etc.) y
     <code>account_model_limits</code> (overrides por modelo para esos mismos proveedores).
   </p>
-  <div id="rl-config-error" class="alert alert-danger py-2 mb-2 small" style="display:none"></div>
-  <div id="rl-config-editor" style="border:1px solid #2d3148;border-radius:.4rem;overflow:hidden"></div>
+  <button class="btn btn-sm btn-outline-info mb-2" type="button" data-bs-toggle="collapse" data-bs-target="#quota-editor-collapse">
+    <i class="bi bi-code-square me-1"></i>Mostrar editor avanzado
+  </button>
+  <div class="collapse" id="quota-editor-collapse">
+    <div id="rl-config-error" class="alert alert-danger py-2 mb-2 small" style="display:none"></div>
+    <div id="rl-config-editor" style="border:1px solid #2d3148;border-radius:.4rem;overflow:hidden"></div>
+  </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
 const FIELDS = [
-  'checkpoint_every', 'claim_max_chars', 'base_delay_seconds',
+  'execution_order', 'arbiter_major_retry_attempts',
+  'checkpoint_every', 'systemic_failure_threshold', 'context_window_fallback', 'context_safety_margin_tokens',
+  'chunk_overlap_chars', 'base_delay_seconds',
   'min_delay_seconds', 'max_delay_seconds', 'rate_limit_backoff_multiplier',
   'server_error_backoff_multiplier', 'recovery_threshold_successes', 'recovery_delay_multiplier',
 ];
@@ -275,17 +322,15 @@ function validateDelayInput() {
   if (!input || !rateLimitSummary || rateLimitSummary.global_min_delay == null) return true;
   const value = parseFloat(input.value || '0');
   const isValid = value >= rateLimitSummary.global_min_delay;
-  input.classList.toggle('is-invalid', !isValid);
+  input.classList.remove('is-invalid');
   input.classList.toggle('is-valid', isValid);
+  input.classList.toggle('border-warning', !isValid);
   return isValid;
 }
 
 async function saveProcessing(e) {
   e.preventDefault();
-  if (!validateDelayInput()) {
-    showToast(`La espera base es demasiado baja. Minimo recomendado: ${rateLimitSummary.global_min_delay}s`, 'error');
-    return;
-  }
+  const belowEstimate = !validateDelayInput();
   const payload = {};
   FIELDS.forEach(f => { const el = document.getElementById(f); if (el) payload[f] = el.value; });
   const res = await fetch(APP_BASE + '/api/processing', {
@@ -294,13 +339,16 @@ async function saveProcessing(e) {
   });
   const data = await res.json();
   if (!res.ok) { showToast(data.error || 'Error al guardar', 'error'); return; }
-  showToast('Parametros guardados');
+  showToast(belowEstimate
+    ? 'Parametros guardados. La espera es menor que la estimacion local; el ajuste reactivo seguira respondiendo a errores reales.'
+    : 'Parametros guardados', belowEstimate ? 'warn' : 'success');
 }
 
 async function loadRlConfig() {
   try {
     const r    = await fetch(APP_BASE + '/api/rate-limits/config');
     const data = await r.json();
+    if (!r.ok || data.error) throw new Error(data.error || `Error ${r.status}`);
     rlEditor.setValue(JSON.stringify(data, null, 2));
     document.getElementById('rl-config-error').style.display = 'none';
   } catch (err) {
@@ -328,19 +376,6 @@ async function saveRlConfig() {
 
   showToast('Limites de peticiones guardados');
   loadProcessing();
-}
-
-async function resetRlConfig() {
-  if (!confirm('Restablecer los limites a los valores predeterminados?\nEsto sobreescribira los cambios actuales en el editor (no en disco hasta que guardes).')) return;
-  try {
-    const r    = await fetch(APP_BASE + '/api/rate-limits/config/defaults');
-    const data = await r.json();
-    rlEditor.setValue(JSON.stringify(data, null, 2));
-    document.getElementById('rl-config-error').style.display = 'none';
-    showToast('Valores predeterminados cargados en el editor (no guardados aun)', 'warn');
-  } catch (err) {
-    _showRlError('Error al obtener defaults: ' + err.message);
-  }
 }
 
 function _showRlError(msg) {
@@ -387,6 +422,9 @@ document.addEventListener('DOMContentLoaded', function () {
   try { initProcessingHelpPopovers(); } catch (e) { console.warn('Popovers:', e); }
   loadProcessing();
   _rlEditorInit();
+  document.getElementById('quota-editor-collapse')?.addEventListener('shown.bs.collapse', () => {
+    if (typeof rlEditor?.refresh === 'function') rlEditor.refresh();
+  });
   loadRlConfig();
 });
 </script>

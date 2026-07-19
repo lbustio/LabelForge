@@ -3,7 +3,7 @@ hw_detection.py
 ---------------
 Deteccion multiplataforma de hardware.
 
-Usado por setup_env.py (setup time) y por local_models.py (runtime)
+Usado por setup/setup_env.py (setup time) y por local_models.py (runtime)
 para construir o validar hw_profile.json.
 
 Retorna un dict compatible con el esquema de hw_profile.json.
@@ -490,4 +490,3 @@ if __name__ == "__main__":
     import json
     result = detect_all()
     print(json.dumps(result, indent=2, ensure_ascii=False))
-

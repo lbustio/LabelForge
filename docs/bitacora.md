@@ -84,11 +84,12 @@ combina:
 
 ## Pendientes vivos
 
-- Ejecutar una prueba end-to-end corta desde la webapp.
-- Ejecutar el pipeline completo para obtener resultados finales del paper.
-- Cerrar pendientes de seguridad documentados en `context.md` y `todos.md`.
-- Limpiar deuda JS legacy en `webapp/templates/arbiters.html`.
-- Validar en navegador descargas GGUF simultaneas, cancelacion y movimiento externo.
+- Ejecutar el pipeline completo para obtener los resultados finales del paper.
+- Corregir el servicio de Windows y configurar una clave de sesion estable.
+- Completar las validaciones manuales de navegador descritas en `todos.md`.
+
+La lista autoritativa y detallada de pendientes esta en `todos.md`; esta seccion
+solo ofrece un resumen y no debe convertirse en un segundo backlog.
 
 ## Historico
 
@@ -1885,6 +1886,48 @@ metricas, rutas y utilidades compartidas.
 
 ---
 
+### 2026-07-18 - Reorganizacion de documentacion y creacion de entornos
+
+**Autor/agente:** Codex.
+
+**Objetivo:** despejar la raiz del repositorio y agrupar archivos por funcion sin
+romper los comandos de instalacion ni las rutas de runtime.
+
+**Decision tomada:**
+
+- Se eligio `docs/` para centralizar la documentacion interna. `README.md` se
+  mantiene en la raiz porque es la portada que GitHub muestra automaticamente.
+- Se eligio `setup/` para centralizar la creacion y preparacion de entornos. El
+  nombre cubre definiciones de dependencias, instalacion guiada por hardware y
+  compilacion auxiliar CUDA, sin confundirse con secretos `.env`.
+
+**Cambios realizados:**
+
+- Movidos `bitacora.md`, `context.md` y `todos.md` a `docs/`. `README.md` se
+  movio inicialmente con ellos, pero se devolvio a la raiz para conservar su
+  integracion convencional con GitHub.
+- Movidos `setup_env.py`, `requirements.txt`, `environment.yml` y
+  `tools/build_llama_cuda.cmd` a `setup/`.
+- `setup/setup_env.py` conserva la raiz del repositorio como `BASE_DIR`, agrega
+  esa raiz a `sys.path` y busca sus requirements dentro de `setup/`.
+- Actualizados los mensajes de CLI/webapp, las instrucciones de instalacion y la
+  estructura documentada para usar `python setup/setup_env.py`,
+  `pip install -r setup/requirements.txt` y
+  `conda env create -f setup/environment.yml`.
+- Verificado el entrypoint nuevo ejecutando su ayuda desde el entorno Conda de
+  LabelForge.
+
+**Archivos y directorios afectados:**
+
+- `docs/`
+- `setup/`
+- `main_tui.py`
+- `manage.py`
+- `labelforge_core/`
+- `webapp/`
+
+---
+
 ## 2026-06-21 - Plantilla de secretos movida a `secrets/`
 
 **Objetivo:** ubicar la plantilla de variables de entorno junto al archivo real
@@ -3146,3 +3189,193 @@ un flujo usable sin depender todavia de registro OAuth externo.
 - `README.md`
 - `context.md`
 - `todos.md`
+### 2026-07-18 - Consolidacion de ejecucion, GGUF, interfaz y documentacion
+
+**Autor/agente:** Codex.
+
+**Objetivo:** cerrar el conjunto de incidencias atendidas durante la revision,
+separar el trabajo terminado del backlog y dejar un relevo portable basado en el
+estado real del codigo.
+
+**Cambios y decisiones consolidados:**
+
+- Se reorganizaron los documentos internos en `docs/`, los archivos para crear
+  entornos en `setup/` y se mantuvo `README.md` en la raiz para GitHub.
+- La taxonomia y los prompts de los arbitros se contrastaron con
+  `docs/pop.json`. Las definiciones AUTH, SP, LSD, CRC y DIS son la autoridad y
+  las especialidades de los arbitros no pueden reinterpretarlas.
+- El descubrimiento de modelos se hizo dependiente del proveedor activo y sus
+  credenciales. Cambiar proveedor o pulsar Recargar consulta solamente ese
+  proveedor; las tarjetas de arbitros se actualizan despues de guardar.
+- Para GGUF, el catalogo conserva repositorio y archivo exactos devueltos por
+  Hugging Face. Se elimino la necesidad de inventar paths y se reforzaron
+  progreso, consulta de estado, cancelacion y limpieza de descargas parciales.
+- Se verifico que `llama_cpp` usa `llama-cpp-python` y bibliotecas ggml/CUDA en
+  la maquina probada. Se retiro el fallback OpenVINO incompatible: una futura
+  integracion NPU debe ser un proveedor distinto.
+- El contexto dejo de resolverse mediante limites fijos o truncado. La ventana
+  se negocia por proveedor/modelo y las entradas que no caben se procesan
+  completas por segmentos con solapamiento, OR de votos y acumulacion de uso y
+  latencia. Los GGUF leen sus metadatos y prueban ventanas decrecientes; en la
+  RTX 5050 probada, Llama 3.2 3B cargo a 65536 despues de fallar a 131072.
+- Los resultados se persisten por entrada y arbitro. La reanudacion omite votos
+  terminados y completa solo los faltantes. Se agrego un circuito de fallos
+  sistemicos, actualmente con umbral 3, y los errores locales deterministas ya
+  no se presentan como rate limit o error de servidor remoto.
+- `config/rate_limits.json` se convirtio en la unica fuente de cuotas. Se
+  retiraron tablas hardcoded y politicas ambiguas o muertas; los datos estaticos
+  son orientativos y la disponibilidad real la determina el proveedor activo.
+- En Ejecutar se corrigieron orden de pestañas, detencion, limpieza total,
+  altura de la ultima entrada, panel plegable del dataset, explicacion del limite
+  cero y semantica de colores de logs.
+- Los dialogos nativos del navegador se sustituyeron por componentes de la
+  aplicacion y los campos de contraseña incorporaron mostrar/ocultar.
+- El backlog fue depurado: todo lo completado en `todos.md` se traslado a esta
+  bitacora y quedaron solo acciones comprobablemente pendientes.
+- `context.md` fue reescrito como entrega autocontenida para otra sesion o PC,
+  incluyendo arquitectura, configuracion actual, invariantes, recuperacion y
+  pasos de instalacion/validacion.
+
+**Estado operativo que no debe perderse:**
+
+La corrida `20260718_023137` termino bajo codigo anterior sin filas consolidadas,
+pero `checkpoints/arbiter_results.jsonl` conserva en las entradas 0 a 7 los
+resultados de `arb1` y `arb3`. El fallo fue de `arb4`. Despues de reiniciar debe
+reanudarse sin `--fresh` y sin limpiar los checkpoints, verificando que se llame
+solo a `arb4` y se consoliden las filas.
+
+**Verificacion registrada:**
+
+- Ultimo resultado automatizado historico: 39 pruebas aprobadas. La suite no
+  pudo repetirse al cerrar esta revision porque el entorno
+  `D:\conda\envs\LabelForge` no tenia `pytest` y el `python` global no pudo
+  iniciarse; debe sincronizarse el entorno y volver a ejecutarse.
+- Compilacion de plantillas verificada durante los cambios de interfaz.
+- Carga local de GGUF con CUDA y negociacion de contexto verificada en la
+  maquina de desarrollo; debe repetirse en cualquier equipo nuevo.
+
+**Pendientes derivados:**
+
+Se documentan exclusivamente en `todos.md`: validar una corrida corta nueva,
+ejecutar el dataset completo, corregir `labelforge-service.xml`, definir
+`LABELFORGE_SECRET_KEY`, validar los flujos de navegador y preparar el commit y
+push de forma intencional.
+
+### 2026-07-18 - Correccion del falso rate limit y liberacion de GGUF
+
+**Diagnostico basado en logs:** la corrida `20260718_023137` no sufrio un rate
+limit. `arb1` y `arb3` respondian, mientras `arb4` fallaba con
+`Failed to create llama_context` al intentar usar 131072 tokens. El codigo
+antiguo clasificaba ese `ValueError` como respuesta invalida y aplicaba backoff
+de servidor, por lo que ninguna fila podia consolidarse.
+
+Una corrida posterior demostro que negociar Llama 3.2 3B a 65536 permite
+completar la inferencia, pero descubrio otro problema al volver a Mistral: el
+modelo expulsado se quitaba del cache Python sin cerrar explicitamente sus
+recursos nativos. Se agrego cierre determinista y recoleccion antes de reservar
+memoria para el siguiente GGUF. Los fallos de carga local ahora tienen la clase
+`local_model_load` y pausan de inmediato sin backoff remoto.
+
+**Verificacion:** 41 pruebas `unittest` aprobadas y prueba real de carga
+Mistral -> Qwen -> Llama (65536) -> Mistral finalizada con `GGUF_SWAP_OK`.
+
+**Correccion de estado documental:** al finalizar, `checkpoints/` solo contenia
+`.gitkeep`; los votos parciales historicos ya no estaban disponibles. Por ello
+la siguiente validacion debe ser una corrida corta nueva, no una reanudacion.
+
+### 2026-07-18 - Ejecucion por arbitro para evitar recargas masivas de GGUF
+
+**Problema:** el orden por entrada cargaba Mistral, Qwen y Llama para cada texto.
+Con 3646 entradas podia provocar hasta 10938 cargas y descargas de varios GB,
+ademas de reconstruir contextos nativos y reservar VRAM en cada cambio.
+
+**Decision arquitectonica:** se incorporo `processing.execution_order` como
+politica general. `arbiter_major` procesa todas las entradas pendientes con un
+arbitro, persiste cada voto y solo entonces cambia de modelo; `row_major`
+conserva el comportamiento anterior para casos que lo requieran. Los reintentos
+sin cambio de modelo se configuran mediante `arbiter_major_retry_attempts`.
+
+La pantalla Configuracion permite elegir ambas politicas y explica el costo. La
+configuracion actual usa `arbiter_major` con un reintento. La reanudacion sigue
+siendo por pareja entrada/arbitro, de modo que una interrupcion no repite votos
+ya guardados.
+
+**Verificacion:** 42 pruebas aprobadas, plantillas compiladas y corrida real
+incremental `20260718_030452` completada 3/3. Para la nueva entrada se observo
+Mistral una vez, Qwen una vez y Llama una vez; la fase de consenso reutilizo los
+votos sin nuevas llamadas.
+
+### 2026-07-18 - Dashboard compatible con row-major y arbiter-major
+
+**Hallazgo:** el panel original asumía que una llamada de cada arbitro llegaba
+junto con una fila consolidada. Durante `arbiter_major`, eso dejaba progreso,
+tokens, latencias y ETA aparentemente congelados hasta terminar todas las
+pasadas; ademas, sumar de nuevo las metricas en `claim_ok` podia duplicarlas.
+
+**Solucion:** el pipeline emite `arbiter_result` por cada voto persistido y
+eventos de inicio/final de pasada. El estado en vivo mantiene por separado
+trabajo de arbitros y entradas consolidadas. El frontend muestra una barra de
+votos y la pasada/modelo activo, calcula velocidad y ETA en votos para
+`arbiter_major`, y conserva entradas/min para `row_major`. Acuerdo y principios
+solo se grafican cuando existen consensos, con un mensaje explicativo mientras
+se completan las pasadas.
+
+Tokens, llamadas y latencias se agregan al recibir cada voto. En modo por
+arbitro, `claim_ok` actualiza consenso y estado de fila sin volver a sumar esos
+recursos. La prueba especifica `DUAL_ORDER_DASHBOARD_OK` verifico progreso,
+llamadas y ausencia de doble conteo; la suite completa mantuvo 42 pruebas OK y
+la plantilla `run.html` compilo correctamente.
+
+### 2026-07-18 - Auditoria integral de la pestaña Ejecutar
+
+**Alcance:** se revisaron dataset, limite, checkpoint, inicio/detencion,
+registro, errores, cola, barras, estado en vivo, ETA, tokens, dashboard,
+principios, ultima entrada, resumen guardado, acuerdo, paper summary, tabla,
+paginacion, outputs, borrado, archivo, limpieza y restauracion tras reinicio.
+
+**Correcciones:** `/api/run/stats` prioriza siempre el run activo o pausado y
+devuelve estado de espera si aun no hay consensos, sin caer en un CSV historico.
+Al iniciar se ocultan resumen y tabla anteriores. El checkpoint muestra votos
+parciales y distingue salida prevista de CSV final. Estado en vivo se hidrata
+desde disco tras reiniciar Flask.
+
+Detener deja una pausa reanudable `user_stopped`. Los endpoints de dataset,
+checkpoint y archivo rechazan mutaciones durante una corrida. El presupuesto de
+tokens se aplica despues de cada voto en orden por arbitro. La cola usa lectura
+deduplicada; las horas de errores salen del log original; tokens por entrada usa
+solo filas procesadas; una corrida completada sana aparece como Completado, no
+como Vigilar.
+
+**Validacion:** sin IDs HTML duplicados ni referencias estaticas ausentes; Python
+y Jinja compilados; JavaScript renderizado validado con `node --check`; 46
+pruebas `unittest` OK. Se añadieron pruebas aisladas para row-major,
+arbiter-major, idempotencia de votos, seleccion de fuente y parada reanudable.
+
+### 2026-07-19 - Contrato unificado de todos los paneles de Ejecutar
+
+Se auditaron Dataset, Configuracion, Control, Registro, Estado en vivo,
+Incidentes, Reintentos, Dashboard, Resumen guardado, Calidad/resultados y
+Archivos. La causa transversal era la mezcla de metricas estructuradas, texto
+del log, checkpoint, CSV y estado local del navegador.
+
+Se fijaron unidades distintas: fila del dataset, entrada analizable,
+evaluacion de arbitro, llamada real al modelo, fila cerrada y entrada
+consolidada. Las filas vacias ya no inflan el trabajo de arbitros. El ejemplo
+real queda en 3646 filas, 3642 entradas analizables y 10926 evaluaciones para
+tres arbitros.
+
+Al reanudar se reconstruyen tokens, latencias, evaluaciones y llamadas desde
+`arbiter_results.jsonl`; antes solo se recuperaba el numero de evaluaciones y
+los recursos aparecian reiniciados. Evaluaciones y llamadas de modelo se
+muestran por separado. Los fallos provisionales ya no cierran una fila ni la
+marcan como fallida. La cola se reconcilia con el backend y no depende de
+incrementos derivados del texto del log.
+
+La ETA espera varias muestras y usa la mediana movil para que la carga inicial
+del GGUF no produzca proyecciones de cientos de horas. Las etiquetas de todas
+las tarjetas especifican ahora su unidad y alcance; los incidentes se declaran
+recientes y no equivalen a fallos definitivos.
+
+Validacion: reconstruccion real del checkpoint (3642 analizables, 3030
+evaluaciones persistidas y 2471137 tokens acumulados), JavaScript renderizado
+valido y 52 pruebas unitarias aprobadas.

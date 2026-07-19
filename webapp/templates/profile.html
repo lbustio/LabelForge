@@ -21,11 +21,17 @@
         <hr style="border-color:#2d3148">
         <div>
           <label class="form-label small text-secondary" for="profile-current-password">Contrasena actual</label>
-          <input class="form-control" id="profile-current-password" type="password" autocomplete="current-password">
+          <div class="input-group">
+            <input class="form-control" id="profile-current-password" type="password" autocomplete="current-password">
+            <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('profile-current-password', this)" title="Mostrar" aria-label="Mostrar contrasena actual"><i class="bi bi-eye"></i></button>
+          </div>
         </div>
         <div>
           <label class="form-label small text-secondary" for="profile-new-password">Nueva contrasena</label>
-          <input class="form-control" id="profile-new-password" type="password" autocomplete="new-password">
+          <div class="input-group">
+            <input class="form-control" id="profile-new-password" type="password" autocomplete="new-password">
+            <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('profile-new-password', this)" title="Mostrar" aria-label="Mostrar nueva contrasena"><i class="bi bi-eye"></i></button>
+          </div>
           <div class="form-text text-secondary">Deja vacio si no quieres cambiarla.</div>
         </div>
         <button class="btn btn-primary" type="submit">

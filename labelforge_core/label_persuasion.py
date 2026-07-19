@@ -32,7 +32,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlparse
 
 # Silenciar warnings de deprecacion del SDK de Vertex AI
 warnings.filterwarnings("ignore", category=UserWarning, module="vertexai")
@@ -72,7 +71,7 @@ from labelforge_core.checkpoint_io import (
 )
 from labelforge_core.dataset_io import DatasetError, load_dataset
 from labelforge_core.llm_json import parse_llm_json
-from labelforge_core.prompting import build_user_prompt
+from labelforge_core.prompting import build_user_prompt, split_claim_for_arbiter
 from labelforge_core.secrets_io import provider_api_key_env, secrets_env_path, set_secret_value
 from labelforge_core.provider_preflight import require_provider_preflight
 from labelforge_core.usage_metrics import (
@@ -257,46 +256,6 @@ def load_config(config_path: Path) -> dict:
     return cfg
 
 
-def is_local_base_url(base_url: str) -> bool:
-    if not base_url:
-        return False
-    parsed = urlparse(base_url)
-    host = (parsed.hostname or "").lower()
-    return host in {"localhost", "127.0.0.1", "::1", "host.docker.internal"}
-
-
-def validate_safety_policy(cfg: dict):
-    safety = cfg.get("safety", {})
-    if not bool(safety.get("free_only_mode", False)):
-        return
-
-    allowed = set(safety.get("allowed_provider_types", ["gemini", "vertex_gemini", "ollama", "openai_compat"]))
-    allow_remote_compat = bool(safety.get("allow_remote_openai_compat", False))
-    violations = []
-
-    for arb in cfg.get("arbiters", []):
-        provider = arb.get("provider", {})
-        ptype = provider.get("type", "")
-        if ptype not in allowed:
-            violations.append(
-                f"{arb['id']} usa proveedor '{ptype}', no permitido en free_only_mode"
-            )
-            continue
-        if ptype == "openai_compat" and not allow_remote_compat:
-            base_url = provider.get("base_url", "")
-            if not is_local_base_url(base_url):
-                violations.append(
-                    f"{arb['id']} usa openai_compat remoto/no local ({base_url or 'sin base_url'})"
-                )
-
-    if violations:
-        msg = (
-            "Politica de seguridad free_only_mode bloqueo la ejecucion para evitar "
-            "tokens de paga: " + "; ".join(violations)
-        )
-        raise RuntimeError(msg)
-
-
 # ---------------------------------------------------------------------------
 # Resolucion de API key
 # ---------------------------------------------------------------------------
@@ -353,6 +312,21 @@ class DynamicRateLimiter:
 
 
 def classify_llm_error(exc: Exception) -> dict:
+    error_text = f"{type(exc).__name__}: {exc}".lower()
+    if "create llama_context" in error_text or "contexto local" in error_text:
+        return {
+            "kind": "local_context_memory",
+            "pause": True,
+            "retryable": True,
+            "message": "La negociacion automatica no encontro un contexto que cupiera en la memoria local.",
+        }
+    if "failed to load model from file" in error_text or "modelo gguf no encontrado" in error_text:
+        return {
+            "kind": "local_model_load",
+            "pause": True,
+            "retryable": False,
+            "message": "El modelo GGUF local no pudo cargarse; revisa el archivo y la memoria disponible.",
+        }
     if isinstance(exc, json.JSONDecodeError):
         return {
             "kind": "invalid_response",
@@ -369,7 +343,7 @@ def classify_llm_error(exc: Exception) -> dict:
             "message": "Campo faltante o valor invalido en respuesta del LLM.",
         }
 
-    text = f"{type(exc).__name__}: {exc}".lower()
+    text = error_text
     quota_terms = [
         "429", "quota", "resource_exhausted", "rate_limit", "rate limit",
         "too many requests", "insufficient_quota", "billing", "credit",
@@ -555,7 +529,7 @@ def _call_llama_cpp(arbiter: dict, prompt_user: str) -> tuple:
 
     provider = arbiter["provider"]
     model_path = provider.get("model_path") or provider.get("model", "")
-    n_ctx = int(provider.get("n_ctx", 4096))
+    n_ctx = int(provider.get("n_ctx", 0) or 0)
     gen_cfg = arbiter.get("generation_config", {})
 
     llama = get_or_load_llama(model_path, n_ctx=n_ctx)
@@ -578,59 +552,6 @@ def _call_llama_cpp(arbiter: dict, prompt_user: str) -> tuple:
     return content, usage_dict
 
 
-def _call_openvino(arbiter: dict, prompt_user: str) -> tuple:
-    try:
-        from optimum.intel import OVModelForCausalLM
-        from transformers import AutoTokenizer, pipeline
-    except ImportError as exc:
-        raise RuntimeError(
-            f"OpenVINO/optimum no instalado para inferencia NPU: {exc}. "
-            "Ejecuta 'python setup_env.py' en un sistema con Intel AI Boost."
-        ) from exc
-
-    provider = arbiter["provider"]
-    model_path = provider.get("model_path") or provider.get("model", "")
-    gen_cfg = arbiter.get("generation_config", {})
-
-    full_path = model_path if Path(model_path).is_absolute() else str(BASE_DIR / model_path)
-
-    tokenizer = AutoTokenizer.from_pretrained(full_path)
-    model = OVModelForCausalLM.from_pretrained(full_path, device="NPU")
-    pipe = pipeline("text-generation", model=model, tokenizer=tokenizer)
-
-    messages = [
-        {"role": "system", "content": arbiter["system_prompt"]},
-        {"role": "user", "content": prompt_user},
-    ]
-    prompt_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    result = pipe(
-        prompt_text,
-        max_new_tokens=int(gen_cfg.get("max_output_tokens", 2048)),
-        temperature=float(gen_cfg.get("temperature", 0.1)),
-        do_sample=True,
-    )
-    generated = result[0]["generated_text"][len(prompt_text):]
-    return generated, {"prompt_tokens": 0, "completion_tokens": 0}
-
-
-def _call_local(arbiter: dict, prompt_user: str) -> tuple:
-    """Dispatcher: NPU (OpenVINO) si disponible, sino llama-cpp-python."""
-    try:
-        from labelforge_core.local_models import load_hw_profile
-        hw = load_hw_profile()
-        best = hw.get("best_backend", "cpu")
-    except FileNotFoundError:
-        best = "cpu"
-
-    if best == "npu":
-        try:
-            return _call_openvino(arbiter, prompt_user)
-        except Exception as exc:
-            log.warning("[local] NPU fallo (%s)  -  recayendo en llama-cpp-python", exc)
-
-    return _call_llama_cpp(arbiter, prompt_user)
-
-
 PROVIDER_CALLERS = {
     "gemini":        _call_gemini,
     "vertex_gemini": _call_vertex_gemini,
@@ -638,7 +559,8 @@ PROVIDER_CALLERS = {
     "openai":        _call_openai_compat,
     "ollama":        _call_openai_compat,
     "openai_compat": _call_openai_compat,
-    "llama_cpp":     _call_local,
+    # Contrato explicito: archivo GGUF ejecutado por llama-cpp-python.
+    "llama_cpp":     _call_llama_cpp,
 }
 
 
@@ -654,7 +576,6 @@ def call_arbiter(
 ) -> Optional[dict]:
     arb_id     = arbiter["id"]
     principles = list(task_cfg["principles"].keys())
-    max_chars  = int(proc_cfg.get("claim_max_chars", 3000))
     prov_type  = arbiter["provider"]["type"]
 
     caller = PROVIDER_CALLERS.get(prov_type)
@@ -662,40 +583,79 @@ def call_arbiter(
         log.error(f"[{arb_id}] Proveedor desconocido: '{prov_type}'")
         return None
 
-    prompt_user = build_user_prompt(task_cfg, claim, max_chars)
-    if prov_type != "llama_cpp":
-        rate_limiter.wait()
-
     try:
         t0 = time.perf_counter()
-        raw, usage = caller(arbiter, prompt_user)
+        budget_arbiter = arbiter
+        if prov_type == "llama_cpp":
+            # llama.cpp conoce la ventana real del GGUF. Se consulta la misma
+            # instancia cacheada que atendera las llamadas, sin tablas por
+            # nombre de modelo ni capacidades inventadas.
+            from labelforge_core.local_models import get_or_load_llama
+            provider = arbiter.get("provider", {})
+            runtime = get_or_load_llama(
+                provider.get("model_path") or provider.get("model", ""),
+                n_ctx=int(provider.get("n_ctx", 0) or 0),
+            )
+            effective_ctx = runtime.n_ctx() if callable(getattr(runtime, "n_ctx", None)) else 0
+            if effective_ctx:
+                budget_arbiter = {
+                    **arbiter,
+                    "provider": {**provider, "context_window": int(effective_ctx)},
+                }
+        chunks = split_claim_for_arbiter(budget_arbiter, task_cfg, proc_cfg, claim)
+        if len(chunks) > 1:
+            log.info(
+                "[%s] Entrada completa distribuida en %d fragmentos por presupuesto de contexto",
+                arb_id, len(chunks),
+            )
+        chunk_results = []
+        total_usage = {"prompt_tokens": 0, "completion_tokens": 0}
+        for chunk_index, chunk in enumerate(chunks, 1):
+            prompt_user = build_user_prompt(task_cfg, chunk, 0)
+            if prov_type != "llama_cpp":
+                rate_limiter.wait()
+            raw, usage = caller(arbiter, prompt_user)
+            raw = raw.strip()
+            result, parse_mode = parse_llm_json(raw, principles)
+            if parse_mode != "direct":
+                log.warning(f"[{arb_id}] JSON del fragmento {chunk_index} recuperado con parser '{parse_mode}'")
+
+            for p in principles:
+                if p not in result:
+                    raise ValueError(f"Falta campo '{p}' en respuesta de {arb_id}, fragmento {chunk_index}")
+                val = result[p]
+                if val not in (0, 1):
+                    try:
+                        result[p] = 1 if int(val) >= 1 else 0
+                    except (TypeError, ValueError):
+                        raise ValueError(f"Valor invalido para '{p}': {val}")
+                if f"{p}_why" not in result:
+                    result[f"{p}_why"] = ""
+            chunk_results.append(result)
+            total_usage["prompt_tokens"] += int(usage.get("prompt_tokens", 0) or 0)
+            total_usage["completion_tokens"] += int(usage.get("completion_tokens", 0) or 0)
+
         latency_s = round(time.perf_counter() - t0, 3)
-        raw = raw.strip()
         arbiter.pop("_last_error", None)
 
-        result, parse_mode = parse_llm_json(raw, principles)
-        if parse_mode != "direct":
-            log.warning(f"[{arb_id}] JSON recuperado con parser '{parse_mode}'")
-        result["_usage"] = usage
+        # Una senal explicita en cualquier fragmento implica presencia en la
+        # entrada completa. No se descarta ninguna parte del documento.
+        result = {}
+        for p in principles:
+            positives = [r for r in chunk_results if r[p] == 1]
+            result[p] = 1 if positives else 0
+            result[f"{p}_why"] = next(
+                (r.get(f"{p}_why", "") for r in positives if r.get(f"{p}_why")),
+                "",
+            )
+        result["_usage"] = total_usage
         result["_latency_s"] = latency_s
+        result["_chunks"] = len(chunks)
         log.debug(f"[{arb_id}] Latencia: {latency_s:.3f}s")
 
-        # Validar y normalizar
-        for p in principles:
-            if p not in result:
-                raise ValueError(f"Falta campo '{p}' en respuesta de {arb_id}")
-            val = result[p]
-            if val not in (0, 1):
-                try:
-                    result[p] = 1 if int(val) >= 1 else 0
-                except (TypeError, ValueError):
-                    raise ValueError(f"Valor invalido para '{p}': {val}")
-            if f"{p}_why" not in result:
-                result[f"{p}_why"] = ""
-
         rate_limiter.on_success()
-        total_tokens = int(usage.get("prompt_tokens", 0) or 0) + int(usage.get("completion_tokens", 0) or 0)
-        log.info(f"[{arb_id}] llamada OK  -  latencia={latency_s:.3f}s tokens={total_tokens}")
+        total_tokens = total_usage["prompt_tokens"] + total_usage["completion_tokens"]
+        log.info(f"[{arb_id}] llamada OK  -  fragmentos={len(chunks)} latencia={latency_s:.3f}s tokens={total_tokens}")
         return result
 
     except Exception as e:
@@ -705,7 +665,9 @@ def call_arbiter(
         arbiter["_last_error_kind"] = classification["kind"]
         arbiter["_last_pause_recommended"] = classification["pause"]
         arbiter["_last_retryable"] = classification["retryable"]
-        if any(k in err.lower() for k in ["429", "quota", "resource_exhausted", "rate_limit", "overloaded"]):
+        if prov_type == "llama_cpp":
+            log.warning(f"[{arb_id}] Runtime local: {classification['message']}")
+        elif any(k in err.lower() for k in ["429", "quota", "resource_exhausted", "rate_limit", "overloaded"]):
             rate_limiter.on_rate_limit()
         elif any(k in err.lower() for k in ["500", "503", "timeout", "unavailable", "connection"]):
             rate_limiter.on_server_error()
@@ -734,6 +696,7 @@ def make_failed_record(arbiters: list, principles: list) -> dict:
         record[f"completion_tokens_{arb['id']}"] = -1
         record[f"total_tokens_{arb['id']}"] = -1
         record[f"latency_s_{arb['id']}"] = -1
+        record[f"model_calls_{arb['id']}"] = 0
     for p in principles:
         record[f"{p}_consensus"] = -1
     for field in build_entry_consensus_metric_fieldnames(principles):
@@ -753,7 +716,7 @@ def build_extra_fieldnames(arbiters: list, principles: list) -> list:
             extra += [f"{p}_{arb['id']}", f"{p}_{arb['id']}_why"]
         extra.append(f"{p}_consensus")
     for arb in arbiters:
-        extra += [f"prompt_tokens_{arb['id']}", f"completion_tokens_{arb['id']}", f"total_tokens_{arb['id']}", f"latency_s_{arb['id']}"]
+        extra += [f"prompt_tokens_{arb['id']}", f"completion_tokens_{arb['id']}", f"total_tokens_{arb['id']}", f"latency_s_{arb['id']}", f"model_calls_{arb['id']}"]
     extra.extend(build_entry_usage_metric_fieldnames())
     extra.extend(build_entry_consensus_metric_fieldnames(principles))
     return extra
@@ -839,6 +802,53 @@ def summarize_records(records: dict, arbiters: list, principles: list) -> dict:
     return summary
 
 
+def summarize_arbiter_checkpoints(partial_results: dict, arbiters: list) -> dict:
+    """Resume recursos acumulados de evaluaciones persistidas por arbitro.
+
+    arbiter_results.jsonl conserva tambien las evaluaciones de filas que luego
+    fueron consolidadas. Por eso esta fuente representa el acumulado completo
+    y evita perder tokens/latencias cuando una ejecucion se reanuda.
+    """
+    summary = {"total_tokens_global": 0, "total_latency_s": 0.0, "arbiters": {}}
+    for arb in arbiters:
+        summary["arbiters"][arb["id"]] = {
+            "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+            "evaluations": 0, "model_calls": 0, "latency_total_s": 0.0,
+            "latency_min_s": None, "latency_max_s": None,
+        }
+    for row_results in partial_results.values():
+        if not isinstance(row_results, dict):
+            continue
+        for arb_id, result in row_results.items():
+            if arb_id not in summary["arbiters"] or not isinstance(result, dict):
+                continue
+            usage = result.get("_usage", {}) if isinstance(result.get("_usage"), dict) else {}
+            prompt = int(usage.get("prompt_tokens", 0) or 0)
+            completion = int(usage.get("completion_tokens", 0) or 0)
+            latency = float(result.get("_latency_s", 0) or 0)
+            chunks = max(1, int(result.get("_chunks", 1) or 1))
+            arb_stats = summary["arbiters"][arb_id]
+            arb_stats["prompt_tokens"] += prompt
+            arb_stats["completion_tokens"] += completion
+            arb_stats["total_tokens"] += prompt + completion
+            arb_stats["evaluations"] += 1
+            arb_stats["model_calls"] += chunks
+            arb_stats["latency_total_s"] += latency
+            arb_stats["latency_min_s"] = latency if arb_stats["latency_min_s"] is None else min(arb_stats["latency_min_s"], latency)
+            arb_stats["latency_max_s"] = latency if arb_stats["latency_max_s"] is None else max(arb_stats["latency_max_s"], latency)
+            summary["total_tokens_global"] += prompt + completion
+            summary["total_latency_s"] += latency
+    summary["total_latency_s"] = round(summary["total_latency_s"], 3)
+    for arb_stats in summary["arbiters"].values():
+        arb_stats["latency_total_s"] = round(arb_stats["latency_total_s"], 3)
+        arb_stats["latency_avg_s"] = round(
+            arb_stats["latency_total_s"] / arb_stats["evaluations"], 3,
+        ) if arb_stats["evaluations"] else 0
+        arb_stats["latency_min_s"] = round(arb_stats["latency_min_s"], 3) if arb_stats["latency_min_s"] is not None else 0
+        arb_stats["latency_max_s"] = round(arb_stats["latency_max_s"], 3) if arb_stats["latency_max_s"] is not None else 0
+    return summary
+
+
 def build_claim_metric(row_index: int, row: dict, record: dict, arbiters: list, principles: list, stage: str) -> dict:
     arbiter_metrics = []
     usage_metrics = add_entry_usage_metrics(record, arbiters)
@@ -857,6 +867,7 @@ def build_claim_metric(row_index: int, row: dict, record: dict, arbiters: list, 
             "completion_tokens": c_tok,
             "total_tokens": t_tok,
             "latency_s": round(lat, 3) if lat >= 0 else None,
+            "model_calls": max(1, int(record.get(f"model_calls_{arb_id}", 1) or 1)),
             "labels": {p: record.get(f"{p}_{arb_id}") for p in principles},
         })
 
@@ -954,6 +965,7 @@ def process_claim(
         if result is None:
             reason = arb.get("_last_error", "sin detalle")
             cfg["_last_failure_reason"] = reason
+            cfg["_last_failure_arbiter"] = arb["id"]
             cfg["_last_failure_kind"] = arb.get("_last_error_kind", "unknown")
             cfg["_last_failure_retryable"] = arb.get("_last_retryable", True)
             cfg["_pause_requested"] = bool(arb.get("_last_pause_recommended", True))
@@ -962,6 +974,17 @@ def process_claim(
         arb_results[arb["id"]] = result
         partial_arbiter_results.setdefault(row_key, {})[arb["id"]] = result
         append_arbiter_result(row_index, arb["id"], result)
+
+    return build_record_from_arbiter_results(row_index, arb_results, arbiters, principles)
+
+
+def build_record_from_arbiter_results(
+    row_index: int,
+    arb_results: dict,
+    arbiters: list,
+    principles: list,
+) -> dict:
+    """Consolida votos ya calculados sin volver a invocar ningun proveedor."""
 
     consensus = compute_majority_consensus(list(arb_results.values()), principles)
 
@@ -981,6 +1004,7 @@ def process_claim(
         record[f"completion_tokens_{arb['id']}"] = c_tok
         record[f"total_tokens_{arb['id']}"]      = p_tok + c_tok
         record[f"latency_s_{arb['id']}"]         = latency
+        record[f"model_calls_{arb['id']}"]        = max(1, int(arb_results[arb["id"]].get("_chunks", 1) or 1))
 
     add_entry_usage_metrics(record, arbiters)
     entry_consensus_metrics = add_entry_consensus_metrics(record, arbiters, principles)
@@ -991,6 +1015,140 @@ def process_claim(
         + format_entry_consensus_metrics(entry_consensus_metrics, principles)
     )
     return record
+
+
+def populate_arbiter_major_results(
+    rows: list,
+    total: int,
+    text_column: str,
+    cfg: dict,
+    rate_limiters: dict,
+    partial_arbiter_results: dict,
+    results: dict,
+    run_id: str,
+) -> tuple[bool, str, str]:
+    """Procesa todo el dataset con un arbitro antes de cargar el siguiente.
+
+    Cada voto se persiste inmediatamente. Al reanudar se omiten pares
+    entrada/arbitro ya terminados, por lo que el orden optimizado conserva el
+    mismo contrato durable que el procesamiento por filas.
+    """
+    task_cfg = cfg["task"]
+    proc_cfg = cfg["processing"]
+    retry_attempts = max(0, int(proc_cfg.get("arbiter_major_retry_attempts", 1) or 0))
+    max_tokens = total_token_budget(cfg)
+    spent_tokens = 0
+    for row_key, arbiter_results in partial_arbiter_results.items():
+        for saved_result in arbiter_results.values():
+            usage = saved_result.get("_usage", {}) if isinstance(saved_result, dict) else {}
+            spent_tokens += int(usage.get("prompt_tokens", 0) or 0)
+            spent_tokens += int(usage.get("completion_tokens", 0) or 0)
+
+    eligible_total = sum(1 for i in range(total) if rows[i].get(text_column, "").strip())
+    log.info("=== Orden de ejecucion: por arbitro (una carga por pasada) ===")
+    for arb_pos, arb in enumerate(cfg["arbiters"], start=1):
+        arb_id = arb["id"]
+        pending = [
+            i for i in range(total)
+            if not (results.get(str(i)) and is_record_final(results[str(i)], list(task_cfg["principles"])))
+            and rows[i].get(text_column, "").strip()
+            and arb_id not in partial_arbiter_results.get(str(i), {})
+        ]
+        log.info(
+            "[%s] Pasada %s/%s: %s entradas pendientes con el mismo modelo",
+            arb_id, arb_pos, len(cfg["arbiters"]), len(pending),
+        )
+        emit_run_metric(
+            "arbiter_pass_start", run_id=run_id, arbiter_id=arb_id,
+            position=arb_pos, total_arbiters=len(cfg["arbiters"]),
+            pending_rows=len(pending), pass_work_total=eligible_total,
+        )
+
+        for position, row_index in enumerate(pending, start=1):
+            claim = rows[row_index].get(text_column, "").strip()
+            preview = claim_preview(claim)
+            log.info(
+                "[%s] [entrada %s] Analizando %s/%s de la pasada  -  texto=\"%s\"",
+                arb_id, row_index, position, len(pending), preview,
+            )
+            emit_run_metric(
+                "arbiter_claim_start", run_id=run_id, row_index=row_index,
+                arbiter_id=arb_id, arbiter_name=arb.get("name", arb_id),
+                claim_preview=preview, position=position,
+                pass_pending_total=len(pending), pass_position=arb_pos,
+                pass_total=len(cfg["arbiters"]), pass_work_total=eligible_total,
+                stage=f"arbiter_pass:{arb_id}",
+            )
+            result = None
+            for attempt in range(retry_attempts + 1):
+                result = call_arbiter(arb, claim, rate_limiters[arb_id], task_cfg, proc_cfg)
+                if result is not None:
+                    break
+                if attempt < retry_attempts:
+                    log.warning(
+                        "[%s] [entrada %s] Reintentando con el modelo aun cargado (%s/%s)",
+                        arb_id, row_index, attempt + 1, retry_attempts,
+                    )
+
+            if result is None:
+                reason = arb.get("_last_error", "sin detalle")
+                kind = arb.get("_last_error_kind", "unknown")
+                cfg["_last_failure_reason"] = reason
+                cfg["_last_failure_arbiter"] = arb_id
+                cfg["_last_failure_kind"] = kind
+                cfg["_last_failure_retryable"] = arb.get("_last_retryable", True)
+                cfg["_pause_requested"] = True
+                append_to_failed_queue(row_index, rows[row_index], reason)
+                log.warning(
+                    "[entrada %s] Arbitro %s fallo  -  entrada encolada  -  %s",
+                    row_index, arb_id, reason[:240],
+                )
+                emit_run_metric(
+                    "claim_failed", run_id=run_id, row_index=row_index,
+                    stage=f"arbiter_pass:{arb_id}", reason=reason,
+                    queued=True, definitive=False,
+                )
+                return False, "arbiter_pass_failure", (
+                    f"El arbitro {arb_id} no pudo procesar la entrada {row_index} "
+                    f"durante su pasada ({kind}): {reason}"
+                )
+
+            partial_arbiter_results.setdefault(str(row_index), {})[arb_id] = result
+            append_arbiter_result(row_index, arb_id, result)
+            usage = result.get("_usage", {})
+            emit_run_metric(
+                "arbiter_result", run_id=run_id, row_index=row_index,
+                arbiter_id=arb_id, arbiter_name=arb.get("name", arb_id),
+                prompt_tokens=int(usage.get("prompt_tokens", 0) or 0),
+                completion_tokens=int(usage.get("completion_tokens", 0) or 0),
+                total_tokens=int(usage.get("prompt_tokens", 0) or 0) + int(usage.get("completion_tokens", 0) or 0),
+                latency_s=float(result.get("_latency_s", 0) or 0),
+                chunks=int(result.get("_chunks", 1) or 1),
+                pass_position=arb_pos,
+                pass_total=len(cfg["arbiters"]),
+                pass_completed=position,
+                pass_pending_total=len(pending),
+            )
+            spent_tokens += int(usage.get("prompt_tokens", 0) or 0)
+            spent_tokens += int(usage.get("completion_tokens", 0) or 0)
+            if max_tokens > 0 and spent_tokens >= max_tokens:
+                return False, "token_budget", (
+                    f"Limite local de tokens alcanzado durante la pasada de {arb_id}: "
+                    f"{spent_tokens}/{max_tokens}. El ultimo voto quedo guardado."
+                )
+            if position == 1 or position % max(1, int(proc_cfg.get("checkpoint_every", 10))) == 0:
+                log.info(
+                    "[%s] Pasada en progreso: %s/%s entradas completadas",
+                    arb_id, position, len(pending),
+                )
+
+        emit_run_metric(
+            "arbiter_pass_completed", run_id=run_id, arbiter_id=arb_id,
+            completed_rows=len(pending),
+        )
+        log.info("[%s] Pasada completada; cambiando al siguiente arbitro", arb_id)
+
+    return True, "", ""
 
 
 # ---------------------------------------------------------------------------
@@ -1109,7 +1267,6 @@ def main():
         return
 
     cfg = load_config(Path(args.config))
-    validate_safety_policy(cfg)
     require_provider_preflight(cfg)
     arbiters   = cfg["arbiters"]
     principles = list(cfg["task"]["principles"].keys())
@@ -1209,10 +1366,12 @@ def main():
         )
         if mismatch:
             log.warning(
-                "Checkpoint ignorado: corresponde a otro input o config. "
-                "Use --fresh para iniciar completamente desde cero."
+                "Checkpoint incompatible con el input o config actual; "
+                "se limpiara antes de iniciar desde cero."
             )
+            clear_runtime_checkpoints(include_run_state=False, include_claim_results=True)
             checkpoint = {"last_index": -1, "results": {}}
+            partial_arbiter_results = {}
 
     last_done  = checkpoint["last_index"]
     results    = checkpoint["results"]
@@ -1235,6 +1394,18 @@ def main():
         log.info(f"Reanudacion: {partial_count} respuestas de arbitros persistidas")
 
     initial_summary = summarize_records(results, arbiters, principles)
+    execution_order = str(proc_cfg.get("execution_order", "row_major") or "row_major").strip().lower()
+    nonempty_rows = sum(1 for i in range(total) if rows[i].get(text_column, "").strip())
+    state["eligible_rows"] = nonempty_rows
+    initial_arbiter_work = 0
+    for i in range(total):
+        row_key = str(i)
+        if not rows[i].get(text_column, "").strip():
+            continue
+        if results.get(row_key) and is_record_final(results[row_key], principles):
+            initial_arbiter_work += len(arbiters)
+        else:
+            initial_arbiter_work += len(partial_arbiter_results.get(row_key, {}))
     save_progress_state(state, results, arbiters, principles, "running")
     emit_run_metric(
         "start",
@@ -1248,6 +1419,12 @@ def main():
         text_column=text_column,
         config_file=str(args.config),
         completed_before_start=initial_summary["processed_rows"],
+        execution_order=execution_order,
+        arbiter_count=len(arbiters),
+        eligible_rows=nonempty_rows,
+        arbiter_work_total=nonempty_rows * len(arbiters),
+        arbiter_work_completed=initial_arbiter_work,
+        initial_resource_summary=summarize_arbiter_checkpoints(partial_arbiter_results, arbiters),
         principles=principles,
         arbiters=[
             {
@@ -1265,10 +1442,26 @@ def main():
     paused = False
     pause_kind = ""
     pause_reason = ""
+    repeated_failures = {}
+    systemic_failure_threshold = max(1, int(proc_cfg.get("systemic_failure_threshold", 3) or 3))
+
+    if execution_order == "arbiter_major":
+        populated, pass_pause_kind, pass_pause_reason = populate_arbiter_major_results(
+            rows, total, text_column, cfg, rate_limiters,
+            partial_arbiter_results, results, run_id,
+        )
+        if not populated:
+            paused = True
+            pause_kind = pass_pause_kind
+            pause_reason = pass_pause_reason
+            log.error(f"=== RUN PAUSADO [{pause_kind}] === {pause_reason}")
+            save_checkpoint(max_persisted_index(results), results)
+            save_progress_state(state, results, arbiters, principles, "paused", pause_kind, pause_reason)
+            emit_run_metric("paused", run_id=run_id, pause_kind=pause_kind, pause_reason=pause_reason)
 
     # Loop principal
     log.info("=== Loop principal ===")
-    for i in range(total):
+    for i in range(total) if not paused else []:
         existing = results.get(str(i))
         if existing and is_record_final(existing, principles):
             continue
@@ -1292,6 +1485,9 @@ def main():
             append_to_failed_queue(i, row, cfg.get("_last_failure_reason", "sin detalle"))
             pause_kind = cfg.get("_last_failure_kind", "unknown")
             pause_reason = cfg.get("_last_failure_reason", "sin detalle")
+            failing_arbiter = cfg.get("_last_failure_arbiter", "unknown")
+            failure_signature = (failing_arbiter, pause_kind, pause_reason[:160])
+            repeated_failures[failure_signature] = repeated_failures.get(failure_signature, 0) + 1
             emit_run_metric(
                 "claim_failed",
                 run_id=run_id,
@@ -1304,7 +1500,14 @@ def main():
                 claim_es=row.get("claim_es", ""),
             )
             save_checkpoint(max_persisted_index(results), results)
-            if cfg.get("_pause_requested", True):
+            systemic_failure = repeated_failures[failure_signature] >= systemic_failure_threshold
+            if systemic_failure:
+                pause_kind = "systemic_arbiter_failure"
+                pause_reason = (
+                    f"El arbitro {failing_arbiter} repitio {repeated_failures[failure_signature]} veces "
+                    f"el mismo fallo ({cfg.get('_last_failure_kind', 'unknown')}): {pause_reason}"
+                )
+            if cfg.get("_pause_requested", True) or systemic_failure:
                 paused = True
                 log.error(f"=== RUN PAUSADO [{pause_kind}] === {pause_reason}")
                 save_progress_state(state, results, arbiters, principles, "paused", pause_kind, pause_reason)
@@ -1366,7 +1569,10 @@ def main():
                     stage="retry",
                     reason=reason,
                     queued=False,
-                    definitive=not cfg.get("_last_failure_retryable", True),
+                    # Solo es definitivo si la politica permite continuar y
+                    # se materializara una fila fallida. Una pausa conserva la
+                    # entrada pendiente para reanudarla.
+                    definitive=not cfg.get("_pause_requested", True),
                     claim=item["row"].get(text_column, ""),
                     claim_es=item["row"].get("claim_es", ""),
                 )

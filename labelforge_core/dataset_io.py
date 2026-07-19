@@ -177,6 +177,7 @@ def profile_dataset(
     for col in fieldnames:
         values = [r.get(col) for r in stat_rows]
         non_null = sum(1 for v in values if v not in (None, ""))
+        non_empty = sum(1 for v in values if str(v or "").strip())
 
         numeric_vals: list[float] = []
         for v in values:
@@ -225,8 +226,10 @@ def profile_dataset(
             "name": col,
             "type": col_type,
             "non_null": non_null,
+            "non_empty": non_empty,
             "null_count": len(stat_rows) - non_null,
-            "fill_pct": round(non_null / len(stat_rows) * 100, 1) if stat_rows else 0,
+            "empty_count": len(stat_rows) - non_empty,
+            "fill_pct": round(non_empty / len(stat_rows) * 100, 1) if stat_rows else 0,
             "sample": sample,
             "stats": stats,
         })

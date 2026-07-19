@@ -4,8 +4,8 @@ setup_env.py
 Script de setup unico para LabelForge con soporte de modelos locales GGUF.
 
 Ejecutar UNA VEZ por maquina, ANTES de main_webapp.py o main_cli.py:
-    python setup_env.py          # instalacion normal
-    python setup_env.py --force  # reinstalar aunque ya este hecho
+    python setup/setup_env.py          # instalacion normal
+    python setup/setup_env.py --force  # reinstalar aunque ya este hecho
 
 Flujo:
   1. Verifica Python >= 3.10 y entorno virtual activo
@@ -39,7 +39,8 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Rutas
 # ---------------------------------------------------------------------------
-BASE_DIR   = Path(__file__).resolve().parent
+SETUP_DIR  = Path(__file__).resolve().parent
+BASE_DIR   = SETUP_DIR.parent
 LOG_DIR    = BASE_DIR / "logs"
 MODELS_DIR = BASE_DIR / "models"
 HW_PROFILE = MODELS_DIR / "hw_profile.json"
@@ -49,6 +50,10 @@ MODELS_DIR.mkdir(exist_ok=True)
 
 RUN_TS   = datetime.now().strftime("%Y%m%d_%H%M%S")
 LOG_PATH = LOG_DIR / f"setup_{RUN_TS}.log"
+
+# Permite importar labelforge_core al ejecutar el script desde setup/.
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
 
 
 # ---------------------------------------------------------------------------
@@ -199,9 +204,9 @@ def detect_hardware() -> dict:
 def install_base_requirements() -> bool:
     _section("INSTALANDO REQUIREMENTS BASE")
     import tempfile
-    req_path = BASE_DIR / "requirements.txt"
+    req_path = SETUP_DIR / "requirements.txt"
     if not req_path.exists():
-        _abort(f"No se encontro requirements.txt en {BASE_DIR}")
+        _abort(f"No se encontro requirements.txt en {SETUP_DIR}")
 
     # Filtrar llama-cpp-python: lo instala setup_env.py con flags GPU especificos
     lines = req_path.read_text(encoding="utf-8").splitlines()
@@ -668,7 +673,7 @@ def print_summary(profile: dict):
     else:
         log.error("")
         log.error("El setup tuvo errores. Revisa el log completo en: %s", profile["setup_log"])
-        log.error("Corrige los errores y vuelve a ejecutar: python setup_env.py --force")
+        log.error("Corrige los errores y vuelve a ejecutar: python setup/setup_env.py --force")
 
 
 # ---------------------------------------------------------------------------
@@ -767,4 +772,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
