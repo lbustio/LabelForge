@@ -408,13 +408,13 @@
         <div class="col-4">
           <div class="metric-mini accent-emerald text-center">
             <div class="metric-value" id="stat-processed">-</div>
-            <div class="metric-label">Consolidadas OK</div>
+            <div class="metric-label" id="stat-processed-label">Consolidadas OK</div>
           </div>
         </div>
         <div class="col-4">
           <div class="metric-mini accent-amber text-center">
             <div class="metric-value" id="stat-failed">-</div>
-            <div class="metric-label">Consolidadas fallidas</div>
+            <div class="metric-label" id="stat-failed-label">Consolidadas fallidas</div>
           </div>
         </div>
         <div class="col-4">
@@ -428,7 +428,7 @@
       <div id="progress-bars" class="mt-3" style="display:none">
         <div class="mb-2">
           <div class="d-flex justify-content-between align-items-baseline mb-1">
-            <span class="small text-secondary">Filas cerradas (consolidadas, fallidas u omitidas)</span>
+            <span class="small text-secondary" id="pb-limit-label">Filas cerradas (consolidadas, fallidas u omitidas)</span>
             <span class="small fw-semibold" id="pb-limit-text" style="color:#22d3ee">-</span>
           </div>
           <div style="height:7px;background:#1e2234;border-radius:999px;overflow:hidden">
@@ -437,7 +437,7 @@
         </div>
         <div>
           <div class="d-flex justify-content-between align-items-baseline mb-1">
-            <span class="small text-secondary">Cobertura del dataset completo</span>
+            <span class="small text-secondary" id="pb-total-label">Cobertura del dataset completo</span>
             <span class="small fw-semibold" id="pb-total-text" style="color:#8b5cf6">-</span>
           </div>
           <div style="height:7px;background:#1e2234;border-radius:999px;overflow:hidden">
@@ -1313,20 +1313,35 @@ function updateProgressBars(processed, total, datasetTotal, data = {}) {
   if (!processed && !total) return;
   container.style.display = '';
 
-  const pctLimit = total > 0 ? (processed / total) * 100 : 0;
+  const isArbiterMajor = data.execution_order === 'arbiter_major';
+  const arbiterDone = Number(data.arbiter_work_completed || 0);
+  const arbiterTotal = Number(data.arbiter_work_total || 0);
+  const evaluatedRows = Number(data.evaluated_rows || 0);
+  const primaryDone = isArbiterMajor ? arbiterDone : processed;
+  const primaryTotal = isArbiterMajor ? arbiterTotal : total;
+  const coverageDone = isArbiterMajor ? evaluatedRows : processed;
+  const limitLabel = document.getElementById('pb-limit-label');
+  const totalLabel = document.getElementById('pb-total-label');
+  if (limitLabel) limitLabel.textContent = isArbiterMajor
+    ? 'Trabajo global de los arbitros'
+    : 'Filas cerradas (consolidadas, fallidas u omitidas)';
+  if (totalLabel) totalLabel.textContent = isArbiterMajor
+    ? 'Entradas que ya recibieron al menos un analisis'
+    : 'Cobertura del dataset completo';
+
+  const pctLimit = primaryTotal > 0 ? (primaryDone / primaryTotal) * 100 : 0;
   document.getElementById('pb-limit-text').textContent =
-    `${formatNumber(processed)} de ${total ? formatNumber(total) : '-'}  -  ${pctLimit.toFixed(1)}%`;
+    `${formatNumber(primaryDone)} de ${primaryTotal ? formatNumber(primaryTotal) : '-'} ${isArbiterMajor ? 'evaluaciones' : ''}  -  ${pctLimit.toFixed(1)}%`;
   document.getElementById('pb-limit-bar').style.width = `${Math.min(pctLimit, 100)}%`;
 
-  const pctTotal = datasetTotal > 0 ? (processed / datasetTotal) * 100 : 0;
+  const pctTotal = datasetTotal > 0 ? (coverageDone / datasetTotal) * 100 : 0;
   document.getElementById('pb-total-text').textContent = datasetTotal > 0
-    ? `${formatNumber(processed)} de ${formatNumber(datasetTotal)}  -  ${pctTotal.toFixed(2)}%`
-    : `${formatNumber(processed)} de -  -  -`;
+    ? `${formatNumber(coverageDone)} de ${formatNumber(datasetTotal)}  -  ${pctTotal.toFixed(2)}%`
+    : `${formatNumber(coverageDone)} de -  -  -`;
   document.getElementById('pb-total-bar').style.width = datasetTotal > 0
     ? `${Math.min(pctTotal, 100)}%` : '0%';
 
   const arbiterContainer = document.getElementById('pb-arbiter-work');
-  const isArbiterMajor = data.execution_order === 'arbiter_major';
   if (arbiterContainer) arbiterContainer.style.display = isArbiterMajor ? '' : 'none';
   if (isArbiterMajor) {
     const done = Number(data.arbiter_work_completed || 0);
@@ -1345,8 +1360,10 @@ function updateProgressBars(processed, total, datasetTotal, data = {}) {
     document.getElementById('pb-arbiter-bar').style.width = `${Math.min(passPct, 100)}%`;
     const global = document.getElementById('pb-arbiter-global');
     if (global) global.textContent =
-      `Trabajo global: ${formatNumber(done)} de ${formatNumber(workTotal)} evaluaciones de arbitro `
-      + `(${formatNumber(data.arbiter_count || passTotal)} arbitros x ${formatNumber(data.eligible_rows || 0)} entradas analizables) - ${globalPct.toFixed(1)}%`;
+      `Resultado consolidado disponible: ${formatNumber(processed)} de ${formatNumber(total)} filas. `
+      + (processed === 0 && done > 0
+        ? 'No es progreso cero: la consolidacion espera los votos pendientes; el trabajo realizado se muestra arriba.'
+        : `Trabajo computacional acumulado: ${globalPct.toFixed(1)}%.`);
   }
 }
 
@@ -1489,8 +1506,22 @@ function updateCharts(data) {
     ? Number(data.arbiter_work_completed || 0)
     : processed;
 
-  // 1. Donut OK/Fallidos/Pendientes
-  if (chartDonut) { chartDonut.data.datasets[0].data = [ok, failed, pending]; chartDonut.update('none'); }
+  // 1. En arbiter-major el progreso útil son evaluaciones, no consensos que
+  // todavía no pueden existir durante las primeras pasadas.
+  if (chartDonut) {
+    if (isArbiterMajor) {
+      const workDone = Number(data.arbiter_work_completed || 0);
+      const workTotal = Number(data.arbiter_work_total || 0);
+      chartDonut.data.labels = ['Evaluaciones completadas', 'Evaluaciones pendientes'];
+      chartDonut.data.datasets[0].data = [workDone, Math.max(0, workTotal - workDone)];
+      chartDonut.data.datasets[0].backgroundColor = ['#34d399', '#334155'];
+    } else {
+      chartDonut.data.labels = ['OK', 'Fallidos', 'Pendientes'];
+      chartDonut.data.datasets[0].data = [ok, failed, pending];
+      chartDonut.data.datasets[0].backgroundColor = ['#34d399', '#fb7185', '#334155'];
+    }
+    chartDonut.update('none');
+  }
 
   // 2. Latencia historica por arbitro
   const arbEntries = Object.entries(data.arbiters || {});
@@ -1726,8 +1757,23 @@ function parseStats(line) {
 }
 
 function updateStats() {
-  document.getElementById('stat-processed').textContent = statsOK;
-  document.getElementById('stat-failed').textContent = statsFailed;
+  const isArbiterMajor = latestLiveStats?.execution_order === 'arbiter_major';
+  const processedLabel = document.getElementById('stat-processed-label');
+  const failedLabel = document.getElementById('stat-failed-label');
+  if (isArbiterMajor) {
+    const done = Number(latestLiveStats.arbiter_work_completed || 0);
+    const total = Number(latestLiveStats.arbiter_work_total || 0);
+    const pct = total > 0 ? done * 100 / total : 0;
+    document.getElementById('stat-processed').textContent = `${pct.toFixed(1)}%`;
+    document.getElementById('stat-failed').textContent = formatNumber(latestLiveStats.evaluated_rows || 0);
+    if (processedLabel) processedLabel.textContent = `${formatNumber(done)} / ${formatNumber(total)} evaluaciones`;
+    if (failedLabel) failedLabel.textContent = `Entradas con analisis de ${formatNumber(latestLiveStats.dataset_total_rows || latestLiveStats.total_rows || 0)}`;
+  } else {
+    document.getElementById('stat-processed').textContent = statsOK;
+    document.getElementById('stat-failed').textContent = statsFailed;
+    if (processedLabel) processedLabel.textContent = 'Consolidadas OK';
+    if (failedLabel) failedLabel.textContent = 'Consolidadas fallidas';
+  }
   document.getElementById('stat-errors').textContent = statsErrors;
 }
 

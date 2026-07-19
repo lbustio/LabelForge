@@ -117,6 +117,31 @@ class TestRunMetricState(unittest.TestCase):
         self.assertEqual(stats["total_tokens_global"], 12)
         self.assertEqual(stats["arbiters"]["a1"]["calls"], 1)
         self.assertEqual(stats["processed_rows"], 1)
+        self.assertEqual(stats["evaluated_rows"], 1)
+
+    def test_arbiter_major_live_coverage_uses_most_advanced_arbiter(self):
+        webapp_module._apply_run_metric_event({
+            "event": "start", "run_id": "run-coverage", "total_rows": 4,
+            "dataset_total_rows": 4, "eligible_rows": 3,
+            "execution_order": "arbiter_major", "arbiter_count": 2,
+            "arbiter_work_total": 6,
+            "arbiters": [{"id": "a1"}, {"id": "a2"}],
+        })
+        for row_index in range(3):
+            stats = webapp_module._apply_run_metric_event({
+                "event": "arbiter_result", "row_index": row_index,
+                "arbiter_id": "a1", "total_tokens": 1, "latency_s": 0.1,
+            })
+        self.assertEqual(stats["processed_rows"], 0)
+        self.assertEqual(stats["arbiter_work_completed"], 3)
+        self.assertEqual(stats["evaluated_rows"], 3)
+
+        stats = webapp_module._apply_run_metric_event({
+            "event": "arbiter_result", "row_index": 0,
+            "arbiter_id": "a2", "total_tokens": 1, "latency_s": 0.1,
+        })
+        self.assertEqual(stats["arbiter_work_completed"], 4)
+        self.assertEqual(stats["evaluated_rows"], 3)
 
     def test_row_major_keeps_entry_based_resource_accounting(self):
         webapp_module._apply_run_metric_event({
@@ -194,6 +219,7 @@ class TestRunMetricState(unittest.TestCase):
         self.assertEqual(stats["total_tokens_global"], 120)
         self.assertEqual(stats["arbiters"]["a1"]["evaluations"], 1)
         self.assertEqual(stats["arbiters"]["a1"]["model_calls"], 2)
+        self.assertEqual(stats["evaluated_rows"], 1)
 
     def test_provisional_failure_does_not_close_or_fail_row(self):
         webapp_module._apply_run_metric_event({

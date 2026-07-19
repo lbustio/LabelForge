@@ -1393,6 +1393,17 @@ def _public_current_stats(stats: dict = None) -> dict:
     )
     public["queued_rows"] = len(queued_indices)
     public["queued_indices"] = queued_indices
+    # En orden por arbitro una fila no queda consolidada hasta reunir todos sus
+    # votos. La cobertura live debe reflejar cuantas entradas ya recibieron al
+    # menos un analisis, no solo cuantas alcanzaron el consenso final.
+    arbiter_evaluated_rows = max(
+        (int(arb.get("evaluations", arb.get("calls", 0)) or 0) for arb in public["arbiters"].values()),
+        default=0,
+    )
+    public["evaluated_rows"] = min(
+        int(public.get("eligible_rows", public.get("total_rows", 0)) or 0),
+        max(processed_rows, arbiter_evaluated_rows),
+    )
     public["total_latency_s"] = round(public.get("total_latency_s", 0) or 0, 3)
     public["tokens_per_processed_row"] = round(total_tokens / processed_rows) if processed_rows else 0
     public["tokens_per_successful_row"] = round(total_tokens / successful_rows) if successful_rows else 0
