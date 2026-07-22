@@ -1,11 +1,13 @@
 # LabelForge: linea base arquitectonica de Fase 0
 
-Estado: aprobado
+Estado: Fase 0 cerrada
 Fecha: 2026-07-21
 Alcance: producto LabelForge completo, no solamente la interfaz Ejecutar
 Modelo de despliegue aprobado: instancia local unica por workspace
 Persistencia aprobada: SQLite operacional + filesystem para objetos grandes +
 JSON validado para configuracion editable
+
+Checkpoint de estabilizacion: commit `5c54348` en la rama `develop`.
 
 ## Proposito del producto
 

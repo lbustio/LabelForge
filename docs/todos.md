@@ -16,7 +16,8 @@ Ultima revision: 2026-07-18.
   configurables.
 - [x] Aprobar ADR-0002: SQLite para estado operacional transaccional y
   filesystem para datasets, modelos, logs y artefactos.
-- [ ] Crear un checkpoint Git intencional del trabajo actual antes de Fase 1.
+- [x] Crear un checkpoint Git intencional del trabajo actual antes de Fase 1:
+  commit `5c54348` en `develop`, publicado como `origin/develop`.
 - [ ] Ejecutar Fase 1: packaging/toolchain, configuracion tipada, composition
   root y eliminacion de efectos secundarios de imports.
 
