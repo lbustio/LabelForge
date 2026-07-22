@@ -13,24 +13,30 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from labelforge_core.bootstrap.paths import WorkspacePaths, default_workspace_root
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-CORE_DIR = BASE_DIR / "labelforge_core"
+_DEFAULT_PATHS = WorkspacePaths.from_root(default_workspace_root())
+
+# Alias de compatibilidad para modulos aun no migrados a inyeccion de paths.
+# La autoridad de calculo es WorkspacePaths; estos nombres se retiraran cuando
+# sus consumidores reciban el workspace desde el composition root.
+BASE_DIR = _DEFAULT_PATHS.root
+CORE_DIR = _DEFAULT_PATHS.core
 SCRIPTS_DIR = CORE_DIR
-CONFIG_DIR = BASE_DIR / "config"
-MODELS_DIR = BASE_DIR / "models"
-HW_PROFILE_PATH = MODELS_DIR / "hw_profile.json"
-SECRETS_DIR = BASE_DIR / "secrets"
-LOGS_DIR = BASE_DIR / "logs"
-OUTPUT_DIR = BASE_DIR / "output"
-RUN_RECORDS_DIR = OUTPUT_DIR / ".manifests"
-CHECKPOINTS_DIR = BASE_DIR / "checkpoints"
-ARCHIVE_DIR = BASE_DIR / "archive"
-DATA_DIR = BASE_DIR / "data"
+CONFIG_DIR = _DEFAULT_PATHS.config
+MODELS_DIR = _DEFAULT_PATHS.models
+HW_PROFILE_PATH = _DEFAULT_PATHS.hardware_profile
+SECRETS_DIR = _DEFAULT_PATHS.secrets
+LOGS_DIR = _DEFAULT_PATHS.logs
+OUTPUT_DIR = _DEFAULT_PATHS.output
+RUN_RECORDS_DIR = _DEFAULT_PATHS.run_records
+CHECKPOINTS_DIR = _DEFAULT_PATHS.checkpoints
+ARCHIVE_DIR = _DEFAULT_PATHS.archive
+DATA_DIR = _DEFAULT_PATHS.data
 
-ARBITERS_CONFIG_PATH = CONFIG_DIR / "arbiters_config.json"
-LOCAL_MODELS_CONFIG_PATH = CONFIG_DIR / "local_models_config.json"
-RATE_LIMITS_CONFIG_PATH = CONFIG_DIR / "rate_limits.json"
+ARBITERS_CONFIG_PATH = _DEFAULT_PATHS.arbiters_config
+LOCAL_MODELS_CONFIG_PATH = _DEFAULT_PATHS.local_models_config
+RATE_LIMITS_CONFIG_PATH = _DEFAULT_PATHS.rate_limits_config
 
 def resolve_config_file_path(path: str | Path | None) -> Path:
     """Resuelve la ruta de configuracion sin redirigir ubicaciones antiguas."""
