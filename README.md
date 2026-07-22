@@ -97,7 +97,7 @@ Los archivos necesarios para crear y preparar entornos están centralizados en
 
 Requisitos:
 
-- Python 3.10+
+- Python 3.11+
 - Windows, Linux o macOS
 - Entorno virtual recomendado
 - Credenciales de proveedores si se usan LLMs cloud

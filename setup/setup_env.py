@@ -10,7 +10,7 @@ Ejecutar UNA VEZ por maquina, ANTES de main_webapp.py o main_cli.py:
 Flujo:
   1. Verifica Python >= 3.10 y entorno virtual activo
   2. Detecta hardware (OS / CPU / RAM / NPU / GPU)
-  3. Instala requirements.txt (base)
+  3. Instala el proyecto y sus dependencias desde pyproject.toml
   4. Instala backend NPU (OpenVINO) si se detecta Intel AI Boost
   5. Instala llama-cpp-python con soporte para el backend GPU detectado
   6. Verifica imports criticos
@@ -202,31 +202,20 @@ def detect_hardware() -> dict:
 # ---------------------------------------------------------------------------
 
 def install_base_requirements() -> bool:
-    _section("INSTALANDO REQUIREMENTS BASE")
-    import tempfile
-    req_path = SETUP_DIR / "requirements.txt"
-    if not req_path.exists():
-        _abort(f"No se encontro requirements.txt en {SETUP_DIR}")
+    _section("INSTALANDO LABELFORGE Y DEPENDENCIAS BASE")
+    pyproject_path = BASE_DIR / "pyproject.toml"
+    if not pyproject_path.exists():
+        _abort(f"No se encontro pyproject.toml en {BASE_DIR}")
 
-    # Filtrar llama-cpp-python: lo instala setup_env.py con flags GPU especificos
-    lines = req_path.read_text(encoding="utf-8").splitlines()
-    filtered = [
-        l for l in lines
-        if not (l.strip().startswith("llama-cpp-python") and not l.strip().startswith("#"))
-    ]
-    log.info("Instalando requirements.txt (excluyendo llama-cpp-python  -  se instala por separado)")
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as tmp:
-        tmp.write("\n".join(filtered))
-        tmp_path = tmp.name
-    try:
-        ok = _run_pip(["install", "-r", tmp_path, "--upgrade"])
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
+    # llama-cpp-python no forma parte de las dependencias base: se instala mas
+    # adelante con el backend especifico del hardware detectado.
+    log.info("Instalando proyecto editable desde pyproject.toml")
+    ok = _run_pip(["install", "--editable", str(BASE_DIR), "--upgrade"])
 
     if not ok:
-        log.error("Fallo la instalacion de requirements.txt  -  se continuara con hardware ya detectado")
+        log.error("Fallo la instalacion base de LabelForge; se continuara con hardware ya detectado")
         return False
-    log.info("Requirements base instalados OK")
+    log.info("LabelForge y dependencias base instalados OK")
     return True
 
 
