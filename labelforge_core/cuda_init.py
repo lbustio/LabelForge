@@ -27,7 +27,7 @@ _handles: list = []
 _initialized = False
 
 
-def _ensure_cuda_ready() -> bool:
+def ensure_cuda_ready() -> bool:
     """Prepara el entorno de DLLs CUDA para que llama_cpp pueda cargarse.
 
     Idempotente  -  safe to call multiple times.
@@ -82,3 +82,6 @@ def _ensure_cuda_ready() -> bool:
 
     return False
 
+
+# Compatibilidad temporal para consumidores externos anteriores a Fase 1.
+_ensure_cuda_ready = ensure_cuda_ready

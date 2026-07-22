@@ -69,19 +69,6 @@ def _validate_upload_content(header: bytes, suffix: str) -> bool:
     return (printable / len(sample)) > 0.70 if sample else False
 
 # ---------------------------------------------------------------------------
-# Inicializacion de CUDA (debe ir antes de cualquier import que use llama_cpp)
-# ---------------------------------------------------------------------------
-from labelforge_core.cuda_init import _ensure_cuda_ready as _cuda_ready
-_cuda_ready()
-
-# Forzar importacion de llama_cpp ahora (mientras CUDA esta listo) para que
-# quede cacheado en sys.modules y los imports posteriores no fallen.
-try:
-    import llama_cpp as _llama_cpp_  # noqa: F401
-except Exception:
-    pass
-
-# ---------------------------------------------------------------------------
 # Modulos compartidos del nucleo
 # ---------------------------------------------------------------------------
 from labelforge_core.arbiters_io import (

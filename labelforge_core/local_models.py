@@ -36,9 +36,6 @@ from labelforge_core.paths import (
 
 log = logging.getLogger(__name__)
 
-from labelforge_core.cuda_init import _ensure_cuda_ready as _cuda_ready
-_cuda_ready()
-
 MODELS_JSON   = MODELS_DIR / "models.json"
 HW_PROFILE    = HW_PROFILE_PATH
 CATALOG_CACHE      = MODELS_DIR / "catalog_cache.json"
@@ -1262,6 +1259,9 @@ def get_or_load_llama(model_path: str, n_ctx: int = 0, **llama_kwargs):
     Mantiene un solo GGUF cargado por defecto para evitar thrashing de VRAM.
     Si la carga falla, evicta el modelo menos usado y reintenta.
     """
+    # Preparar las DLL solo cuando realmente se solicita el runtime GGUF.
+    from labelforge_core.cuda_init import ensure_cuda_ready
+    ensure_cuda_ready()
     try:
         from llama_cpp import Llama
     except ImportError:

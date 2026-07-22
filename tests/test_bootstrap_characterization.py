@@ -65,6 +65,25 @@ print(json.dumps({
             {"container": False, "execution": False},
         )
 
+    def test_importing_web_does_not_load_llama_runtime_or_initialize_cuda(self):
+        script = """
+import json, os, sys
+before = os.environ.get('CUDA_PATH')
+import webapp.app
+print(json.dumps({
+    'llama_cpp': 'llama_cpp' in sys.modules,
+    'cuda_initialized': bool(sys.modules.get('labelforge_core.cuda_init') and
+        sys.modules['labelforge_core.cuda_init']._initialized),
+    'cuda_path_changed': os.environ.get('CUDA_PATH') != before,
+}))
+"""
+        result = run_python("-c", script)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(result.stdout.strip().splitlines()[-1]),
+            {"llama_cpp": False, "cuda_initialized": False, "cuda_path_changed": False},
+        )
+
 
 class TestEntrypointContracts(unittest.TestCase):
     def assert_help(self, entrypoint: str, *expected: str) -> None:
