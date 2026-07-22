@@ -49,6 +49,22 @@ print(json.dumps({
         imported = json.loads(result.stdout.strip())
         self.assertEqual(imported, {"flask": False, "llama_cpp": False, "webapp": False})
 
+    def test_legacy_paths_do_not_eagerly_import_container_or_infrastructure(self):
+        script = """
+import json, sys
+import labelforge_core.paths
+print(json.dumps({
+    'container': 'labelforge_core.bootstrap.container' in sys.modules,
+    'execution': 'labelforge_core.infrastructure.execution' in sys.modules,
+}))
+"""
+        result = run_python("-c", script)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(result.stdout.strip()),
+            {"container": False, "execution": False},
+        )
+
 
 class TestEntrypointContracts(unittest.TestCase):
     def assert_help(self, entrypoint: str, *expected: str) -> None:
