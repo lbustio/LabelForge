@@ -1,5 +1,10 @@
 # LabelForge - contexto portable de continuidad
 
+> Actualizacion arquitectonica 2026-07-21: la linea base vigente del producto
+> completo esta en `docs/architecture/phase-0-baseline.md`; la arquitectura
+> objetivo y decisiones pendientes estan en `docs/architecture/`. Las cifras y
+> estados historicos posteriores de este documento no sustituyen esa auditoria.
+
 Documento de relevo para retomar el proyecto en otra sesion, con otro asistente
 de codigo o en otra PC. Describe el estado vigente; el historial detallado esta
 en `bitacora.md` y el trabajo pendiente exclusivamente en `todos.md`.

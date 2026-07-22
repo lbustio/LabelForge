@@ -8,6 +8,7 @@ import json
 import os
 import re
 import sqlite3
+import statistics
 import subprocess
 import sys
 import threading
@@ -93,10 +94,15 @@ from labelforge_core.arbiters_io import (
     validate_imported_arbiters,
 )
 from labelforge_core.checkpoint_io import (
+    append_performance_sample,
     clear_runtime_checkpoints,
     load_arbiter_results,
     load_failed_queue,
+    load_performance_samples,
+    load_run_incidents,
     load_run_state,
+    record_run_incident,
+    resolve_row_incidents,
     save_run_state,
     CLAIM_RESULTS_PATH,
 )
@@ -118,6 +124,13 @@ from labelforge_core.rate_limits import (
     load_config as _rl_load_config,
     save_config as _rl_save_config,
 )
+from labelforge_core.run_contract import build_resume_contract, compare_resume_contract
+from labelforge_core.domain.run_lifecycle import RunLifecycleFacts, derive_run_lifecycle
+from labelforge_core.domain.run_record import RunRecord
+from labelforge_core.application.run_metrics_service import RunMetricsService
+from labelforge_core.application.run_metrics_hydration import RunMetricsHydrator
+from labelforge_core.infrastructure.execution import InMemoryRunMetrics, InMemoryRunSupervisor
+from labelforge_core.infrastructure.persistence import JsonRunRepository
 from labelforge_core.provider_preflight import validate_provider_preflight
 from labelforge_core.utils import safe_int as _safe_int
 from labelforge_core.paths import (
@@ -130,6 +143,7 @@ from labelforge_core.paths import (
     LOGS_DIR,
     MODELS_DIR,
     OUTPUT_DIR,
+    RUN_RECORDS_DIR,
     resolve_config_file_path,
 )
 
@@ -140,6 +154,8 @@ BASE_DIR        = Path(__file__).resolve().parent.parent
 WEBAPP_DIR      = Path(__file__).resolve().parent
 CONFIG_DIR.mkdir(exist_ok=True)
 CONFIG_PATH     = resolve_config_file_path(ARBITERS_CONFIG_PATH)
+_run_repository = JsonRunRepository(RUN_RECORDS_DIR)
+_run_supervisor = InMemoryRunSupervisor()
 
 SECRETS_ENV_PATH = secrets_env_path(BASE_DIR)
 load_dotenv(SECRETS_ENV_PATH)
@@ -845,22 +861,61 @@ def _public_user(user: dict) -> dict:
     }
 
 
-def _record_run_owner(output_file: str, run_id: str | None, user: dict | None) -> None:
-    if not output_file or not user:
+def _record_run_manifest(event: dict, user: dict | None) -> None:
+    run_id = str(event.get("run_id", "") or "")
+    if not run_id:
         return
-    with _auth_db() as conn:
-        conn.execute(
-            """
-            INSERT INTO run_ownership (output_file, run_id, user_id, username)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(output_file) DO UPDATE SET
-                run_id = excluded.run_id,
-                user_id = excluded.user_id,
-                username = excluded.username
-            """,
-            (Path(output_file).name, run_id or "", user["id"], user["username"]),
+    state = load_run_state() or {}
+    execution_order = "row_major"
+    try:
+        cfg = read_config()
+        execution_order = cfg.get("processing", {}).get("execution_order", "row_major")
+        contract = build_resume_contract(
+            cfg,
+            input_file=str(state.get("input_file", "") or ""),
+            sheet=str(state.get("sheet", "") or ""),
+            text_column=str(state.get("text_column", "") or ""),
+            total_rows=int(state.get("total_rows", 0) or 0),
         )
-        conn.commit()
+        contract_summary = {
+            "version": contract.get("version"),
+            "fingerprint": contract.get("fingerprint"),
+            **contract.get("summary", {}),
+        }
+    except Exception:
+        contract = state.get("resume_contract") or {}
+        contract_summary = {
+            "version": contract.get("version"),
+            "fingerprint": contract.get("fingerprint"),
+            **contract.get("summary", {}),
+        }
+    manifest = {
+        "schema_version": 1,
+        "run_id": run_id,
+        "status": "completed",
+        "created_at": state.get("created_at"),
+        "completed_at": event.get("timestamp") or state.get("updated_at"),
+        "updated_at": event.get("timestamp") or state.get("updated_at"),
+        "input_file": state.get("input_file"),
+        "sheet": state.get("sheet", ""),
+        "text_column": state.get("text_column", ""),
+        "output_file": event.get("output_file") or state.get("output_file"),
+        "total_rows": int(event.get("total_rows") or state.get("total_rows") or 0),
+        "dataset_total_rows": int(state.get("dataset_total_rows") or state.get("total_rows") or 0),
+        "eligible_rows": int(state.get("eligible_rows") or 0),
+        "execution_order": execution_order,
+        "arbiters": state.get("arbiters", []),
+        "principles": state.get("principles", []),
+        "summary": event.get("final_summary") or state.get("summary", {}),
+        "configuration": contract_summary,
+        "owner": {
+            "user_id": user.get("id"), "username": user.get("username"),
+        } if user else None,
+    }
+    try:
+        _run_repository.save(RunRecord.from_dict(manifest))
+    except (OSError, ValueError) as exc:
+        app.logger.warning("No se pudo guardar manifiesto del run %s: %s", run_id, exc)
 
 
 def _clear_runtime_checkpoint_files(
@@ -873,7 +928,7 @@ def _clear_runtime_checkpoint_files(
     )
 
 
-def _output_owner(name: str) -> dict | None:
+def _legacy_output_owner(name: str) -> dict | None:
     with _auth_db() as conn:
         row = conn.execute(
             """
@@ -889,6 +944,7 @@ def _output_owner(name: str) -> dict | None:
         return None
     avatar_filename = row["avatar_filename"] or ""
     return {
+        "run_id": row["run_id"] or "",
         "id": int(row["id"]) if row["id"] is not None else None,
         "username": row["username"],
         "email": row["email"] or "",
@@ -902,10 +958,39 @@ def _output_owner(name: str) -> dict | None:
     }
 
 
+def _output_owner(name: str) -> dict | None:
+    """Resuelve propietario desde RunRepository; SQLite queda como fallback legacy."""
+    record = _run_repository.find_by_output_file(Path(str(name or "")).name)
+    if record:
+        if not record.owner:
+            return None
+        user = _get_user_by_id(record.owner.user_id)
+        if user:
+            return {**user, "run_id": record.run_id, "output_file": record.output_file}
+        return {
+            "run_id": record.run_id,
+            "output_file": record.output_file,
+            "id": record.owner.user_id,
+            "username": record.owner.username,
+            "email": "",
+            "avatar_filename": "",
+            "avatar_url": "",
+            "role": USER_ROLE,
+            "active": False,
+            "created_at": None,
+            "updated_at": None,
+            "last_login_at": None,
+        }
+    return _legacy_output_owner(name)
+
+
 def _can_access_output(name: str) -> bool:
     if _current_user_is_admin():
         return True
-    owner = _output_owner(name)
+    record = _run_repository.find_by_output_file(Path(str(name or "")).name)
+    if record:
+        return bool(record.owner and record.owner.user_id == _current_user_id())
+    owner = _legacy_output_owner(name)
     return bool(owner and owner.get("id") == _current_user_id())
 
 
@@ -1330,6 +1415,7 @@ def _empty_current_run_stats() -> dict:
         "arbiter_count": 0,
         "arbiter_work_total": 0,
         "arbiter_work_completed": 0,
+        "arbiter_work_before_start": 0,
         "current_arbiter_id": None,
         "current_pass_position": 0,
         "current_pass_total": 0,
@@ -1343,24 +1429,11 @@ def _empty_current_run_stats() -> dict:
     }
 
 
-_process_state = {
-    "running":   False,
-    "stop_requested": False,
-    "pid":       None,
-    "log_lines": [],
-    "log_seq":   0,
-    "run_log_path": None,
-    "proc":      None,
-    "current_stats": _empty_current_run_stats(),
-    "stats_lock": threading.Lock(),
-    "state_lock": threading.RLock(),
-    "exit_code": None,
-    "last_error": "",
-}
+_run_metrics = InMemoryRunMetrics(_empty_current_run_stats)
 
 
 def _public_current_stats(stats: dict = None) -> dict:
-    stats = stats or _process_state["current_stats"]
+    stats = stats if stats is not None else _run_metrics.snapshot()
     public = {k: v for k, v in stats.items() if not k.startswith("_")}
     processed_rows = int(public.get("processed_rows", 0) or 0)
     successful_rows = int(public.get("successful_rows", 0) or 0)
@@ -1410,6 +1483,420 @@ def _public_current_stats(stats: dict = None) -> dict:
     return public
 
 
+_run_metrics_service = RunMetricsService(
+    store=_run_metrics,
+    empty_factory=_empty_current_run_stats,
+    public_mapper=_public_current_stats,
+    checkpoint_every_provider=lambda: int(
+        read_config().get("processing", {}).get("checkpoint_every", 10)
+    ),
+    performance_sink=append_performance_sample,
+    incident_sink=record_run_incident,
+    incident_resolver=resolve_row_incidents,
+    timestamp_provider=lambda: time.strftime("%Y-%m-%dT%H:%M:%S"),
+)
+
+_run_metrics_hydrator = RunMetricsHydrator(
+    store=_run_metrics,
+    empty_factory=_empty_current_run_stats,
+    run_state_loader=lambda: load_run_state(),
+    arbiter_results_loader=lambda: load_arbiter_results(),
+    failed_queue_loader=lambda: load_failed_queue(),
+    input_rows_loader=lambda state: _load_input_rows_for_run_state(state),
+    execution_order_provider=lambda: read_config().get(
+        "processing", {}
+    ).get("execution_order", "row_major"),
+)
+
+
+def _dashboard_lifecycle(stats: dict, runtime: dict, persisted: dict) -> dict:
+    """Traduce banderas tecnicas a un unico estado operativo para la UI."""
+    running = bool(runtime.get("running"))
+    stop_requested = bool(runtime.get("stop_requested"))
+    pause_kind = stats.get("pause_kind") or persisted.get("pause_kind") or ""
+    pause_reason = stats.get("pause_reason") or persisted.get("pause_reason") or ""
+    exit_code = runtime.get("exit_code")
+    last_error = runtime.get("last_error") or ""
+    has_run = bool(stats.get("run_id") or persisted.get("run_id"))
+    finished = bool(stats.get("finished")) or persisted.get("status") == "completed"
+
+    decision = derive_run_lifecycle(RunLifecycleFacts(
+        has_run=has_run,
+        process_running=running,
+        stop_requested=stop_requested,
+        persisted_status=str(persisted.get("status") or ""),
+        pause_kind=str(pause_kind),
+        pause_reason=str(pause_reason),
+        finished=finished,
+        failed_rows=int(stats.get("failed_rows", 0) or 0),
+        exit_code=exit_code,
+        last_error=str(last_error),
+    ))
+    code = decision.status.value
+    labels = {
+        "idle": "Sin ejecucion", "prepared": "Preparada", "running": "Ejecutando",
+        "stopping": "Deteniendo", "paused": "Pausada y reanudable",
+        "interrupted": "Interrumpida", "completed": "Completada",
+        "completed_with_issues": "Completada con incidencias", "failed": "Fallida",
+    }
+    tones = {
+        "idle": "secondary", "prepared": "secondary", "running": "info",
+        "stopping": "warning", "paused": "warning", "interrupted": "danger",
+        "completed": "success", "completed_with_issues": "warning", "failed": "danger",
+    }
+    return {
+        "code": code,
+        "label": labels[code],
+        "tone": tones[code],
+        "reason": decision.reason,
+        "is_terminal": decision.is_terminal,
+        "can_start": decision.can_start,
+        "can_resume": decision.can_resume,
+        "can_stop": decision.can_stop,
+    }
+
+
+def _resume_compatibility(persisted: dict) -> dict:
+    if not persisted or persisted.get("status") not in {"running", "paused"}:
+        return {"applicable": False, "compatible": False, "reason": "No hay ejecucion reanudable."}
+    try:
+        cfg = read_config()
+        dataset = cfg.get("dataset", {})
+        current = build_resume_contract(
+            cfg,
+            input_file=str(dataset.get("input_file", "") or ""),
+            sheet=str(dataset.get("sheet", "") or ""),
+            text_column=str(dataset.get("text_column", "") or ""),
+            total_rows=int(persisted.get("total_rows", 0) or 0),
+        )
+        saved = persisted.get("resume_contract")
+        if saved:
+            comparison = compare_resume_contract(saved, current)
+            return {"applicable": True, **comparison}
+        legacy_compatible = (
+            str(persisted.get("input_file", "")) == str(dataset.get("input_file", ""))
+            and str(persisted.get("sheet", "") or "") == str(dataset.get("sheet", "") or "")
+            and str(persisted.get("text_column", "") or "") == str(dataset.get("text_column", "") or "")
+        )
+        return {
+            "applicable": True,
+            "compatible": legacy_compatible,
+            "legacy": True,
+            "reason": (
+                "Checkpoint heredado: coinciden dataset, hoja y columna; el contrato fuerte se guardara al reanudar."
+                if legacy_compatible else
+                "El dataset, la hoja o la columna no coinciden con el checkpoint heredado."
+            ),
+        }
+    except Exception as exc:
+        return {
+            "applicable": True, "compatible": False, "legacy": False,
+            "reason": f"No se pudo verificar la compatibilidad: {exc}",
+        }
+
+
+def _performance_rate_summary(samples: list[dict], remaining: int) -> dict:
+    points = []
+    for item in samples:
+        try:
+            stamp = datetime.fromisoformat(str(item.get("timestamp", "")).replace("Z", "+00:00")).timestamp()
+            completed = int(item.get("completed", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        points.append((stamp, completed))
+    points.sort(key=lambda point: point[0])
+    rates = []
+    for (t0, p0), (t1, p1) in zip(points, points[1:]):
+        dt_minutes = (t1 - t0) / 60.0
+        delta = p1 - p0
+        if dt_minutes > 0 and delta > 0:
+            rates.append(delta / dt_minutes)
+    # La primera observacion suele incluir carga del modelo; solo se descarta
+    # cuando existen suficientes intervalos para no ocultar falta de evidencia.
+    if len(rates) >= 5:
+        rates = rates[1:]
+    if len(rates) < 3:
+        return {
+            "ready": False, "confidence": "insufficient", "sample_count": len(rates),
+            "rate_per_minute": None, "eta_minutes_low": None, "eta_minutes_high": None,
+        }
+    ordered = sorted(rates)
+    median = statistics.median(ordered)
+    low_rate = ordered[max(0, int((len(ordered) - 1) * 0.25))]
+    high_rate = ordered[min(len(ordered) - 1, int((len(ordered) - 1) * 0.75))]
+    confidence = "high" if len(rates) >= 20 else "medium" if len(rates) >= 8 else "low"
+    return {
+        "ready": True,
+        "confidence": confidence,
+        "sample_count": len(rates),
+        "rate_per_minute": round(median, 3),
+        "rate_low_per_minute": round(low_rate, 3),
+        "rate_high_per_minute": round(high_rate, 3),
+        "eta_minutes_low": round(remaining / high_rate, 2) if remaining > 0 and high_rate > 0 else 0,
+        "eta_minutes_high": round(remaining / low_rate, 2) if remaining > 0 and low_rate > 0 else 0,
+    }
+
+
+def _performance_rate_history(samples: list[dict], limit: int = 60) -> list[dict]:
+    points = []
+    for item in samples:
+        try:
+            stamp = datetime.fromisoformat(str(item.get("timestamp", "")).replace("Z", "+00:00")).timestamp()
+            completed = int(item.get("completed", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        points.append((stamp, completed))
+    points.sort(key=lambda point: point[0])
+    history = []
+    for (t0, p0), (t1, p1) in zip(points, points[1:]):
+        elapsed = (t1 - t0) / 60.0
+        if elapsed > 0 and p1 > p0:
+            history.append({
+                "timestamp": datetime.fromtimestamp(t1).isoformat(timespec="seconds"),
+                "rate_per_minute": round((p1 - p0) / elapsed, 3),
+            })
+    return history[-max(1, int(limit)):]
+
+
+def _build_performance_dashboard(
+    run_id: str | None, *, completed: int, total: int, total_tokens: int,
+) -> dict:
+    samples = load_performance_samples(run_id) if run_id else []
+    remaining = max(0, total - completed)
+    global_samples = [item for item in samples if not item.get("arbiter_id")]
+    global_summary = _performance_rate_summary(global_samples, remaining)
+    token_basis = completed
+    projected_tokens = round(total_tokens * total / token_basis) if token_basis >= 3 and total > 0 else None
+    token_confidence = (
+        "high" if token_basis >= 20 else "medium" if token_basis >= 8 else "low" if token_basis >= 3 else "insufficient"
+    )
+    per_arbiter = {}
+    for arbiter_id in {str(item.get("arbiter_id")) for item in samples if item.get("arbiter_id")}:
+        arb_samples = [item for item in samples if str(item.get("arbiter_id")) == arbiter_id]
+        if not arb_samples:
+            continue
+        arb_completed = max(int(item.get("completed", 0) or 0) for item in arb_samples)
+        arb_total = max(int(item.get("total", 0) or 0) for item in arb_samples)
+        per_arbiter[arbiter_id] = _performance_rate_summary(
+            arb_samples, max(0, arb_total - arb_completed),
+        )
+    return {
+        **global_summary,
+        "unit": global_samples[-1].get("unit") if global_samples else "evaluation",
+        "completed": completed,
+        "total": total,
+        "remaining": remaining,
+        "tokens": {
+            "consumed": total_tokens,
+            "projected": projected_tokens,
+            "basis_completed": token_basis,
+            "confidence": token_confidence,
+        },
+        "per_arbiter": per_arbiter,
+        "history": _performance_rate_history(global_samples),
+    }
+
+
+def _build_run_dashboard(stats: dict, runtime: dict) -> dict:
+    """Contrato semantico unico consumido por las tarjetas de Ejecutar."""
+    persisted = load_run_state() or {}
+    lifecycle = _dashboard_lifecycle(stats, runtime, persisted)
+    resume = _resume_compatibility(persisted)
+    if lifecycle["code"] in {"paused", "interrupted"} and resume.get("applicable") and not resume.get("compatible"):
+        lifecycle = {
+            **lifecycle,
+            "code": "resume_incompatible",
+            "label": "No se puede reanudar",
+            "tone": "danger",
+            "reason": resume.get("reason") or "La configuracion cambio.",
+            "can_resume": False,
+        }
+    run_id = stats.get("run_id") or persisted.get("run_id")
+    eligible = int(stats.get("eligible_rows") or persisted.get("eligible_rows") or stats.get("total_rows") or 0)
+    target = int(stats.get("total_rows") or persisted.get("total_rows") or 0)
+    dataset_total = int(stats.get("dataset_total_rows") or persisted.get("total_rows") or target)
+    successful = int(stats.get("successful_rows", 0) or 0)
+    failed = int(stats.get("failed_rows", 0) or 0)
+    skipped = int(stats.get("skipped_rows", 0) or 0)
+    closed = int(stats.get("processed_rows", successful + failed + skipped) or 0)
+    evaluated = int(stats.get("evaluated_rows", closed) or 0)
+    evaluations_done = int(stats.get("arbiter_work_completed", 0) or 0)
+    evaluations_total = int(stats.get("arbiter_work_total", 0) or 0)
+    reused_closed = min(closed, int(stats.get("completed_before_start", 0) or 0))
+    reused_evaluations = min(
+        evaluations_done, int(stats.get("arbiter_work_before_start", 0) or 0),
+    )
+    analyzable_closed = min(eligible, successful + failed)
+    performance_completed = evaluations_done if evaluations_total > 0 else analyzable_closed
+    performance_total = evaluations_total if evaluations_total > 0 else eligible
+    performance = _build_performance_dashboard(
+        run_id,
+        completed=performance_completed,
+        total=performance_total,
+        total_tokens=int(stats.get("total_tokens_global", 0) or 0),
+    )
+    queued_indices = list(stats.get("queued_indices", []))
+    durable_queue = load_failed_queue()
+    queued_set = {str(value) for value in queued_indices}
+    retry_items = []
+    for item in durable_queue:
+        index = item.get("index")
+        if str(index) not in queued_set:
+            continue
+        retry_items.append({
+            "row_index": index,
+            "arbiter_id": item.get("arbiter_id"),
+            "reason_code": item.get("reason_code") or "unknown",
+            "message": item.get("reason") or "sin detalle",
+            "attempts": int(item.get("attempts", 0) or 0),
+            "created_at": item.get("created_at"),
+            "status": item.get("status") or "pending",
+        })
+    result_source = stats.get("source_file") or persisted.get("output_file")
+    artifact_exists = False
+    output_path = _resolve_project_path(stats.get("output_path") or persisted.get("output_path"))
+    if output_path:
+        artifact_exists = output_path.exists()
+    elif result_source:
+        artifact_exists = (OUTPUT_DIR / Path(str(result_source)).name).exists()
+    checkpoint_results_exist = (CHECKPOINTS_DIR / "claim_results.jsonl").exists()
+    if result_source and lifecycle["code"] in {"completed", "completed_with_issues"} and not artifact_exists and not checkpoint_results_exist:
+        lifecycle = {
+            **lifecycle,
+            "code": "artifact_missing",
+            "label": "Resultado no disponible",
+            "tone": "danger",
+            "reason": "La ejecucion termino, pero su archivo final ya no existe.",
+            "is_terminal": True,
+        }
+
+    incidents = []
+    if lifecycle.get("reason"):
+        incidents.append({
+            "id": f"run:{run_id or 'none'}:{lifecycle['code']}",
+            "severity": "error" if lifecycle["code"] == "failed" else "warning",
+            "kind": "Estado de ejecucion",
+            "message": lifecycle["reason"],
+            "status": "open" if not lifecycle["is_terminal"] else "final",
+        })
+    if queued_indices:
+        incidents.append({
+            "id": f"run:{run_id or 'none'}:retry-queue",
+            "severity": "warning",
+            "kind": "Reintentos pendientes",
+            "message": f"{len(queued_indices)} entradas esperan un nuevo intento.",
+            "status": "open",
+        })
+    persisted_incidents = load_run_incidents(run_id) if run_id else []
+    incident_ids = {item["id"] for item in incidents}
+    for item in persisted_incidents:
+        if item.get("status") == "resolved" or item.get("id") in incident_ids:
+            continue
+        incidents.append({
+            "id": item.get("id"),
+            "severity": item.get("severity", "error"),
+            "kind": item.get("kind", "Incidente"),
+            "message": item.get("message", ""),
+            "status": item.get("status", "open"),
+            "row_index": item.get("row_index"),
+            "arbiter_id": item.get("arbiter_id"),
+            "reason_code": item.get("reason_code", "unknown"),
+            "updated_at": item.get("updated_at"),
+        })
+
+    arbiters = []
+    current_arbiter = stats.get("current_arbiter_id")
+    for arb_id, arb in stats.get("arbiters", {}).items():
+        arb_incident = next((
+            item for item in persisted_incidents
+            if item.get("arbiter_id") == arb_id and item.get("status") in {"open", "final"}
+        ), None)
+        arb_evaluations = int(arb.get("evaluations", arb.get("calls", 0)) or 0)
+        arb_reused = min(arb_evaluations, int(arb.get("evaluations_before_start", 0) or 0))
+        arb_status = "active" if runtime.get("running") and arb_id == current_arbiter else "waiting"
+        if eligible and arb_evaluations >= eligible:
+            arb_status = "completed"
+        elif arb_incident or lifecycle["code"] in {"paused", "interrupted", "failed"} and arb_id == current_arbiter:
+            arb_status = "blocked"
+        elif lifecycle["is_terminal"]:
+            arb_status = "completed"
+        arbiters.append({
+            "id": arb_id,
+            "name": arb.get("name") or arb_id,
+            "status": arb_status,
+            "evaluations_completed": arb_evaluations,
+            "evaluations_target": eligible,
+            "evaluations_reused": arb_reused,
+            "evaluations_this_session": max(0, arb_evaluations - arb_reused),
+            "evaluations_pending": max(0, eligible - arb_evaluations),
+            "model_calls": int(arb.get("model_calls", arb.get("calls", 0)) or 0),
+            "total_tokens": int(arb.get("total_tokens", 0) or 0),
+            "latency_avg_s": arb.get("latency_avg_s", 0) or 0,
+            "last_error": arb_incident.get("message") if arb_incident else "",
+            "reason_code": arb_incident.get("reason_code") if arb_incident else "",
+            "last_error_at": arb_incident.get("updated_at") if arb_incident else None,
+        })
+
+    return {
+        "schema_version": 1,
+        "identity": {
+            "run_id": run_id,
+            "input_file": stats.get("input_file") or persisted.get("input_file"),
+            "output_file": stats.get("source_file") or persisted.get("output_file"),
+            "started_at": stats.get("started_at") or persisted.get("created_at"),
+            "updated_at": stats.get("updated_at") or persisted.get("updated_at"),
+            "execution_order": stats.get("execution_order") or "row_major",
+        },
+        "lifecycle": lifecycle,
+        "resume": resume,
+        "progress": {
+            "dataset_rows": dataset_total,
+            "target_rows": target,
+            "eligible_rows": eligible,
+            "evaluated_rows": evaluated,
+            "closed_rows": closed,
+            "successful_rows": successful,
+            "failed_rows": failed,
+            "skipped_rows": skipped,
+            "pending_rows": max(0, target - closed),
+            "evaluations_completed": evaluations_done,
+            "evaluations_total": evaluations_total,
+        },
+        "objective": {
+            "dataset_rows": dataset_total,
+            "target_rows": target,
+            "outside_target_rows": max(0, dataset_total - target),
+            "analyzable_rows": eligible,
+            "non_analyzable_rows": max(0, target - eligible),
+            "analyzable_closed_rows": analyzable_closed,
+            "analyzable_pending_rows": max(0, eligible - analyzable_closed),
+            "reused_closed_rows": reused_closed,
+            "closed_this_session": max(0, closed - reused_closed),
+            "evaluations_total": evaluations_total,
+            "evaluations_reused": reused_evaluations,
+            "evaluations_this_session": max(0, evaluations_done - reused_evaluations),
+            "evaluations_pending": max(0, evaluations_total - evaluations_done),
+        },
+        "resources": {
+            "total_tokens": int(stats.get("total_tokens_global", 0) or 0),
+            "total_latency_s": float(stats.get("total_latency_s", 0) or 0),
+        },
+        "performance": performance,
+        "queue": {
+            "count": len(queued_indices),
+            "row_indices": queued_indices,
+            "items": retry_items,
+        },
+        "incidents": incidents,
+        "arbiters": arbiters,
+        "results": {
+            "availability": "missing" if lifecycle["code"] == "artifact_missing" else "final" if lifecycle["code"] in {"completed", "completed_with_issues"} else "partial" if closed else "none",
+            "source_file": result_source,
+            "artifact_exists": artifact_exists,
+        },
+    }
+
+
 def _new_web_run_log_path() -> Path:
     stamp = time.strftime("%Y%m%d_%H%M%S")
     suffix = uuid.uuid4().hex[:8]
@@ -1417,8 +1904,7 @@ def _new_web_run_log_path() -> Path:
 
 
 def _append_web_run_log_file(line: str):
-    with _process_state["state_lock"]:
-        path_value = _process_state.get("run_log_path")
+    path_value = _run_supervisor.snapshot().run_log_path
     if not path_value:
         return
     try:
@@ -1466,122 +1952,32 @@ def _push_run_log(line: str, *, expose_ui: bool = True):
     _append_web_run_log_file(line)
     if not expose_ui:
         return
-    with _process_state["state_lock"]:
-        _process_state.setdefault("log_lines", []).append(_sanitize_run_log_for_ui(line))
-        _process_state["log_seq"] = int(_process_state.get("log_seq", 0) or 0) + 1
-        if len(_process_state["log_lines"]) > 500:
-            _process_state["log_lines"] = _process_state["log_lines"][-500:]
+    _run_supervisor.append_log(_sanitize_run_log_for_ui(line))
 
 
 def _reset_current_stats():
-    with _process_state["stats_lock"]:
-        _process_state["current_stats"] = _empty_current_run_stats()
+    _run_metrics.reset()
 
 
 def _hydrate_current_stats_from_disk() -> None:
     """Restaura el panel tras reiniciar Flask sin inventar una ejecucion activa."""
-    with _process_state["stats_lock"]:
-        if _process_state["current_stats"].get("run_id"):
-            return
-    state = load_run_state()
-    if not state:
-        return
-
-    restored = _empty_current_run_stats()
-    restored["run_id"] = state.get("run_id")
-    restored["active"] = False
-    restored["finished"] = state.get("status") == "completed"
-    restored["source_file"] = state.get("output_file")
-    restored["output_path"] = state.get("output_path")
-    restored["input_file"] = state.get("input_file")
-    restored["config_file"] = state.get("config_file")
-    restored["started_at"] = state.get("created_at")
-    restored["updated_at"] = state.get("updated_at")
-    restored["total_rows"] = int(state.get("total_rows") or 0)
-    restored["dataset_total_rows"] = int(state.get("total_rows") or 0)
-    restored["eligible_rows"] = int(state.get("eligible_rows") or 0)
-    restored["pause_kind"] = state.get("pause_kind", "")
-    restored["pause_reason"] = state.get("pause_reason", "")
-    restored["principles"] = state.get("principles", [])
-    restored["arbiter_count"] = len(state.get("arbiters", []))
-    try:
-        restored["execution_order"] = read_config().get("processing", {}).get("execution_order", "row_major")
-    except Exception:
-        restored["execution_order"] = "row_major"
-    for arb in state.get("arbiters", []):
-        _ensure_live_arbiter(restored, arb.get("id"), arb.get("name"))
-
-    summary = state.get("summary", {})
-    if summary:
-        _apply_initial_summary(restored, summary)
-
-    partial = load_arbiter_results()
-    if not restored["eligible_rows"]:
-        input_rows, _ = _load_input_rows_for_run_state(state)
-        text_column = state.get("text_column") or ""
-        restored["eligible_rows"] = sum(
-            1 for row in input_rows if str(row.get(text_column, "") or "").strip()
-        ) if text_column else restored["total_rows"]
-    restored["arbiter_work_total"] = restored["eligible_rows"] * restored["arbiter_count"]
-    partial_evaluations = sum(len(v) for v in partial.values())
-    restored["arbiter_work_completed"] = partial_evaluations or (
-        (int(summary.get("successful_rows", 0) or 0) + int(summary.get("failed_rows", 0) or 0))
-        * restored["arbiter_count"]
-    )
-    # arbiter_results.jsonl contiene el acumulado completo, incluso para filas
-    # ya consolidadas. Sustituye los recursos del resumen para evitar tanto
-    # perdida al reanudar como doble conteo.
-    checkpoint_resources = {"total_tokens_global": 0, "total_latency_s": 0.0, "arbiters": {}}
-    for arbiter_results in partial.values():
-        for arb_id, result in arbiter_results.items():
-            usage = result.get("_usage", {}) if isinstance(result, dict) else {}
-            latency = float(result.get("_latency_s", 0) or 0) if isinstance(result, dict) else 0.0
-            chunks = max(1, int(result.get("_chunks", 1) or 1)) if isinstance(result, dict) else 1
-            incoming = checkpoint_resources["arbiters"].setdefault(arb_id, {
-                "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
-                "evaluations": 0, "model_calls": 0, "latency_total_s": 0.0,
-                "latency_min_s": None, "latency_max_s": None,
-            })
-            prompt = int(usage.get("prompt_tokens", 0) or 0)
-            completion = int(usage.get("completion_tokens", 0) or 0)
-            incoming["prompt_tokens"] += prompt
-            incoming["completion_tokens"] += completion
-            incoming["total_tokens"] += prompt + completion
-            incoming["evaluations"] += 1
-            incoming["model_calls"] += chunks
-            incoming["latency_total_s"] += latency
-            incoming["latency_min_s"] = latency if incoming["latency_min_s"] is None else min(incoming["latency_min_s"], latency)
-            incoming["latency_max_s"] = latency if incoming["latency_max_s"] is None else max(incoming["latency_max_s"], latency)
-            checkpoint_resources["total_tokens_global"] += prompt + completion
-            checkpoint_resources["total_latency_s"] += latency
-    _apply_resource_summary(restored, checkpoint_resources)
-    restored["_queued_indices"] = {str(item.get("index")) for item in load_failed_queue()}
-
-    with _process_state["stats_lock"]:
-        if not _process_state["current_stats"].get("run_id"):
-            _process_state["current_stats"] = restored
+    _run_metrics_hydrator.hydrate()
 
 
 def _reset_runtime_state_for_new_run():
-    with _process_state["state_lock"]:
-        _process_state["run_log_path"] = str(_new_web_run_log_path())
-        _process_state["log_lines"] = []
-        _process_state["log_seq"] = 0
-        _process_state["exit_code"] = None
-        _process_state["last_error"] = ""
+    _run_supervisor.reset_for_run(str(_new_web_run_log_path()))
     _reset_current_stats()
 
 
 def _run_is_active() -> bool:
-    with _process_state["state_lock"]:
-        return bool(_process_state.get("running"))
+    return _run_supervisor.is_active()
 
 
 def _mark_user_stopped_state() -> None:
     """Convierte una terminacion solicitada en pausa reanudable y coherente."""
     reason = "Ejecucion detenida por el usuario; los resultados persistidos pueden reanudarse."
-    with _process_state["stats_lock"]:
-        stats = _process_state["current_stats"]
+    with _run_metrics.edit() as editor:
+        stats = editor.stats
         stats["active"] = False
         stats["finished"] = False
         stats["pause_kind"] = "user_stopped"
@@ -1612,254 +2008,26 @@ def _terminate_run_process(proc: subprocess.Popen, timeout: float = 5.0) -> None
 
 def _runtime_snapshot(since: int = 0) -> dict:
     _hydrate_current_stats_from_disk()
-    with _process_state["state_lock"]:
-        seq = int(_process_state.get("log_seq", 0) or 0)
-        lines = list(_process_state.get("log_lines", []))
-        base_seq = max(0, seq - len(lines))
-        start = max(0, int(since or 0) - base_seq)
-        payload_lines = lines[start:]
-        first_payload_seq = base_seq + start + 1
-        log_entries = [
-            {"seq": first_payload_seq + offset, "line": line}
-            for offset, line in enumerate(payload_lines)
-        ]
-        runtime = {
-            "server_instance_id": SERVER_INSTANCE_ID,
-            "running": bool(_process_state.get("running")),
-            "pid": _process_state.get("pid"),
-            "seq": seq,
-            "lines": payload_lines,
-            "log_entries": log_entries,
-            "exit_code": _process_state.get("exit_code"),
-            "last_error": _process_state.get("last_error", ""),
-            "run_log_available": bool(_process_state.get("run_log_path")),
-            "stop_requested": bool(_process_state.get("stop_requested")),
-        }
-    with _process_state["stats_lock"]:
-        runtime["stats"] = _public_current_stats(_process_state["current_stats"])
+    snapshot = _run_supervisor.snapshot(since)
+    runtime = {
+        "server_instance_id": SERVER_INSTANCE_ID,
+        "running": snapshot.running,
+        "pid": snapshot.pid,
+        "seq": snapshot.seq,
+        "lines": list(snapshot.lines),
+        "log_entries": [{"seq": seq, "line": line} for seq, line in snapshot.log_entries],
+        "exit_code": snapshot.exit_code,
+        "last_error": snapshot.last_error,
+        "run_log_available": bool(snapshot.run_log_path),
+        "stop_requested": snapshot.stop_requested,
+    }
+    runtime["stats"] = _public_current_stats(_run_metrics.snapshot())
+    runtime["dashboard"] = _build_run_dashboard(runtime["stats"], runtime)
     return runtime
 
 
-def _ensure_live_arbiter(stats: dict, arb_id: str, name: str = None) -> dict:
-    if arb_id not in stats["arbiters"]:
-        stats["arbiters"][arb_id] = {
-            "id": arb_id,
-            "name": name or arb_id,
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0,
-            "calls": 0,
-            "evaluations": 0,
-            "model_calls": 0,
-            "latency_total_s": 0.0,
-            "latency_min_s": None,
-            "latency_max_s": None,
-        }
-    elif name:
-        stats["arbiters"][arb_id]["name"] = name
-    return stats["arbiters"][arb_id]
-
-
-def _apply_initial_summary(stats: dict, summary: dict):
-    if not summary:
-        return
-    for key in ["processed_rows", "successful_rows", "failed_rows", "skipped_rows",
-                "total_tokens_global", "total_latency_s"]:
-        stats[key] = summary.get(key, stats.get(key, 0))
-    for arb_id, incoming in summary.get("arbiters", {}).items():
-        arb_stats = _ensure_live_arbiter(stats, arb_id)
-        for key in ["prompt_tokens", "completion_tokens", "total_tokens", "calls"]:
-            arb_stats[key] = incoming.get(key, arb_stats.get(key, 0))
-        arb_stats["evaluations"] = int(incoming.get("evaluations", incoming.get("calls", 0)) or 0)
-        arb_stats["model_calls"] = int(incoming.get("model_calls", incoming.get("calls", 0)) or 0)
-        arb_stats["latency_total_s"] = incoming.get("latency_total_s", 0) or 0
-        arb_stats["latency_min_s"] = incoming.get("latency_min_s") or None
-        arb_stats["latency_max_s"] = incoming.get("latency_max_s") or None
-
-
-def _apply_resource_summary(stats: dict, summary: dict):
-    """Reemplaza el acumulado de recursos con una fuente completa y durable."""
-    if not summary:
-        return
-    stats["total_tokens_global"] = int(summary.get("total_tokens_global", 0) or 0)
-    stats["total_latency_s"] = float(summary.get("total_latency_s", 0) or 0)
-    for arb_id, incoming in summary.get("arbiters", {}).items():
-        arb_stats = _ensure_live_arbiter(stats, arb_id)
-        for key in ("prompt_tokens", "completion_tokens", "total_tokens", "evaluations", "model_calls"):
-            arb_stats[key] = int(incoming.get(key, 0) or 0)
-        arb_stats["calls"] = arb_stats["evaluations"]
-        arb_stats["latency_total_s"] = float(incoming.get("latency_total_s", 0) or 0)
-        arb_stats["latency_min_s"] = incoming.get("latency_min_s") or None
-        arb_stats["latency_max_s"] = incoming.get("latency_max_s") or None
-
-
-def _set_live_claim_status(stats: dict, row_index, status: str):
-    key = str(row_index)
-    old = stats["_claim_statuses"].get(key)
-    if old == status:
-        return
-    counters = {
-        "ok": "successful_rows",
-        "failed": "failed_rows",
-        "skipped": "skipped_rows",
-    }
-    if old in counters:
-        stats[counters[old]] = max(0, stats.get(counters[old], 0) - 1)
-    if status in counters:
-        stats[counters[status]] = stats.get(counters[status], 0) + 1
-    stats["_claim_statuses"][key] = status
-    stats["processed_rows"] = (
-        stats.get("completed_before_start", 0)
-        + len(stats["_claim_statuses"])
-    )
-
-
 def _apply_run_metric_event(event: dict) -> dict:
-    with _process_state["stats_lock"]:
-        stats = _process_state["current_stats"]
-        kind = event.get("event")
-        stats["updated_at"] = event.get("timestamp") or time.strftime("%Y-%m-%dT%H:%M:%S")
-
-        if kind == "start":
-            stats = _empty_current_run_stats()
-            _process_state["current_stats"] = stats
-            stats["active"] = True
-            stats["finished"] = False
-            stats["run_id"] = event.get("run_id")
-            stats["source_file"] = event.get("output_file")
-            stats["output_path"] = event.get("output_path")
-            stats["input_file"] = event.get("input_file")
-            stats["config_file"] = event.get("config_file")
-            stats["started_at"] = event.get("timestamp")
-            stats["updated_at"] = event.get("timestamp")
-            stats["total_rows"] = int(event.get("total_rows") or 0)
-            stats["dataset_total_rows"] = int(event.get("dataset_total_rows") or 0)
-            stats["eligible_rows"] = int(event.get("eligible_rows") or stats["total_rows"])
-            stats["completed_before_start"] = int(event.get("completed_before_start") or 0)
-            stats["execution_order"] = event.get("execution_order") or "row_major"
-            stats["arbiter_count"] = int(event.get("arbiter_count") or len(event.get("arbiters", [])))
-            stats["arbiter_work_total"] = int(event.get("arbiter_work_total") or 0)
-            stats["arbiter_work_completed"] = int(event.get("arbiter_work_completed") or 0)
-            stats["principles"] = event.get("principles", [])
-            try:
-                _cfg = read_config()
-                stats["checkpoint_every"] = int(_cfg.get("processing", {}).get("checkpoint_every", 10))
-            except Exception:
-                pass
-            for arb in event.get("arbiters", []):
-                _ensure_live_arbiter(stats, arb.get("id"), arb.get("name"))
-            _apply_initial_summary(stats, event.get("initial_summary", {}))
-            _apply_resource_summary(stats, event.get("initial_resource_summary", {}))
-
-        elif kind == "claim_ok":
-            _set_live_claim_status(stats, event.get("row_index"), "ok")
-            stats["_queued_indices"].discard(str(event.get("row_index")))
-            if stats.get("execution_order") != "arbiter_major":
-                stats["total_tokens_global"] += int(event.get("total_tokens") or 0)
-                if event.get("total_latency_s") is not None:
-                    stats["total_latency_s"] += float(event.get("total_latency_s") or 0)
-            stats["last_claim"] = event
-            if stats.get("execution_order") != "arbiter_major":
-                for arb in event.get("arbiters", []):
-                    arb_stats = _ensure_live_arbiter(stats, arb.get("id"), arb.get("name"))
-                    arb_stats["prompt_tokens"] += int(arb.get("prompt_tokens") or 0)
-                    arb_stats["completion_tokens"] += int(arb.get("completion_tokens") or 0)
-                    arb_stats["total_tokens"] += int(arb.get("total_tokens") or 0)
-                    if arb.get("latency_s") is not None:
-                        latency = float(arb.get("latency_s") or 0)
-                        arb_stats["calls"] += 1
-                        arb_stats["evaluations"] += 1
-                        arb_stats["model_calls"] += max(1, int(arb.get("model_calls") or 1))
-                        arb_stats["latency_total_s"] += latency
-                        arb_stats["latency_min_s"] = latency if arb_stats["latency_min_s"] is None else min(arb_stats["latency_min_s"], latency)
-                        arb_stats["latency_max_s"] = latency if arb_stats["latency_max_s"] is None else max(arb_stats["latency_max_s"], latency)
-            for p, val in event.get("consensus", {}).items():
-                pc = stats["principle_counts"]
-                if p not in pc:
-                    pc[p] = {"ones": 0, "zeros": 0}
-                if val == 1:
-                    pc[p]["ones"] += 1
-                elif val == 0:
-                    pc[p]["zeros"] += 1
-
-        elif kind == "claim_start":
-            stats["last_claim"] = event
-
-        elif kind == "arbiter_claim_start":
-            stats["last_claim"] = event
-            stats["current_arbiter_id"] = event.get("arbiter_id")
-            stats["current_pass_position"] = int(event.get("pass_position") or 0)
-            stats["current_pass_total"] = int(event.get("pass_total") or 0)
-            pending_total = int(event.get("pass_pending_total") or 0)
-            pending_position = int(event.get("position") or 0)
-            stats["current_pass_work_total"] = int(event.get("pass_work_total") or stats["eligible_rows"])
-            stats["current_pass_completed"] = max(
-                0, stats["current_pass_work_total"] - pending_total + pending_position - 1,
-            )
-
-        elif kind == "arbiter_pass_start":
-            stats["current_arbiter_id"] = event.get("arbiter_id")
-            stats["current_pass_position"] = int(event.get("position") or 0)
-            stats["current_pass_total"] = int(event.get("total_arbiters") or 0)
-            pending_rows = int(event.get("pending_rows") or 0)
-            stats["current_pass_work_total"] = int(event.get("pass_work_total") or stats["eligible_rows"])
-            stats["current_pass_completed"] = max(0, stats["current_pass_work_total"] - pending_rows)
-
-        elif kind == "arbiter_result":
-            arb_id = event.get("arbiter_id")
-            result_key = f"{event.get('row_index')}:{arb_id}"
-            if result_key not in stats["_arbiter_result_keys"]:
-                stats["_arbiter_result_keys"].add(result_key)
-                stats["arbiter_work_completed"] += 1
-                stats["total_tokens_global"] += int(event.get("total_tokens") or 0)
-                latency = float(event.get("latency_s") or 0)
-                stats["total_latency_s"] += latency
-                arb_stats = _ensure_live_arbiter(stats, arb_id, event.get("arbiter_name"))
-                arb_stats["prompt_tokens"] += int(event.get("prompt_tokens") or 0)
-                arb_stats["completion_tokens"] += int(event.get("completion_tokens") or 0)
-                arb_stats["total_tokens"] += int(event.get("total_tokens") or 0)
-                arb_stats["calls"] += 1
-                arb_stats["evaluations"] += 1
-                arb_stats["model_calls"] += max(1, int(event.get("chunks") or 1))
-                arb_stats["latency_total_s"] += latency
-                arb_stats["latency_min_s"] = latency if arb_stats["latency_min_s"] is None else min(arb_stats["latency_min_s"], latency)
-                arb_stats["latency_max_s"] = latency if arb_stats["latency_max_s"] is None else max(arb_stats["latency_max_s"], latency)
-                if arb_id == stats.get("current_arbiter_id"):
-                    stats["current_pass_completed"] = min(
-                        stats.get("current_pass_work_total") or stats["total_rows"],
-                        int(stats.get("current_pass_completed") or 0) + 1,
-                    )
-
-        elif kind == "claim_failed":
-            if event.get("definitive"):
-                _set_live_claim_status(stats, event.get("row_index"), "failed")
-            if event.get("queued"):
-                stats["_queued_indices"].add(str(event.get("row_index")))
-            stats["last_claim"] = event
-
-        elif kind == "claim_skipped":
-            _set_live_claim_status(stats, event.get("row_index"), "skipped")
-            stats["last_claim"] = event
-
-        elif kind == "output_written":
-            stats["source_file"] = event.get("output_file") or stats.get("source_file")
-            stats["output_path"] = event.get("output_path") or stats.get("output_path")
-
-        elif kind == "complete":
-            stats["active"] = False
-            stats["finished"] = True
-            stats["source_file"] = event.get("output_file") or stats.get("source_file")
-            stats["output_path"] = event.get("output_path") or stats.get("output_path")
-            if event.get("final_summary"):
-                _apply_initial_summary(stats, event["final_summary"])
-
-        elif kind == "paused":
-            stats["active"] = False
-            stats["finished"] = False
-            stats["pause_kind"] = event.get("pause_kind", "")
-            stats["pause_reason"] = event.get("pause_reason", "")
-
-        return _public_current_stats(stats)
+    return _run_metrics_service.apply(event)
 
 
 # ---------------------------------------------------------------------------
@@ -2744,6 +2912,28 @@ def page_run():
 # ---------------------------------------------------------------------------
 # API: Dataset de entrada (archivo, sheet, columna)
 # ---------------------------------------------------------------------------
+def _dataset_config_revision(dataset: dict) -> str:
+    """Huella estable de la seleccion y del archivo que se va a ejecutar."""
+    input_file = str(dataset.get("input_file", "") or "").strip()
+    payload = {
+        "input_file": input_file.replace("\\", "/"),
+        "sheet": str(dataset.get("sheet", "") or ""),
+        "text_column": str(dataset.get("text_column", "") or ""),
+        "file_size": None,
+        "file_mtime_ns": None,
+    }
+    if input_file:
+        try:
+            resolved = _resolve_allowed_dataset_path(input_file)
+            stat = resolved.stat()
+            payload["file_size"] = stat.st_size
+            payload["file_mtime_ns"] = stat.st_mtime_ns
+        except (OSError, PermissionError, ValueError):
+            pass
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:20]
+
+
 @app.route("/api/dataset/config", methods=["GET"])
 def api_get_dataset_config():
     """Devuelve la configuracion actual del dataset de entrada."""
@@ -2759,6 +2949,7 @@ def api_get_dataset_config():
             result["uploaded_at"] = int(st.st_mtime)
         except OSError:
             pass
+    result["revision"] = _dataset_config_revision(dataset)
     return jsonify(result)
 
 
@@ -2797,7 +2988,9 @@ def api_update_dataset_config():
         cfg["dataset"] = {}
     cfg["dataset"].update(updated)
     write_config(cfg)
-    return jsonify(cfg["dataset"])
+    result = dict(cfg["dataset"])
+    result["revision"] = _dataset_config_revision(result)
+    return jsonify(result)
 
 
 @app.route("/api/dataset/inspect", methods=["POST"])
@@ -3468,15 +3661,13 @@ def api_update_processing():
 def api_run_start():
     app.logger.info("[run/start] Solicitud recibida")
 
-    with _process_state["state_lock"]:
-        if _process_state["running"]:
-            app.logger.info("[run/start] Ya hay un proceso corriendo -> 409")
-            return jsonify({"error": "Ya hay un proceso corriendo"}), 409
-        _process_state["running"] = True  # claim slot atomically before releasing lock
-        _process_state["stop_requested"] = False
+    if not _run_supervisor.claim_start():
+        app.logger.info("[run/start] Ya hay un proceso corriendo -> 409")
+        return jsonify({"error": "Ya hay un proceso corriendo"}), 409
 
     data  = request.get_json() or {}
     limit = data.get("limit")
+    requested_dataset_revision = str(data.get("dataset_revision", "") or "")
     run_user = _session_user()
     app.logger.info("[run/start] Usuario: %s | limit: %s", run_user, limit)
 
@@ -3484,22 +3675,19 @@ def api_run_start():
         cfg_data = read_config()
     except Exception as exc:
         app.logger.error("[run/start] Error leyendo config: %s", exc)
-        with _process_state["state_lock"]:
-            _process_state["running"] = False
+        _run_supervisor.abort_start()
         return jsonify({"error": f"Error leyendo configuracion: {exc}"}), 500
 
     try:
         preflight_issues = validate_provider_preflight(cfg_data)
     except Exception as exc:
         app.logger.error("[run/start] Error en preflight: %s", exc)
-        with _process_state["state_lock"]:
-            _process_state["running"] = False
+        _run_supervisor.abort_start()
         return jsonify({"error": f"Error en preflight: {exc}"}), 500
 
     if preflight_issues:
         app.logger.info("[run/start] Preflight fallo: %s", preflight_issues)
-        with _process_state["state_lock"]:
-            _process_state["running"] = False
+        _run_supervisor.abort_start()
         return jsonify({
             "error": "No se puede iniciar: hay problemas de credenciales o proveedores.",
             "issues": preflight_issues,
@@ -3509,11 +3697,40 @@ def api_run_start():
     input_file  = dataset_cfg.get("input_file", "").strip()
     sheet       = dataset_cfg.get("sheet", "")
     text_column = dataset_cfg.get("text_column", "").strip()
+    current_dataset_revision = _dataset_config_revision(dataset_cfg)
 
     def _abort_run(message: str, status: int = 400):
-        with _process_state["state_lock"]:
-            _process_state["running"] = False
+        _run_supervisor.abort_start()
         return jsonify({"error": message}), status
+
+    if not requested_dataset_revision:
+        return _abort_run(
+            "No se pudo confirmar el dataset mostrado. Recarga la configuracion antes de iniciar.",
+            409,
+        )
+    if requested_dataset_revision != current_dataset_revision:
+        return _abort_run(
+            "El dataset configurado cambio desde que se cargo la pantalla. Revisa y confirma nuevamente el archivo y la columna.",
+            409,
+        )
+    persisted_run = load_run_state() or {}
+    resume_check = _resume_compatibility(persisted_run)
+    if resume_check.get("applicable") and not resume_check.get("compatible"):
+        return _abort_run(
+            f"No se puede reanudar esta ejecucion: {resume_check.get('reason', 'la configuracion cambio.')}",
+            409,
+        )
+    if resume_check.get("applicable") and limit:
+        try:
+            requested_limit = int(limit)
+            saved_target = int(persisted_run.get("total_rows", 0) or 0)
+        except (TypeError, ValueError):
+            return _abort_run("El limite de entradas no es valido.", 400)
+        if requested_limit > 0 and requested_limit < saved_target:
+            return _abort_run(
+                f"No se puede reducir una ejecucion reanudable de {saved_target} a {requested_limit} entradas. Limpia el checkpoint para iniciar un objetivo menor.",
+                409,
+            )
 
     if not input_file:
         return _abort_run(
@@ -3558,10 +3775,7 @@ def api_run_start():
                 text=True, encoding="utf-8", errors="replace", bufsize=1,
                 cwd=str(BASE_DIR), env=env,
             )
-            with _process_state["state_lock"]:
-                _process_state["proc"] = proc
-                _process_state["pid"]  = proc.pid
-                stop_requested = bool(_process_state.get("stop_requested"))
+            stop_requested = _run_supervisor.attach_process(proc)
             app.logger.info("[run/start] Subprocess PID=%s", proc.pid)
             _push_run_log(f"Subprocess PID={proc.pid}")
             if stop_requested:
@@ -3578,8 +3792,8 @@ def api_run_start():
                         _push_run_log(f"[metric] {metric_line}", expose_ui=False)
                         if event.get("event") in {"start", "claim_start", "claim_ok", "claim_failed", "claim_skipped", "pause", "complete", "output_written"}:
                             _push_run_log(f"[metric:{event.get('event')}] row={event.get('row_index', '-')} stage={event.get('stage', '-')} tokens={event.get('total_tokens', '-')} latency={event.get('total_latency_s', '-')}")
-                        if event.get("event") in {"output_written", "completed"}:
-                            _record_run_owner(event.get("output_file"), event.get("run_id"), run_user)
+                        if event.get("event") == "complete":
+                            _record_run_manifest(event, run_user)
                         _apply_run_metric_event(event)
                     except json.JSONDecodeError:
                         _push_run_log(line)
@@ -3590,27 +3804,16 @@ def api_run_start():
             exit_msg = f"--- Proceso finalizado (codigo {proc.returncode}) ---"
             app.logger.info("[run/start] %s", exit_msg)
             _push_run_log(exit_msg)
-            with _process_state["state_lock"]:
-                if _process_state.get("stop_requested"):
-                    _process_state["exit_code"] = "STOPPED"
-                else:
-                    _process_state["exit_code"] = proc.returncode
+            _run_supervisor.record_exit(proc.returncode)
         except Exception as e:
             app.logger.error("[run/start] Excepcion en subprocess: %s", e)
             err_msg = "--- Error en proceso ---"
             _push_run_log(err_msg)
-            with _process_state["state_lock"]:
-                _process_state["exit_code"] = "ERROR"
-                # No exponer detalles internos del error al cliente
-                _process_state["last_error"] = "Error interno en el proceso de etiquetado"
+            _run_supervisor.record_error("Error interno en el proceso de etiquetado")
         finally:
-            with _process_state["state_lock"]:
-                was_stopped = bool(_process_state.get("stop_requested"))
+            was_stopped = _run_supervisor.finish()
             if was_stopped:
                 _mark_user_stopped_state()
-            with _process_state["state_lock"]:
-                _process_state["running"] = False
-                _process_state["proc"]    = None
 
     threading.Thread(target=run_and_capture, daemon=True).start()
     app.logger.info("[run/start] Thread iniciado -> respondiendo OK")
@@ -3620,22 +3823,18 @@ def api_run_start():
 @app.route("/api/run/stop", methods=["POST"])
 def api_run_stop():
     app.logger.info("[run/stop] Solicitud recibida")
-    with _process_state["state_lock"]:
-        proc    = _process_state.get("proc")
-        running = _process_state["running"]
-        if running:
-            _process_state["stop_requested"] = True
-    if not running:
+    stop_request = _run_supervisor.request_stop()
+    if not stop_request.accepted:
         return jsonify({"error": "No hay proceso activo"}), 400
 
     _push_run_log("--- Detencion solicitada por el usuario ---")
-    if proc:
+    if stop_request.process:
         # No bloquear la respuesta HTTP mientras Windows espera a que cierre el
         # runner. La interfaz recibe confirmacion inmediata y sigue consultando
         # el estado hasta que el hilo de captura finaliza.
         threading.Thread(
             target=_terminate_run_process,
-            args=(proc,),
+            args=(stop_request.process,),
             daemon=True,
             name="labelforge-run-stop",
         ).start()
@@ -3734,7 +3933,104 @@ def api_output_stats(name):
 
 @app.route("/history")
 def page_history():
-    return render_template("history.html")
+    return render_template("history.html", initial_run_id="")
+
+
+@app.route("/history/<run_id>")
+def page_run_history_detail(run_id):
+    return render_template("history.html", initial_run_id=run_id)
+
+
+def _can_access_manifest(manifest: dict) -> bool:
+    if _current_user_is_admin():
+        return True
+    owner = manifest.get("owner") or {}
+    return owner.get("user_id") == _current_user_id()
+
+
+@app.route("/api/runs", methods=["GET"])
+def api_runs():
+    records = (
+        _run_repository.list()
+        if _current_user_is_admin()
+        else _run_repository.list_by_owner(_current_user_id())
+    )
+    manifests = {record.run_id: record.to_dict() for record in records}
+    if OUTPUT_DIR.exists():
+        for path in sorted(OUTPUT_DIR.glob("labeled_*.csv"), reverse=True):
+            owner = _output_owner(path.name)
+            if not _current_user_is_admin() and (not owner or owner.get("id") != _current_user_id()):
+                continue
+            run_id = (owner or {}).get("run_id") or path.stem.removeprefix("labeled_")
+            legacy_data = {
+                "schema_version": 0,
+                "run_id": run_id,
+                "status": "historical",
+                "completed_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(path.stat().st_mtime)),
+                "output_file": path.name,
+                "owner": {"user_id": owner.get("id"), "username": owner.get("username")} if owner else None,
+                "legacy": True,
+            }
+            manifest = manifests.get(run_id)
+            if manifest is None:
+                manifest = legacy_data
+                manifests[run_id] = manifest
+                # Migracion oportunista: una vez identificado el propietario,
+                # futuras lecturas usan RunRepository y no la tabla legacy.
+                if owner and owner.get("id") and owner.get("username"):
+                    try:
+                        migrated = RunRecord.from_dict(legacy_data)
+                        _run_repository.save(migrated)
+                        manifest = migrated.to_dict()
+                        manifests[run_id] = manifest
+                    except (OSError, ValueError) as exc:
+                        app.logger.warning("No se pudo migrar propiedad legacy de %s: %s", path.name, exc)
+            manifest["artifact_exists"] = True
+            manifest["size_kb"] = round(path.stat().st_size / 1024, 1)
+
+    visible = []
+    for manifest in manifests.values():
+        output_file = manifest.get("output_file") or ""
+        artifact_exists = bool(output_file and (OUTPUT_DIR / Path(output_file).name).exists())
+        manifest["artifact_exists"] = artifact_exists
+        if _current_user_is_admin() or _can_access_manifest(manifest) or (artifact_exists and _can_access_output(Path(output_file).name)):
+            visible.append(manifest)
+    visible.sort(key=lambda item: str(item.get("completed_at") or item.get("updated_at") or ""), reverse=True)
+    return jsonify(visible)
+
+
+@app.route("/api/runs/<run_id>", methods=["GET"])
+def api_run_detail(run_id):
+    record = _run_repository.get(run_id)
+    manifest = record.to_dict() if record else {}
+    if not record:
+        # Compatibilidad con resultados anteriores a los manifiestos.
+        for path in OUTPUT_DIR.glob("labeled_*.csv") if OUTPUT_DIR.exists() else []:
+            owner = _output_owner(path.name)
+            candidate = (owner or {}).get("run_id") or path.stem.removeprefix("labeled_")
+            if candidate == run_id:
+                manifest = {
+                    "schema_version": 0, "legacy": True, "run_id": run_id,
+                    "status": "historical", "output_file": path.name,
+                    "owner": {"user_id": owner.get("id"), "username": owner.get("username")} if owner else None,
+                }
+                break
+    if not manifest:
+        return jsonify({"error": "Ejecucion no encontrada"}), 404
+    output_file = Path(str(manifest.get("output_file", "") or "")).name
+    if not (_current_user_is_admin() or _can_access_manifest(manifest) or (output_file and _can_access_output(output_file))):
+        return jsonify({"error": "No autorizado"}), 403
+    stats = None
+    if output_file and (OUTPUT_DIR / output_file).exists():
+        response = api_output_stats(output_file)
+        if isinstance(response, tuple):
+            response_obj, status = response
+            if status == 200:
+                stats = response_obj.get_json()
+        else:
+            stats = response.get_json()
+    manifest["artifact_exists"] = bool(output_file and (OUTPUT_DIR / output_file).exists())
+    return jsonify({"manifest": manifest, "stats": stats})
 
 
 @app.route("/api/outputs/<name>", methods=["DELETE"])
@@ -3747,6 +4043,16 @@ def api_delete_output(name):
     path = OUTPUT_DIR / name
     if not path.exists():
         return jsonify({"error": "Archivo no encontrado"}), 404
+    run_state = load_run_state() or {}
+    current_output_name = Path(str(
+        run_state.get("output_path") or run_state.get("output_file") or ""
+    )).name
+    if current_output_name and current_output_name == name:
+        return jsonify({
+            "error": "Este archivo es el resultado vigente de la ejecucion actual. Archiva o limpia la ejecucion antes de eliminarlo.",
+            "code": "current_run_artifact",
+            "run_id": run_state.get("run_id"),
+        }), 409
     path.unlink()
     with _auth_db() as conn:
         conn.execute("DELETE FROM run_ownership WHERE output_file = ?", (name,))
@@ -3798,9 +4104,8 @@ def api_clear_all_outputs():
     denied = _require_admin()
     if denied:
         return denied
-    with _process_state["state_lock"]:
-        if _process_state.get("running"):
-            return jsonify({"error": "Deten la ejecucion activa antes de limpiar todo"}), 409
+    if _run_supervisor.is_active():
+        return jsonify({"error": "Deten la ejecucion activa antes de limpiar todo"}), 409
 
     import re
     files = list(OUTPUT_DIR.glob("labeled_*.csv")) if OUTPUT_DIR.exists() else []
@@ -3815,18 +4120,12 @@ def api_clear_all_outputs():
         include_claim_results=True,
     )
     _reset_current_stats()
-    with _process_state["state_lock"]:
-        _process_state["pid"] = None
-        _process_state["proc"] = None
-        _process_state["log_lines"] = []
-        _process_state["log_seq"] = 0
-        _process_state["run_log_path"] = None
-        _process_state["exit_code"] = None
-        _process_state["last_error"] = ""
-        _process_state["stop_requested"] = False
+    _run_supervisor.reset()
     with _auth_db() as conn:
         conn.execute("DELETE FROM run_ownership")
         conn.commit()
+    for record in _run_repository.list():
+        _run_repository.delete(record.run_id)
 
     return jsonify({
         "ok": True,
@@ -3838,7 +4137,7 @@ def api_clear_all_outputs():
 
 @app.route("/api/run/principle-counts", methods=["GET"])
 def api_principle_counts():
-    stats      = _process_state["current_stats"]
+    stats      = _run_metrics.snapshot()
     principles  = stats.get("principles") or []
     if not principles:
         return jsonify({"ok": False, "counts": {}, "principles": []})
@@ -3973,7 +4272,24 @@ def api_run_stats():
             except Exception as exc:
                 app.logger.warning("[run/stats] Error leyendo CSV vigente %s: %s", current_output.name, exc)
 
-    if not rows and OUTPUT_DIR.exists():
+        # Solo el checkpoint de este mismo run puede sustituir a su CSV. Nunca
+        # tomar un archivo historico distinto y presentarlo con el run_id actual.
+        if not rows:
+            checkpoint_rows, checkpoint_fieldnames, checkpoint_source = _load_checkpoint_result_rows()
+            if checkpoint_rows:
+                rows = checkpoint_rows
+                fieldnames = checkpoint_fieldnames
+                source_file = checkpoint_source or f"checkpoint:{run_state.get('run_id') or ''}"
+        if not rows:
+            return jsonify({
+                "error": "El artefacto final de esta ejecucion ya no esta disponible.",
+                "code": "artifact_missing",
+                "run_id": run_state.get("run_id"),
+            }), 410
+
+    # El ultimo CSV solo representa una vista historica cuando no existe ningun
+    # estado de ejecucion vigente al cual deba pertenecer el resultado.
+    if not rows and not run_state and OUTPUT_DIR.exists():
         csvs = sorted(OUTPUT_DIR.glob("labeled_*.csv"), reverse=True)
         if csvs:
             latest = csvs[0]
@@ -3985,15 +4301,6 @@ def api_run_stats():
                 source_file = latest.name
             except Exception as e:
                 app.logger.warning("[run/stats] Error leyendo CSV %s: %s", latest.name, e)
-
-    # Sin una ejecucion activa, el checkpoint incremental puede ser mas reciente
-    # que el CSV y se usa solo si pertenece al mismo estado y aporta mas filas.
-    if run_state_path.exists() and run_state.get("status") == "completed":
-        checkpoint_rows, checkpoint_fieldnames, checkpoint_source = _load_checkpoint_result_rows()
-        if len(checkpoint_rows) > len(rows):
-            rows = checkpoint_rows
-            fieldnames = checkpoint_fieldnames
-            source_file = checkpoint_source or "checkpoint"
 
     if not rows:
         return jsonify({"error": "No hay datos aun"}), 404
@@ -4021,6 +4328,7 @@ def api_run_stats():
         result_offset=result_offset,
     )
     payload["run_id"] = run_state.get("run_id") if run_state else None
+    payload["source_run_id"] = run_state.get("run_id") if run_state else None
     payload["run_status"] = run_state.get("status") if run_state else None
     return jsonify(payload)
 
@@ -4030,10 +4338,12 @@ def api_checkpoint_status():
     cp = CHECKPOINTS_DIR / "checkpoint.json"
     run_state_path = CHECKPOINTS_DIR / "run_state.json"
     run_state = None
+    resume_compatibility = {"applicable": False, "compatible": False}
     if run_state_path.exists():
         try:
             with open(run_state_path, "r", encoding="utf-8") as f:
                 raw_state = json.load(f)
+            resume_compatibility = _resume_compatibility(raw_state)
             summary = raw_state.get("summary", {})
             run_state = {
                 "run_id": raw_state.get("run_id"),
@@ -4073,17 +4383,19 @@ def api_checkpoint_status():
                         "last_index": claim_count - 1,
                         "claims_done": claim_count,
                         "run_state": run_state,
+                        "resume_compatibility": resume_compatibility,
                     })
-                return jsonify({"exists": False, "run_state": run_state})
+                return jsonify({"exists": False, "run_state": run_state, "resume_compatibility": resume_compatibility})
         except (OSError, json.JSONDecodeError):
             run_state = None
     if not cp.exists():
-        return jsonify({"exists": False, "run_state": run_state})
+        return jsonify({"exists": False, "run_state": run_state, "resume_compatibility": resume_compatibility})
     with open(cp) as f:
         data = json.load(f)
     return jsonify({"exists": True, "last_index": data.get("last_index", -1),
                     "claims_done": data.get("last_index", -1) + 1,
-                    "run_state": run_state})
+                    "run_state": run_state,
+                    "resume_compatibility": resume_compatibility})
 
 
 @app.route("/api/failed-queue", methods=["GET"])
@@ -4095,6 +4407,11 @@ def api_failed_queue():
             "index": item.get("index"),
             "reason": item.get("reason", "sin detalle"),
             "claim": row.get("claim") or row.get("txt") or "",
+            "arbiter_id": item.get("arbiter_id"),
+            "reason_code": item.get("reason_code") or "unknown",
+            "attempts": int(item.get("attempts", 0) or 0),
+            "created_at": item.get("created_at"),
+            "status": item.get("status") or "pending",
         })
     return jsonify(items)
 

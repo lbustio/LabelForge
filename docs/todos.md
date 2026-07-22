@@ -6,6 +6,20 @@ registran en `bitacora.md`; el estado necesario para retomar el proyecto vive en
 
 Ultima revision: 2026-07-18.
 
+## Programa de reconstruccion arquitectonica
+
+- [x] Aprobar la linea base y arquitectura objetivo de `docs/architecture/`.
+- [x] Resolver ADR-0001: se adopto instalacion local de una sola instancia por
+  workspace, con un run activo y puertos reemplazables.
+- [x] Cuantificar escala objetivo: hasta 100000 filas, un run activo y entre 3
+  y 15 arbitros, siempre en numero impar; retencion y limites operativos
+  configurables.
+- [x] Aprobar ADR-0002: SQLite para estado operacional transaccional y
+  filesystem para datasets, modelos, logs y artefactos.
+- [ ] Crear un checkpoint Git intencional del trabajo actual antes de Fase 1.
+- [ ] Ejecutar Fase 1: packaging/toolchain, configuracion tipada, composition
+  root y eliminacion de efectos secundarios de imports.
+
 ## Bloqueantes inmediatos
 
 - [ ] Ejecutar el dataset de investigacion completo y conservar en `output/`,

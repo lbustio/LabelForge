@@ -391,36 +391,47 @@
 <!-- ============================================================ -->
 <div class="card-dark accent-panel accent-emerald mb-4">
   <div class="d-flex justify-content-between align-items-center mb-3">
-    <div class="card-header-label mb-0"><i class="bi bi-activity me-1"></i>Control de ejecucion</div>
-    <div class="d-flex align-items-center gap-2">
-      <span class="status-dot idle" id="status-dot"></span>
-      <span class="small" id="status-text" style="color:#94a3b8">Inactivo</span>
+    <div>
+      <div class="card-header-label mb-1"><i class="bi bi-activity me-1"></i>Control de ejecucion</div>
+      <div class="small text-secondary" id="run-identity">Ninguna ejecucion seleccionada</div>
+    </div>
+    <div class="text-end">
+      <div class="d-flex align-items-center justify-content-end gap-2">
+        <span class="status-dot idle" id="status-dot"></span>
+        <span class="fw-semibold" id="status-text" style="color:#94a3b8">Sin ejecucion</span>
+      </div>
+      <div class="small text-secondary mt-1" id="run-state-reason"></div>
     </div>
   </div>
   <div class="row g-3 align-items-end">
     <div class="col-md-4">
-      <button id="btn-start" class="btn btn-primary btn-lg w-100" disabled onclick="startRun().catch(e=>{appendLog('[ERROR interno] '+e.message,'error');showToast('Error interno: '+e.message,'error');})">
-        <span class="spinner-border spinner-border-sm me-2"></span>Sincronizando
-      </button>
+      <div class="d-grid gap-2">
+        <button id="btn-start" class="btn btn-primary btn-lg w-100" disabled onclick="startRun().catch(e=>{appendLog('[ERROR interno] '+e.message,'error');showToast('Error interno: '+e.message,'error');})">
+          <span class="spinner-border spinner-border-sm me-2"></span>Sincronizando
+        </button>
+        <button type="button" id="btn-stop" class="btn btn-danger w-100" disabled>
+          <i class="bi bi-stop-fill me-1"></i>Detener ejecucion
+        </button>
+      </div>
     </div>
     <div class="col-md-8">
       <div class="row g-2">
         <div class="col-4">
-          <div class="metric-mini accent-emerald text-center">
-            <div class="metric-value" id="stat-processed">-</div>
-            <div class="metric-label" id="stat-processed-label">Consolidadas OK</div>
+          <div class="metric-mini accent-blue text-center">
+            <div class="metric-value" id="stat-closed">-</div>
+            <div class="metric-label">Entradas cerradas</div>
           </div>
         </div>
         <div class="col-4">
-          <div class="metric-mini accent-amber text-center">
-            <div class="metric-value" id="stat-failed">-</div>
-            <div class="metric-label" id="stat-failed-label">Consolidadas fallidas</div>
+          <div class="metric-mini accent-emerald text-center">
+            <div class="metric-value" id="stat-successful">-</div>
+            <div class="metric-label">Consolidadas OK</div>
           </div>
         </div>
         <div class="col-4">
           <div class="metric-mini accent-rose text-center">
-            <div class="metric-value" id="stat-errors">-</div>
-            <div class="metric-label">Incidentes recientes</div>
+            <div class="metric-value" id="stat-failed">-</div>
+            <div class="metric-label">Fallidas definitivas</div>
           </div>
         </div>
       </div>
@@ -444,16 +455,7 @@
             <div id="pb-total-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#7c3aed,#8b5cf6);border-radius:999px;transition:width .4s ease"></div>
           </div>
         </div>
-        <div id="pb-arbiter-work" class="mt-2" style="display:none">
-          <div class="d-flex justify-content-between align-items-baseline mb-1">
-            <span class="small text-secondary" id="pb-arbiter-label">Pasadas de arbitros</span>
-            <span class="small fw-semibold" id="pb-arbiter-text" style="color:#34d399">-</span>
-          </div>
-          <div style="height:7px;background:#1e2234;border-radius:999px;overflow:hidden">
-            <div id="pb-arbiter-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#059669,#34d399);border-radius:999px;transition:width .4s ease"></div>
-          </div>
-          <div class="small text-secondary mt-1" id="pb-arbiter-global">-</div>
-        </div>
+        <div class="small text-secondary mt-2" id="objective-breakdown"></div>
       </div>
     </div>
   </div>
@@ -472,36 +474,31 @@
         </button>
       </div>
       <div class="log-box" id="log-box"></div>
-      <div class="mt-3 flex-shrink-0">
-        <button type="button" id="btn-stop" class="btn btn-danger w-100" disabled>
-          <i class="bi bi-stop-fill me-1"></i>Detener ejecucion
-        </button>
-      </div>
     </div>
   </div>
   <div class="col-xl-5">
     <div class="card-dark accent-panel accent-blue mb-3" id="live-stats-panel">
       <div class="d-flex justify-content-between align-items-center mb-3">
-        <div class="card-header-label mb-0"><i class="bi bi-speedometer2 me-1"></i>Estado en vivo</div>
+        <div class="card-header-label mb-0"><i class="bi bi-speedometer2 me-1"></i>Estado operativo</div>
         <span class="badge bg-primary-subtle text-primary border border-primary" id="live-source">Sin ejecucion activa</span>
       </div>
       <div class="row g-2 mb-3">
         <div class="col-sm-4 col-6">
           <div class="metric-mini accent-emerald text-center">
-            <div class="metric-value"><span id="live-health" class="health-pill health-warn">Listo</span></div>
-            <div class="metric-label" id="live-health-detail">Salud</div>
+            <div class="metric-value"><span id="live-health" class="health-pill health-warn">Sin ejecucion</span></div>
+            <div class="metric-label" id="live-health-detail">Estado operativo</div>
           </div>
         </div>
         <div class="col-sm-4 col-6">
           <div class="metric-mini accent-blue text-center">
             <div class="metric-value" id="live-progress">-</div>
-            <div class="metric-label" id="live-progress-pct">Progreso</div>
+            <div class="metric-label" id="live-progress-pct">Evaluaciones</div>
           </div>
         </div>
         <div class="col-sm-4 col-6">
           <div class="metric-mini accent-cyan text-center">
             <div class="metric-value" id="live-eta">-</div>
-            <div class="metric-label">ETA</div>
+            <div class="metric-label">ETA estimada</div>
           </div>
         </div>
         <div class="col-sm-4 col-6">
@@ -519,7 +516,7 @@
         <div class="col-sm-4 col-6">
           <div class="metric-mini accent-rose text-center">
             <div class="metric-value" id="live-attention">-</div>
-            <div class="metric-label">Fallidas / en cola</div>
+            <div class="metric-label">Fallidas / reintentos</div>
           </div>
         </div>
       </div>
@@ -529,15 +526,15 @@
     <div class="card-dark accent-panel accent-rose mb-3">
       <div class="d-flex justify-content-between align-items-center mb-2">
         <div class="card-header-label mb-0">
-          <i class="bi bi-exclamation-triangle me-1"></i>Incidentes operativos recientes
+          <i class="bi bi-exclamation-triangle me-1"></i>Incidentes de la ejecucion
           <i class="bi bi-info-circle ms-1" style="color:#64748b;font-size:.72rem;cursor:help" title="Advertencias y errores observados en la actividad reciente cargada. Un incidente no implica necesariamente que una entrada haya fallado."></i>
         </div>
         <div class="d-flex align-items-center gap-2">
           <span class="badge bg-danger-subtle text-danger border border-danger" id="errors-count">0</span>
-          <button class="btn btn-sm btn-outline-secondary py-0 px-2" id="btn-view-errors" onclick="openErrorsModal()" title="Ver lista completa de errores" style="font-size:.7rem;display:none">Ver todo</button>
+          <button class="btn btn-sm btn-outline-secondary py-0 px-2" id="btn-view-errors" onclick="openErrorsModal()" title="Ver lista completa de incidentes" style="font-size:.7rem;display:none">Ver todo</button>
         </div>
       </div>
-      <div id="errors-list" class="small text-secondary" style="max-height:200px;overflow-y:auto">Sin errores detectados.</div>
+      <div id="errors-list" class="small text-secondary" style="max-height:200px;overflow-y:auto">Sin incidentes activos.</div>
     </div>
     <div class="card-dark accent-panel accent-amber">
       <div class="d-flex justify-content-between align-items-center mb-2">
@@ -559,7 +556,7 @@
 <!-- FILA 3.5: Dashboard de graficas en vivo                       -->
 <!-- ============================================================ -->
 <div class="card-dark accent-panel accent-violet mb-4" id="live-dashboard-panel">
-  <div class="card-header-label"><i class="bi bi-graph-up-arrow me-1"></i>Dashboard en vivo</div>
+  <div class="card-header-label"><i class="bi bi-graph-up-arrow me-1"></i>Rendimiento de la ejecucion</div>
   <div class="row g-3 mb-3">
     <div class="col-lg-6">
       <div class="chart-box">
@@ -572,7 +569,7 @@
         <div class="chart-box-title" id="chart-principles-title">Distribucion de principios (consensos consolidados)</div>
         <div class="chart-pending-overlay" id="overlay-principles">
           <div class="po-icon"><i class="bi bi-hourglass-split"></i></div>
-          <div id="overlay-principles-msg">Inicia un proceso para ver datos en vivo</div>
+          <div id="overlay-principles-msg">Inicia una ejecucion para generar datos</div>
         </div>
         <canvas id="chart-principles" height="120"></canvas>
       </div>
@@ -584,9 +581,17 @@
 <!-- FILA 4: Resumen del resultado guardado                        -->
 <!-- ============================================================ -->
 <div class="card-dark accent-panel accent-emerald mb-4" id="stats-panel" style="display:none">
-  <div class="d-flex justify-content-between align-items-center mb-3">
-    <div class="card-header-label mb-0"><i class="bi bi-bar-chart me-1"></i>Resumen del ultimo resultado guardado</div>
-    <span class="badge bg-success-subtle text-success border border-success" id="stats-source"></span>
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div class="card-header-label mb-0" id="stats-panel-title"><i class="bi bi-bar-chart me-1"></i>Resumen de resultados</div>
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <span class="badge bg-success-subtle text-success border border-success" id="stats-source"></span>
+      <a class="btn btn-sm btn-success" id="btn-download-labeled" href="#" download style="display:none">
+        <i class="bi bi-download me-1"></i>Descargar dataset etiquetado
+      </a>
+      <a class="btn btn-sm btn-outline-info" id="btn-open-run-analysis" href="{{ url_for('page_history') }}" style="display:none">
+        <i class="bi bi-graph-up me-1"></i>Abrir analisis completo
+      </a>
+    </div>
   </div>
   <div class="row g-2 mb-3">
     <div class="col-md-2 col-6">
@@ -598,7 +603,7 @@
     <div class="col-md-2 col-6">
       <div class="metric-mini accent-blue text-center">
         <div class="metric-value" id="stats-total-rows">-</div>
-        <div class="metric-label">Filas guardadas</div>
+        <div class="metric-label">Filas en el artefacto</div>
       </div>
     </div>
     <div class="col-md-2 col-6">
@@ -616,7 +621,7 @@
     <div class="col-md-2 col-6">
       <div class="metric-mini accent-amber text-center">
         <div class="metric-value" id="stats-tpr">-</div>
-        <div class="metric-label">Tokens / fila consolidada</div>
+        <div class="metric-label">Tokens / resultado cerrado</div>
       </div>
     </div>
     <div class="col-md-2 col-6">
@@ -627,8 +632,9 @@
     </div>
   </div>
   <div id="stats-arbiters-table"></div>
-  <div id="paper-summary-panel" class="mt-4"></div>
-  <div id="agreement-panel" class="mt-4"></div>
+  <div class="small text-secondary mt-3">
+    Este panel conserva solo indicadores operativos. El acuerdo, los principios, los arbitros y los recursos comparativos se consultan en el analisis de la ejecucion.
+  </div>
 </div>
 
 <!-- ============================================================ -->
@@ -636,11 +642,11 @@
 <!-- ============================================================ -->
 <div class="card-dark accent-panel accent-cyan mb-4" id="results-panel" style="display:none">
   <div class="d-flex justify-content-between align-items-center mb-3">
-    <div class="card-header-label mb-0"><i class="bi bi-table me-1"></i>Resultados y calidad - tabla completa</div>
+    <div class="card-header-label mb-0"><i class="bi bi-table me-1"></i>Muestra operativa de resultados</div>
     <span class="badge bg-info-subtle text-info border border-info" id="stats-results-count"></span>
   </div>
   <div class="text-secondary small mb-2">
-    Incluye consenso, acuerdo observado, unanimidad/division por principio, votos y justificaciones por arbitro, tokens de entrada/salida, llamadas y tiempos.
+    Vista paginada para verificar que la salida se esta formando correctamente. El analisis completo queda asociado al run en Historial.
   </div>
   <div class="d-flex flex-wrap align-items-center gap-2 mb-3" id="results-controls"></div>
   <div id="stats-results-table"></div>
@@ -670,11 +676,10 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script>
-let statsOK = 0, statsFailed = 0, statsErrors = 0;
 let runErrors = [];
 let queuedClaims = [];
-let lastArbErrors = {};
 let latestLiveStats = null;
+let latestDashboard = null;
 let _lastSeenClaimRow = null;
 let _statsRefreshDebounce = null;
 let chartDonut = null;
@@ -688,14 +693,12 @@ let chartAgreementQuality = null;
 let chartAgreementKappa = null;
 const latencyHistory = {};
 const latencyHistoryCounts = {};
-const speedHistory   = [];
 const LATENCY_MAX_POINTS = 60;
-const SPEED_MAX_POINTS   = 60;
 let checkpointProcessedRows = 0;
 let checkpointTotalRows = 0;
 let checkpointArbiterEvaluations = 0;
 let resultsOffset = 0;
-let resultsPageSize = 'all';
+let resultsPageSize = 25;
 let statsRefreshTimer = null;
 let principleCountsTimer = null;
 let runSyncTimer = null;
@@ -713,7 +716,6 @@ let backendLogSeqSeen = new Set();
 let runStateHydrated = false;
 let authoritativeRunning = false;
 let runStartedAtMs = 0;
-let lastStatsActivitySnapshot = '';
 let runWasActive = false;
 let latestAgreementData = null;
 let currentRunLogActive = false;
@@ -798,8 +800,16 @@ function updateLimitExplanation() {
 
 // ---------- punto de control ----------
 async function loadCheckpoint() {
-  const cp = await fetch(APP_BASE + '/api/checkpoint/status').then(r => r.json());
   const area = document.getElementById('checkpoint-area');
+  let cp;
+  try {
+    const response = await fetch(APP_BASE + '/api/checkpoint/status');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    cp = await response.json();
+  } catch (error) {
+    area.innerHTML = `<span class="text-danger small"><i class="bi bi-wifi-off me-1"></i>No se pudo actualizar el checkpoint: ${escapeHtml(error.message)}</span>`;
+    return;
+  }
   const runState = cp.run_state;
 
   if (!cp.exists || !runState) {
@@ -819,6 +829,7 @@ async function loadCheckpoint() {
 
   const isPaused = runState.status === 'paused';
   const isCompleted = runState.status === 'completed';
+  const resumeCheck = cp.resume_compatibility || {applicable:false, compatible:false};
   const stateIcon = isPaused
     ? 'bi-pause-circle text-warning'
     : isCompleted
@@ -830,13 +841,6 @@ async function loadCheckpoint() {
       ? 'Resultado final generado'
       : 'Punto de control disponible';
   const stateLabelClass = isPaused ? 'text-warning' : isCompleted ? 'text-success' : 'text-info';
-  const resumeBtn = isPaused
-    ? `<button class="btn btn-sm btn-primary mt-2" onclick="document.getElementById(\'btn-start\').click()">
-         <i class="bi bi-play-fill me-1"></i>Reanudar esta ejecucion
-       </button>`
-    : '';
-  const icon = isPaused ? 'bi-pause-circle text-warning' : 'bi-bookmark-check text-info';
-  const label = isPaused ? 'Ejecucion pausada' : 'Punto de control disponible';
 
   area.innerHTML = `
     <div class="p-3 rounded" style="background:#0a0c14;border:1px solid #2d3148">
@@ -853,10 +857,10 @@ async function loadCheckpoint() {
             <div class="mb-1"><span class="text-secondary">Consolidadas OK:</span> ${formatNumber(runState.successful_rows || 0)}  -  <span class="text-secondary">Consolidadas fallidas:</span> ${formatNumber(runState.failed_rows || 0)}</div>
             ${runState.execution_order === 'arbiter_major' ? `<div class="mb-1"><span class="text-secondary">Evaluaciones de arbitro guardadas:</span> <strong>${formatNumber(runState.arbiter_evaluations_saved ?? runState.arbiter_votes_saved ?? 0)}</strong> / ${formatNumber(runState.arbiter_evaluations_total ?? runState.arbiter_votes_total ?? 0)}</div>` : ''}
             ${runState.pause_kind ? `<div class="mb-1"><span class="text-secondary">Motivo pausa:</span> <span class="text-danger">${escapeHtml(runState.pause_kind)}</span> - ${escapeHtml(runState.pause_reason || '')}</div>` : ''}
+            ${isPaused ? `<div class="mb-1"><span class="text-secondary">Compatibilidad:</span> <span class="${resumeCheck.compatible ? 'text-success' : 'text-danger'}">${resumeCheck.compatible ? 'Se puede reanudar' : 'No se puede reanudar'}</span> - ${escapeHtml(resumeCheck.reason || '')}</div>` : ''}
             <div><span class="text-secondary">Ultima actualizacion:</span> ${escapeHtml(runState.updated_at || '')}</div>
             ${runState.output_file ? `<div class="mt-1"><span class="text-secondary">${isCompleted ? 'CSV final' : 'Salida prevista'}:</span> ${escapeHtml(runState.output_file)}</div>` : ''}
           </div>
-          ${resumeBtn}
         </div>
         <button class="btn btn-sm btn-danger-soft" onclick="clearCheckpoint()" title="Limpiar punto de control">
           <i class="bi bi-x-circle"></i>
@@ -871,7 +875,7 @@ async function clearCheckpoint() {
   const res = await fetch(APP_BASE + '/api/checkpoint/clear', {method: 'POST'});
   const data = await res.json();
   if (!res.ok) { showToast(data.error || 'No se pudo limpiar el punto de control', 'error'); return; }
-  await loadCheckpoint();
+  await refreshRunWorkspace();
   showToast('Punto de control limpiado');
 }
 
@@ -920,7 +924,9 @@ async function loadConfigSummary() {
       chartSpeed.data.datasets[0].label = `${itemLabel}s/min`;
       chartSpeed.update('none');
     }
-  } catch(e) { /* silencio */ }
+  } catch(e) {
+    document.getElementById('config-resumen').innerHTML = `<span class="text-danger"><i class="bi bi-wifi-off me-1"></i>Configuracion no disponible: ${escapeHtml(e.message)}</span>`;
+  }
 }
 
 function hwBadge(arbId) {
@@ -957,8 +963,16 @@ function hwBadge(arbId) {
 
 // ---------- resultados ----------
 async function loadOutputs() {
-  const files = await fetch(APP_BASE + '/api/outputs').then(r => r.json());
   const el = document.getElementById('outputs-table');
+  let files;
+  try {
+    const response = await fetch(APP_BASE + '/api/outputs');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    files = await response.json();
+  } catch (error) {
+    el.innerHTML = `<span class="text-danger small"><i class="bi bi-wifi-off me-1"></i>No se pudieron actualizar los archivos: ${escapeHtml(error.message)}</span>`;
+    return;
+  }
   if (!files.length) {
     el.innerHTML = '<span class="text-secondary small">Sin resultados todavia.</span>';
     syncDynamicControlLocks();
@@ -1010,21 +1024,20 @@ async function deleteOutput(name) {
     const r = await fetch(`${APP_BASE}/api/outputs/${name}`, { method: 'DELETE' });
     if (!r.ok) { const e = await r.json(); throw new Error(e.error); }
     showToast(`Archivo "${decoded}" eliminado`, 'success');
-    await loadOutputs();
-    await loadRunStats();
+    await refreshRunWorkspace();
   } catch (err) {
     showToast(`Error: ${err.message}`, 'error');
   }
 }
 
-async function loadFailedQueue() {
-  const items = await fetch(APP_BASE + '/api/failed-queue').then(r => r.json()).catch(() => []);
-  queuedClaims = items.map(item => ({
-    claim: item.index,
-    arbiter: 'cola persistida',
-    reason: item.reason || item.claim || 'sin detalle',
-  }));
-  renderRunLists();
+async function refreshRunWorkspace() {
+  await syncRunSnapshot();
+  await Promise.all([
+    loadCheckpoint(),
+    loadOutputs(),
+    loadRunStats(),
+    loadPrincipleCounts(),
+  ]);
 }
 
 // ---------- run ----------
@@ -1041,6 +1054,10 @@ async function startRun() {
     setRunning(true);
     return;
   }
+  if (!_datasetConfigRevision || _datasetSelectionDirty) {
+    showToast('Confirma el archivo, la hoja y la columna antes de iniciar.', 'warn');
+    return;
+  }
   runStopPending = false;
   document.getElementById('btn-start').disabled = true;
   appendLog('[Iniciando...] Enviando solicitud al servidor...', 'ok');
@@ -1053,16 +1070,13 @@ async function startRun() {
   backendLogSeen = new Set();
   backendLogSeqSeen = new Set();
   runSyncSeq = 0;
-  lastStatsActivitySnapshot = '';
   currentRunLogActive = false;
   runStartedAtMs = Date.now();
-  statsOK = 0; statsFailed = 0; statsErrors = 0;
   runErrors = [];
   queuedClaims = [];
-  lastArbErrors = {};
   latestLiveStats = null;
+  latestDashboard = null;
   _lastSeenClaimRow = null;
-  speedHistory.splice(0, speedHistory.length);
   Object.keys(latencyHistory).forEach(key => delete latencyHistory[key]);
   Object.keys(latencyHistoryCounts).forEach(key => delete latencyHistoryCounts[key]);
   resultsOffset = 0;
@@ -1071,7 +1085,7 @@ async function startRun() {
   resetLiveStats();
   document.getElementById('stats-panel').style.display = 'none';
   document.getElementById('results-panel').style.display = 'none';
-  document.getElementById('paper-summary-panel').innerHTML = '';
+  document.getElementById('btn-open-run-analysis').style.display = 'none';
   document.getElementById('stats-arbiters-table').innerHTML = '';
   document.getElementById('stats-results-table').innerHTML = '';
 
@@ -1079,7 +1093,7 @@ async function startRun() {
   const limit = limitEl ? limitEl.value.trim() : '';
   const parsedLimit = Math.max(parseInt(limit, 10) || 0, 0);
 
-  const body = {};
+  const body = {dataset_revision: _datasetConfigRevision};
   if (parsedLimit > 0) body.limit = parsedLimit;
 
   appendLog(`[Iniciando...] POST /api/run/start limite=${parsedLimit > 0 ? parsedLimit : 'todo el dataset'}`, null);
@@ -1096,7 +1110,7 @@ async function startRun() {
     const msg = `Error de red al iniciar: ${e.message}`;
     showToast(msg, 'error');
     appendLog(`[ERROR RED] ${msg}`, 'error');
-    runErrors.push({kind: 'Red', detail: msg, time: new Date().toLocaleTimeString()});
+    runErrors.push({kind: 'Red', detail: msg, severity: 'error', time: new Date().toLocaleTimeString()});
     renderRunLists();
     await syncRunSnapshot();
     setRunning(authoritativeRunning);
@@ -1113,7 +1127,7 @@ async function startRun() {
     issues.forEach(issue => {
       const line = `[preflight] ${issue}`;
       appendLog(line, 'error');
-      runErrors.push({kind: 'Preflight', detail: line, time: new Date().toLocaleTimeString()});
+      runErrors.push({kind: 'Preflight', detail: line, severity: 'error', time: new Date().toLocaleTimeString()});
     });
     renderRunLists();
     updateStats();
@@ -1167,7 +1181,6 @@ function appendBackendLog(line, type = null) {
   if (backendLogSeen.has(text)) return;
   backendLogSeen.add(text);
   appendLog(text, type);
-  parseStats(text);
 }
 
 function appendSequencedBackendLog(entry) {
@@ -1178,29 +1191,6 @@ function appendSequencedBackendLog(entry) {
   const text = String(entry.line || '').trim();
   if (!text) return;
   appendLog(text);
-  parseStats(text);
-}
-
-function appendStatsActivity(data) {
-  const source = data.source_file || 'sin archivo';
-  const total = Number(data.total_rows || 0);
-  const ok = Number(data.successful_rows || 0);
-  const failed = Number(data.failed_rows || 0);
-  const pending = Number(data.pending_rows || 0);
-  const processed = Number(data.processed_rows ?? (ok + failed));
-  const tokens = Number(data.total_tokens_global || 0);
-  const arbiterWork = Number(data.arbiter_work_completed || 0);
-  const arbiterWorkTotal = Number(data.arbiter_work_total || 0);
-  const snapshot = `${source}|${total}|${ok}|${failed}|${pending}|${tokens}|${arbiterWork}|${arbiterWorkTotal}`;
-  if (snapshot === lastStatsActivitySnapshot) return;
-  lastStatsActivitySnapshot = snapshot;
-
-  appendBackendLog(
-    `[stats] ${processed} entradas consolidadas de ${total} (${ok} OK, ${failed} fallidas, ${pending} pendientes)`
-      + (data.execution_order === 'arbiter_major' ? ` / ${arbiterWork} de ${arbiterWorkTotal} evaluaciones de arbitro calculadas` : '')
-      + ` desde ${source}`,
-    processed > 0 || arbiterWork > 0 ? 'ok' : 'info'
-  );
 }
 
 function applyRunSnapshot(snapshot) {
@@ -1211,18 +1201,13 @@ function applyRunSnapshot(snapshot) {
     // contadores pertenecen a otro proceso y no deben mezclarse con el nuevo.
     backendLogSeen = new Set();
     backendLogSeqSeen = new Set();
-    lastStatsActivitySnapshot = '';
     currentRunLogActive = false;
     runSyncSeq = 0;
-    statsOK = 0;
-    statsFailed = 0;
-    statsErrors = 0;
     runErrors = [];
     queuedClaims = [];
-    lastArbErrors = {};
     latestLiveStats = null;
+    latestDashboard = null;
     _lastSeenClaimRow = null;
-    speedHistory.splice(0, speedHistory.length);
     Object.keys(latencyHistory).forEach(key => delete latencyHistory[key]);
     Object.keys(latencyHistoryCounts).forEach(key => delete latencyHistoryCounts[key]);
     clearLog();
@@ -1255,6 +1240,9 @@ function applyRunSnapshot(snapshot) {
   const justFinished = runWasActive && !running;
   runWasActive = running;
   setRunning(running);
+  if (snapshot.dashboard) {
+    renderDashboard(snapshot.dashboard);
+  }
 
   if (justFinished) {
     stopRunSync();
@@ -1306,68 +1294,7 @@ function stopRunSync() {
   }
 }
 
-// ---------- barras de progreso dual ----------
-function updateProgressBars(processed, total, datasetTotal, data = {}) {
-  const container = document.getElementById('progress-bars');
-  if (!container) return;
-  if (!processed && !total) return;
-  container.style.display = '';
-
-  const isArbiterMajor = data.execution_order === 'arbiter_major';
-  const arbiterDone = Number(data.arbiter_work_completed || 0);
-  const arbiterTotal = Number(data.arbiter_work_total || 0);
-  const evaluatedRows = Number(data.evaluated_rows || 0);
-  const primaryDone = isArbiterMajor ? arbiterDone : processed;
-  const primaryTotal = isArbiterMajor ? arbiterTotal : total;
-  const coverageDone = isArbiterMajor ? evaluatedRows : processed;
-  const limitLabel = document.getElementById('pb-limit-label');
-  const totalLabel = document.getElementById('pb-total-label');
-  if (limitLabel) limitLabel.textContent = isArbiterMajor
-    ? 'Trabajo global de los arbitros'
-    : 'Filas cerradas (consolidadas, fallidas u omitidas)';
-  if (totalLabel) totalLabel.textContent = isArbiterMajor
-    ? 'Entradas que ya recibieron al menos un analisis'
-    : 'Cobertura del dataset completo';
-
-  const pctLimit = primaryTotal > 0 ? (primaryDone / primaryTotal) * 100 : 0;
-  document.getElementById('pb-limit-text').textContent =
-    `${formatNumber(primaryDone)} de ${primaryTotal ? formatNumber(primaryTotal) : '-'} ${isArbiterMajor ? 'evaluaciones' : ''}  -  ${pctLimit.toFixed(1)}%`;
-  document.getElementById('pb-limit-bar').style.width = `${Math.min(pctLimit, 100)}%`;
-
-  const pctTotal = datasetTotal > 0 ? (coverageDone / datasetTotal) * 100 : 0;
-  document.getElementById('pb-total-text').textContent = datasetTotal > 0
-    ? `${formatNumber(coverageDone)} de ${formatNumber(datasetTotal)}  -  ${pctTotal.toFixed(2)}%`
-    : `${formatNumber(coverageDone)} de -  -  -`;
-  document.getElementById('pb-total-bar').style.width = datasetTotal > 0
-    ? `${Math.min(pctTotal, 100)}%` : '0%';
-
-  const arbiterContainer = document.getElementById('pb-arbiter-work');
-  if (arbiterContainer) arbiterContainer.style.display = isArbiterMajor ? '' : 'none';
-  if (isArbiterMajor) {
-    const done = Number(data.arbiter_work_completed || 0);
-    const workTotal = Number(data.arbiter_work_total || 0);
-    const passDone = Number(data.current_pass_completed || 0);
-    const passWorkTotal = Number(data.current_pass_work_total || data.eligible_rows || 0);
-    const passPct = passWorkTotal > 0 ? passDone * 100 / passWorkTotal : 0;
-    const globalPct = workTotal > 0 ? done * 100 / workTotal : 0;
-    const passPos = Number(data.current_pass_position || 0);
-    const passTotal = Number(data.current_pass_total || 0);
-    const arbId = data.current_arbiter_id || 'preparando';
-    document.getElementById('pb-arbiter-label').textContent =
-      `Arbitro activo: ${arbId} (pasada ${passPos || '-'} de ${passTotal || '-'})`;
-    document.getElementById('pb-arbiter-text').textContent =
-      `${formatNumber(passDone)} de ${formatNumber(passWorkTotal)} entradas - ${passPct.toFixed(1)}%`;
-    document.getElementById('pb-arbiter-bar').style.width = `${Math.min(passPct, 100)}%`;
-    const global = document.getElementById('pb-arbiter-global');
-    if (global) global.textContent =
-      `Resultado consolidado disponible: ${formatNumber(processed)} de ${formatNumber(total)} filas. `
-      + (processed === 0 && done > 0
-        ? 'No es progreso cero: la consolidacion espera los votos pendientes; el trabajo realizado se muestra arriba.'
-        : `Trabajo computacional acumulado: ${globalPct.toFixed(1)}%.`);
-  }
-}
-
-// ---------- graficas en tiempo real ----------
+// ---------- graficas de ejecucion ----------
 function initCharts() {
   if (typeof Chart === 'undefined') return;
   Chart.defaults.color = '#64748b';
@@ -1484,7 +1411,7 @@ function hideChartOverlay(id) {
   if (el) el.style.display = 'none';
 }
 function checkpointPendingMsg(processedRows) {
-  if (!processedRows) return 'Inicia un proceso para ver datos en vivo';
+  if (!processedRows) return 'Inicia una ejecucion para generar datos';
   const faltan = checkpointEvery - (processedRows % checkpointEvery || checkpointEvery);
   const extra = faltan > 0
     ? `<br><span style="font-size:.73rem;color:#334155">faltan ${faltan} entr${faltan === 1 ? 'ada' : 'adas'} para el proximo checkpoint</span>`
@@ -1502,9 +1429,6 @@ function updateCharts(data) {
   const processed = Number(data.processed_rows || 0);
   const pending   = Math.max(0, total - processed);
   const isArbiterMajor = data.execution_order === 'arbiter_major';
-  const activityCompleted = isArbiterMajor
-    ? Number(data.arbiter_work_completed || 0)
-    : processed;
 
   // 1. En arbiter-major el progreso útil son evaluaciones, no consensos que
   // todavía no pueden existir durante las primeras pasadas.
@@ -1550,26 +1474,7 @@ function updateCharts(data) {
     }
   }
 
-  // 3. Velocidad claims/min
-  const lastSpeedPoint = speedHistory[speedHistory.length - 1];
-  if (!lastSpeedPoint || lastSpeedPoint.p !== activityCompleted) {
-    speedHistory.push({ t: Date.now(), p: activityCompleted });
-  }
-  if (speedHistory.length > SPEED_MAX_POINTS) speedHistory.shift();
-  if (chartSpeed && speedHistory.length >= 2) {
-    const speeds = [];
-    for (let i = 1; i < speedHistory.length; i++) {
-      const dt = (speedHistory[i].t - speedHistory[i-1].t) / 60000;
-      const dp = speedHistory[i].p - speedHistory[i-1].p;
-      speeds.push(dt > 0 ? Math.max(0, dp / dt) : 0);
-    }
-    chartSpeed.data.labels = Array.from({ length: speeds.length }, (_, i) => i + 1);
-    chartSpeed.data.datasets[0].data = speeds;
-    chartSpeed.data.datasets[0].label = isArbiterMajor ? 'evaluaciones/min' : `${itemLabel}s/min`;
-    chartSpeed.update('none');
-  }
-
-  // 4. Tokens por arbitro (apilado) - tokens_in/tokens_out son alias de prompt/completion_tokens
+  // 3. Tokens por arbitro (apilado) - tokens_in/tokens_out son alias de prompt/completion_tokens
   if (chartTokens && arbEntries.length) {
     chartTokens.data.labels = arbEntries.map(([id]) => arbiterLogMeta[id]?.name || id);
     chartTokens.data.datasets[0].data = arbEntries.map(([, s]) => Number(s.tokens_in  || s.prompt_tokens  || 0));
@@ -1577,7 +1482,7 @@ function updateCharts(data) {
     chartTokens.update('none');
   }
 
-  // 5. Tasa de exito por arbitro - ok=calls (llamadas exitosas) / processed_rows
+  // 4. Tasa de exito por arbitro - ok=calls (llamadas exitosas) / processed_rows
   const totalProcessed = Number(data.processed_rows || 0);
   if (chartSuccess && arbEntries.length && totalProcessed > 0) {
     chartSuccess.data.labels = arbEntries.map(([id]) => arbiterLogMeta[id]?.name || id);
@@ -1591,7 +1496,7 @@ function updateCharts(data) {
     showChartOverlay('success', checkpointPendingMsg(totalProcessed));
   }
 
-  // 6. Latencia rango min/prom/max
+  // 5. Latencia rango min/prom/max
   if (chartLatRange && arbEntries.length) {
     chartLatRange.data.labels = arbEntries.map(([id]) => arbiterLogMeta[id]?.name || id);
     chartLatRange.data.datasets[0].data = arbEntries.map(([, s]) => Number(s.latency_min_s || 0));
@@ -1640,8 +1545,7 @@ async function archiveAllOutputs() {
     if (data.archived === 0) {
       if ((data.cleared || []).length) {
         resetExecutionUi('[archivo] No habia CSVs, pero se limpiaron temporales de ejecucion.');
-        await loadCheckpoint();
-        await loadOutputs();
+        await refreshRunWorkspace();
         showToast('Temporales de ejecucion limpiados', 'success');
       } else {
         showToast('No hay archivos para archivar', 'warn');
@@ -1649,8 +1553,7 @@ async function archiveAllOutputs() {
     } else {
       showToast(`${data.archived} archivos movidos a ${escapeHtml(data.archive_dir)}`, 'success');
       resetExecutionUi(`[archivo] ${data.archived} archivos archivados. Interfaz lista para una nueva ejecucion.`);
-      await loadCheckpoint();
-      await loadOutputs();
+      await refreshRunWorkspace();
     }
   } catch (err) {
     showToast(`Error: ${err.message}`, 'error');
@@ -1679,7 +1582,7 @@ async function clearAllExecutions() {
     if (!res.ok) throw new Error(data.error || 'Error al limpiar las ejecuciones');
 
     resetExecutionUi('[limpieza] Ejecuciones eliminadas. Interfaz lista para comenzar desde cero.');
-    await Promise.all([loadCheckpoint(), loadOutputs(), loadRunStats()]);
+    await refreshRunWorkspace();
     showToast(`${data.deleted_outputs || 0} ejecuciones eliminadas`, 'success');
   } catch (err) {
     showToast(`Error: ${err.message}`, 'error');
@@ -1725,56 +1628,233 @@ function clearLog() {
   document.getElementById('log-box').innerHTML = '';
 }
 
-function parseStats(line) {
-  const envelope = parseLogEnvelope(line);
-  const eventTime = envelope.timestamp ? envelope.timestamp.split(/\s+/)[1].replace(',', '.') : new Date().toLocaleTimeString();
-  const isErrorLine = ['ERROR', 'CRITICAL'].includes(envelope.level) || /^\[(?:ERROR|FATAL)\b/i.test(envelope.payload);
-  const isWarnError = envelope.level === 'WARNING' && /Rate limiter|fallo|429/i.test(envelope.payload);
-  const arbError = line.match(/\[(arb[^\]]+)\]\s+\[([^\]]+)\]\s+(.+)/);
-  if (arbError) {
-    lastArbErrors[arbError[1]] = `${arbError[2]}: ${arbError[3]}`;
+function updateStats() {
+  const progress = latestDashboard?.progress || {};
+  document.getElementById('stat-closed').textContent = formatNumber(progress.closed_rows || 0);
+  document.getElementById('stat-successful').textContent = formatNumber(progress.successful_rows || 0);
+  document.getElementById('stat-failed').textContent = formatNumber(progress.failed_rows || 0);
+}
+
+function renderDashboard(dashboard) {
+  latestDashboard = dashboard;
+  const identity = dashboard.identity || {};
+  const lifecycle = dashboard.lifecycle || {};
+  const progress = dashboard.progress || {};
+  const resources = dashboard.resources || {};
+  const runId = identity.run_id || 'sin run';
+  const input = identity.input_file ? ` / ${identity.input_file}` : '';
+  document.getElementById('run-identity').textContent = `${runId}${input}`;
+  document.getElementById('status-text').textContent = lifecycle.label || 'Sin ejecucion';
+  document.getElementById('run-state-reason').textContent = lifecycle.reason || '';
+
+  const dot = document.getElementById('status-dot');
+  dot.className = `status-dot ${['running', 'stopping'].includes(lifecycle.code) ? 'running' : 'idle'}`;
+  const toneColors = {success:'#34d399', info:'#38bdf8', warning:'#fbbf24', danger:'#fb7185', secondary:'#94a3b8'};
+  document.getElementById('status-text').style.color = toneColors[lifecycle.tone] || toneColors.secondary;
+
+  document.getElementById('stat-closed').textContent = formatNumber(progress.closed_rows || 0);
+  document.getElementById('stat-successful').textContent = formatNumber(progress.successful_rows || 0);
+  document.getElementById('stat-failed').textContent = formatNumber(progress.failed_rows || 0);
+
+  const health = document.getElementById('live-health');
+  const healthDetail = document.getElementById('live-health-detail');
+  health.textContent = lifecycle.label || 'Sin ejecucion';
+  health.className = `health-pill ${lifecycle.tone === 'danger' ? 'health-bad' : lifecycle.tone === 'success' || lifecycle.tone === 'info' ? 'health-ok' : 'health-warn'}`;
+  healthDetail.textContent = lifecycle.reason || 'Estado operativo';
+
+  const evalDone = Number(progress.evaluations_completed || 0);
+  const evalTotal = Number(progress.evaluations_total || 0);
+  document.getElementById('live-progress').textContent = `${formatNumber(evalDone)} / ${evalTotal ? formatNumber(evalTotal) : '-'}`;
+  document.getElementById('live-progress-pct').textContent = evalTotal
+    ? `${(evalDone * 100 / evalTotal).toFixed(1)}% evaluaciones`
+    : `${formatNumber(progress.closed_rows || 0)} entradas cerradas`;
+  document.getElementById('live-total-tokens').textContent = formatNumber(resources.total_tokens || 0);
+  document.getElementById('live-attention').textContent = `${formatNumber(progress.failed_rows || 0)} / ${formatNumber(dashboard.queue?.count || 0)}`;
+  const resultTitle = document.getElementById('stats-panel-title');
+  if (resultTitle) {
+    const availability = dashboard.results?.availability || 'none';
+    const label = availability === 'final' ? 'Resultado final de esta ejecucion'
+      : availability === 'partial' ? 'Resultados parciales de esta ejecucion'
+      : availability === 'missing' ? 'Resultado de esta ejecucion no disponible'
+      : 'Resumen de resultados';
+    resultTitle.innerHTML = `<i class="bi bi-bar-chart me-1"></i>${label}`;
+  }
+  const downloadButton = document.getElementById('btn-download-labeled');
+  const resultFile = dashboard.results?.source_file || identity.output_file || '';
+  const downloadable = dashboard.results?.availability === 'final'
+    && Boolean(dashboard.results?.artifact_exists)
+    && Boolean(resultFile);
+  if (downloadable) {
+    downloadButton.href = `${APP_BASE}/outputs/${encodeURIComponent(resultFile)}`;
+    downloadButton.setAttribute('download', resultFile);
+    downloadButton.style.display = '';
+    downloadButton.title = 'Descarga el CSV con consensos, votos, justificaciones y metricas disponibles de cada arbitro.';
+  } else {
+    downloadButton.removeAttribute('download');
+    downloadButton.style.display = 'none';
   }
 
-  const queued = line.match(/\[(?:claim|entrada)\s+(\d+)\]\s+Arbitro\s+(\S+)\s+fallo\s+-\s+(?:claim encolado|entrada encolada)(?:\s+-\s+(.+))?/);
-  if (queued) {
-    const reason = queued[3] || lastArbErrors[queued[2]] || 'No se encontro detalle previo del error.';
-    if (!queuedClaims.some(q => String(q.claim) === String(queued[1]))) {
-      queuedClaims.push({claim: queued[1], arbiter: queued[2], reason});
-    }
-    renderRunLists();
-    return;
+  const startButton = document.getElementById('btn-start');
+  const resumeBlocked = Boolean(dashboard.resume?.applicable && !dashboard.resume?.compatible);
+  startButton.disabled = !runStateHydrated || Boolean(authoritativeRunning) || !_datasetConfigRevision || _datasetSelectionDirty || resumeBlocked;
+  if (runStateHydrated && !authoritativeRunning) {
+    startButton.innerHTML = lifecycle.can_resume
+      ? '<i class="bi bi-play-fill me-1"></i>Reanudar ejecucion'
+      : '<i class="bi bi-play-fill me-1"></i>Iniciar';
   }
+  renderStructuredIncidents(dashboard.incidents || []);
+  renderDashboardQueue(dashboard.queue || {});
+  renderDashboardArbiters(dashboard.arbiters || []);
+  renderObjectiveProgress(dashboard.objective || {});
+  renderBackendPerformance(dashboard.performance || {});
+}
 
-  if (line.includes('Fallo definitivo')) {
-    runErrors.push({kind: 'Fallo definitivo', detail: line, time: eventTime});
-    renderRunLists();
-  } else if (isErrorLine || isWarnError) {
-    statsErrors++;
-    runErrors.push({kind: line.includes('429') || line.includes('RESOURCE_EXHAUSTED') ? 'Rate limit / cuota' : 'Error', detail: line, time: eventTime});
-    renderRunLists();
-    updateStats();
+function renderBackendPerformance(performance) {
+  const etaEl = document.getElementById('live-eta');
+  const projectedEl = document.getElementById('live-projected-tokens');
+  const confidenceLabels = {high:'alta', medium:'media', low:'baja', insufficient:'insuficiente'};
+  if (Number(performance.remaining || 0) === 0 && Number(performance.total || 0) > 0) {
+    etaEl.textContent = 'Completado';
+  } else if (!performance.ready) {
+    etaEl.textContent = 'Datos insuficientes';
+  } else {
+    const low = formatDurationFromMinutes(performance.eta_minutes_low);
+    const high = formatDurationFromMinutes(performance.eta_minutes_high);
+    etaEl.textContent = low === high ? low : `${low} - ${high}`;
+  }
+  etaEl.title = `${formatNumber(performance.sample_count || 0)} intervalos / confianza ${confidenceLabels[performance.confidence] || performance.confidence || 'insuficiente'}${performance.rate_per_minute ? ` / mediana ${formatMetric(performance.rate_per_minute, 2)} por minuto` : ''}`;
+
+  const tokens = performance.tokens || {};
+  projectedEl.textContent = tokens.projected === null || tokens.projected === undefined
+    ? 'Datos insuficientes'
+    : formatNumber(tokens.projected);
+  projectedEl.title = `Base: ${formatNumber(tokens.basis_completed || 0)} ${performance.unit === 'entry' ? 'entradas' : 'evaluaciones'} / confianza ${confidenceLabels[tokens.confidence] || tokens.confidence || 'insuficiente'}`;
+
+  const speedTitle = document.getElementById('chart-speed-title');
+  if (speedTitle) {
+    const unit = performance.unit === 'entry' ? `${itemLabel}s` : 'evaluaciones de arbitro';
+    speedTitle.textContent = performance.ready
+      ? `Velocidad reciente: ${formatMetric(performance.rate_per_minute, 2)} ${unit}/min (${confidenceLabels[performance.confidence]})`
+      : `Velocidad de ${unit}: esperando muestras suficientes`;
+  }
+  if (chartSpeed) {
+    const history = performance.history || [];
+    chartSpeed.data.labels = history.map(item => {
+      const date = new Date(item.timestamp);
+      return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    });
+    chartSpeed.data.datasets[0].data = history.map(item => Number(item.rate_per_minute || 0));
+    chartSpeed.data.datasets[0].label = performance.unit === 'entry' ? `${itemLabel}s/min` : 'evaluaciones/min';
+    chartSpeed.update('none');
   }
 }
 
-function updateStats() {
-  const isArbiterMajor = latestLiveStats?.execution_order === 'arbiter_major';
-  const processedLabel = document.getElementById('stat-processed-label');
-  const failedLabel = document.getElementById('stat-failed-label');
-  if (isArbiterMajor) {
-    const done = Number(latestLiveStats.arbiter_work_completed || 0);
-    const total = Number(latestLiveStats.arbiter_work_total || 0);
-    const pct = total > 0 ? done * 100 / total : 0;
-    document.getElementById('stat-processed').textContent = `${pct.toFixed(1)}%`;
-    document.getElementById('stat-failed').textContent = formatNumber(latestLiveStats.evaluated_rows || 0);
-    if (processedLabel) processedLabel.textContent = `${formatNumber(done)} / ${formatNumber(total)} evaluaciones`;
-    if (failedLabel) failedLabel.textContent = `Entradas con analisis de ${formatNumber(latestLiveStats.dataset_total_rows || latestLiveStats.total_rows || 0)}`;
-  } else {
-    document.getElementById('stat-processed').textContent = statsOK;
-    document.getElementById('stat-failed').textContent = statsFailed;
-    if (processedLabel) processedLabel.textContent = 'Consolidadas OK';
-    if (failedLabel) failedLabel.textContent = 'Consolidadas fallidas';
+function renderObjectiveProgress(objective) {
+  const target = Number(objective.target_rows || 0);
+  const eligible = Number(objective.analyzable_rows || 0);
+  const evalDone = Number(objective.evaluations_total || 0) - Number(objective.evaluations_pending || 0);
+  const evalTotal = Number(objective.evaluations_total || 0);
+  const closed = Number(objective.analyzable_closed_rows || 0);
+  const container = document.getElementById('progress-bars');
+  if (!container) return;
+  if (!target) {
+    container.style.display = 'none';
+    document.getElementById('objective-breakdown').textContent = '';
+    return;
   }
-  document.getElementById('stat-errors').textContent = statsErrors;
+  container.style.display = '';
+
+  document.getElementById('pb-limit-label').textContent = 'Evaluaciones de arbitro requeridas';
+  document.getElementById('pb-limit-text').textContent = `${formatNumber(evalDone)} de ${formatNumber(evalTotal)} - ${evalTotal ? (evalDone * 100 / evalTotal).toFixed(1) : '0.0'}%`;
+  document.getElementById('pb-limit-bar').style.width = `${evalTotal ? Math.min(100, evalDone * 100 / evalTotal) : 0}%`;
+
+  document.getElementById('pb-total-label').textContent = 'Entradas analizables con resultado cerrado';
+  document.getElementById('pb-total-text').textContent = `${formatNumber(closed)} de ${formatNumber(eligible)} - ${eligible ? (closed * 100 / eligible).toFixed(1) : '0.0'}%`;
+  document.getElementById('pb-total-bar').style.width = `${eligible ? Math.min(100, closed * 100 / eligible) : 0}%`;
+
+  const parts = [
+    `${formatNumber(objective.dataset_rows)} filas en dataset`,
+    `${formatNumber(target)} dentro del objetivo`,
+    `${formatNumber(eligible)} analizables`,
+    `${formatNumber(objective.non_analyzable_rows || 0)} vacias/no analizables`,
+    `${formatNumber(objective.reused_closed_rows || 0)} resultados reutilizados`,
+    `${formatNumber(objective.evaluations_reused || 0)} evaluaciones reutilizadas`,
+    `${formatNumber(objective.analyzable_pending_rows || 0)} entradas analizables pendientes`,
+  ];
+  document.getElementById('objective-breakdown').textContent = parts.join(' / ');
+}
+
+function renderDashboardQueue(queue) {
+  queuedClaims = (queue.items || []).map(item => ({
+    claim: item.row_index,
+    arbiter: item.arbiter_id || 'sin arbitro identificado',
+    reason: `${item.reason_code && item.reason_code !== 'unknown' ? `[${item.reason_code}] ` : ''}${item.message || 'sin detalle'}${item.attempts ? ` / ${item.attempts} intento(s)` : ''}`,
+    created_at: item.created_at || '',
+    status: item.status || 'pending',
+  }));
+  if (!queuedClaims.length && Number(queue.count || 0) > 0) {
+    queuedClaims = (queue.row_indices || []).map(index => ({
+      claim: index,
+      arbiter: 'sin detalle persistido',
+      reason: 'Checkpoint creado con una version anterior.',
+      status: 'pending',
+    }));
+  }
+  renderRunLists();
+}
+
+function renderDashboardArbiters(arbiters) {
+  const target = document.getElementById('live-arbiters-table');
+  if (!target) return;
+  if (!arbiters.length) {
+    target.innerHTML = '<div class="small text-secondary">Los arbitros apareceran al preparar una ejecucion.</div>';
+    return;
+  }
+  const labels = {active:'Procesando', waiting:'En espera', completed:'Completado', blocked:'Bloqueado'};
+  const tones = {active:'info', waiting:'secondary', completed:'success', blocked:'danger'};
+  const rows = arbiters.map(arb => {
+    const pending = Math.max(0, Number(arb.evaluations_target || 0) - Number(arb.evaluations_completed || 0));
+    const tone = tones[arb.status] || 'secondary';
+    return `<tr>
+      <td>
+        <div class="fw-semibold">${escapeHtml(arb.name || arb.id)}</div>
+        <div class="small text-secondary">${escapeHtml(arb.id)}</div>
+        ${arb.last_error ? `<div class="small text-danger mt-1" title="${escapeHtml(arb.last_error)}">${escapeHtml(arb.reason_code || 'error')}: ${escapeHtml(dsTrunc(arb.last_error, 80))}</div>` : ''}
+      </td>
+      <td><span class="badge bg-${tone}-subtle text-${tone} border border-${tone}">${labels[arb.status] || arb.status}</span></td>
+      <td>${formatNumber(arb.evaluations_completed)} / ${formatNumber(arb.evaluations_target)}${arb.evaluations_reused ? `<div class="small text-secondary">${formatNumber(arb.evaluations_reused)} reutilizadas</div>` : ''}</td>
+      <td>${formatNumber(pending)}</td>
+      <td>${formatNumber(arb.model_calls)}</td>
+      <td>${formatNumber(arb.total_tokens)}</td>
+      <td>${formatSeconds(arb.latency_avg_s)}</td>
+    </tr>`;
+  }).join('');
+  target.innerHTML = `<div class="small text-secondary mb-2">Progreso individual por arbitro</div>
+    <div style="overflow-x:auto"><table class="table table-dark table-sm mb-0" style="font-size:.78rem">
+      <thead><tr><th>Arbitro</th><th>Estado</th><th>Evaluaciones</th><th>Pendientes</th><th>Llamadas</th><th>Tokens</th><th>Latencia prom.</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
+
+function renderStructuredIncidents(incidents) {
+  runErrors = runErrors.filter(item => item.source !== 'dashboard');
+  if (!incidents.length) {
+    renderRunLists();
+    return;
+  }
+  const known = new Set(runErrors.map(item => item.id).filter(Boolean));
+  incidents.forEach(item => {
+    if (known.has(item.id)) return;
+    runErrors.push({
+      id: item.id,
+      source: 'dashboard',
+      kind: item.kind || 'Incidente',
+      detail: item.message || '',
+      severity: item.severity || 'warning',
+      time: latestDashboard?.identity?.updated_at || '',
+    });
+  });
+  renderRunLists();
 }
 
 function resetLiveStats() {
@@ -1784,7 +1864,7 @@ function resetLiveStats() {
     health.textContent = 'Listo';
     health.className = 'health-pill health-warn';
   }
-  document.getElementById('live-health-detail').textContent = 'Salud';
+  document.getElementById('live-health-detail').textContent = 'Estado operativo';
   document.getElementById('live-total-tokens').textContent = '0';
   document.getElementById('live-progress').textContent = '0/-';
   document.getElementById('live-progress-pct').textContent = 'Progreso';
@@ -1795,7 +1875,6 @@ function resetLiveStats() {
   document.getElementById('live-last-claim').innerHTML = '';
   Object.keys(latencyHistory).forEach(k => delete latencyHistory[k]);
   Object.keys(latencyHistoryCounts).forEach(k => delete latencyHistoryCounts[k]);
-  speedHistory.length = 0;
   if (chartDonut)      { chartDonut.data.datasets[0].data = [0,0,1]; chartDonut.update('none'); }
   if (chartLatency)    { chartLatency.data.labels = []; chartLatency.data.datasets = []; chartLatency.update('none'); }
   if (chartSpeed)      { chartSpeed.data.labels = []; chartSpeed.data.datasets[0].data = []; chartSpeed.update('none'); }
@@ -1803,19 +1882,15 @@ function resetLiveStats() {
   if (chartSuccess)    { chartSuccess.data.labels = []; chartSuccess.data.datasets[0].data = []; chartSuccess.update('none'); }
   if (chartLatRange)   { chartLatRange.data.labels = []; chartLatRange.data.datasets.forEach(d => d.data = []); chartLatRange.update('none'); }
   if (chartPrinciples) { chartPrinciples.data.labels = []; chartPrinciples.data.datasets.forEach(d => d.data = []); chartPrinciples.update('none'); }
-  showChartOverlay('principles', 'Inicia un proceso para ver datos en vivo');
+  showChartOverlay('principles', 'Inicia una ejecucion para generar datos');
 }
 
 function resetExecutionUi(message = '') {
-  statsOK = 0;
-  statsFailed = 0;
-  statsErrors = 0;
   runErrors = [];
   queuedClaims = [];
-  lastArbErrors = {};
   latestLiveStats = null;
+  latestDashboard = null;
   _lastSeenClaimRow = null;
-  speedHistory.splice(0, speedHistory.length);
   Object.keys(latencyHistory).forEach(key => delete latencyHistory[key]);
   Object.keys(latencyHistoryCounts).forEach(key => delete latencyHistoryCounts[key]);
   checkpointProcessedRows = 0;
@@ -1824,7 +1899,6 @@ function resetExecutionUi(message = '') {
   resultsOffset = 0;
   backendLogSeen = new Set();
   backendLogSeqSeen = new Set();
-  lastStatsActivitySnapshot = '';
   currentRunLogActive = false;
   latestAgreementData = null;
   if (chartAgreementQuality) { chartAgreementQuality.destroy(); chartAgreementQuality = null; }
@@ -1841,26 +1915,24 @@ function resetExecutionUi(message = '') {
   if (progressBars) progressBars.style.display = 'none';
   const limitBar = document.getElementById('pb-limit-bar');
   const totalBar = document.getElementById('pb-total-bar');
-  const arbiterBar = document.getElementById('pb-arbiter-bar');
-  const arbiterWork = document.getElementById('pb-arbiter-work');
   const limitText = document.getElementById('pb-limit-text');
   const totalText = document.getElementById('pb-total-text');
   if (limitBar) limitBar.style.width = '0%';
   if (totalBar) totalBar.style.width = '0%';
-  if (arbiterBar) arbiterBar.style.width = '0%';
-  if (arbiterWork) arbiterWork.style.display = 'none';
   if (limitText) limitText.textContent = '-';
   if (totalText) totalText.textContent = '-';
 
   const statsPanel = document.getElementById('stats-panel');
   const resultsPanel = document.getElementById('results-panel');
   const arbitersTable = document.getElementById('stats-arbiters-table');
-  const paperSummaryPanel = document.getElementById('paper-summary-panel');
+  const analysisButton = document.getElementById('btn-open-run-analysis');
+  const downloadButton = document.getElementById('btn-download-labeled');
   const resultsTable = document.getElementById('stats-results-table');
   if (statsPanel) statsPanel.style.display = 'none';
   if (resultsPanel) resultsPanel.style.display = 'none';
   if (arbitersTable) arbitersTable.innerHTML = '';
-  if (paperSummaryPanel) paperSummaryPanel.innerHTML = '';
+  if (analysisButton) analysisButton.style.display = 'none';
+  if (downloadButton) downloadButton.style.display = 'none';
   if (resultsTable) resultsTable.innerHTML = '';
 
   const outputs = document.getElementById('outputs-table');
@@ -1874,7 +1946,7 @@ function renderLiveStats(data) {
   latestLiveStats = data;
 
   const source = data.source_file || data.run_id || 'ejecucion actual';
-  const state = data.active ? 'en vivo' : data.finished ? 'finalizado' : data.pause_kind ? 'pausado' : 'preparado';
+  const state = data.active ? 'actualizandose' : data.finished ? 'finalizado' : data.pause_kind ? 'pausado' : 'preparado';
   document.getElementById('live-source').textContent = `${source} / ${state}`;
 
   const processed = Number(data.processed_rows || 0);
@@ -1882,24 +1954,11 @@ function renderLiveStats(data) {
   const ok = Number(data.successful_rows || 0);
   const failed = Number(data.failed_rows || 0);
   const totalTokens = Number(data.total_tokens_global || 0);
-  if (Array.isArray(data.queued_indices)) {
-    const activeQueue = new Set(data.queued_indices.map(String));
-    queuedClaims = queuedClaims.filter(item => activeQueue.has(String(item.claim)));
-    renderRunLists();
-  }
-  const queued = Number(data.queued_rows ?? queuedClaims.length ?? 0);
   const isArbiterMajor = data.execution_order === 'arbiter_major';
   const arbiterWork = Number(data.arbiter_work_completed || 0);
   const arbiterWorkTotal = Number(data.arbiter_work_total || 0);
   const activityCompleted = isArbiterMajor ? arbiterWork : processed;
   const activityTotal = isArbiterMajor ? arbiterWorkTotal : total;
-  const speed = recentItemsPerMinute(activityCompleted);
-  const remaining = Math.max(0, activityTotal - activityCompleted);
-  const etaReady = speedHistory.length >= 4;
-  const eta = etaReady && speed > 0 && remaining > 0 ? remaining / speed : null;
-  const projectedTokens = activityCompleted > 0 && activityTotal > 0
-    ? Math.round((totalTokens / activityCompleted) * activityTotal)
-    : totalTokens;
 
   const datasetTotal = Number(data.dataset_total_rows || 0);
   const pctLimit   = total > 0 ? ((processed / total) * 100).toFixed(1) : null;
@@ -1914,41 +1973,7 @@ function renderLiveStats(data) {
       ? `${activityTotal > 0 ? (activityCompleted * 100 / activityTotal).toFixed(1) : '0.0'}% evaluaciones / ${formatNumber(processed)} filas cerradas`
       : (pctLimit !== null ? `${pctLimit}% limite` : 'Progreso') +
         (pctDataset !== null ? `  -  ${pctDataset}% total` : '');
-  document.getElementById('live-eta').textContent = remaining === 0
-    ? 'Completado'
-    : eta === null ? 'Calculando...' : formatDurationFromMinutes(eta);
-  document.getElementById('live-projected-tokens').textContent = formatNumber(projectedTokens);
-  document.getElementById('live-attention').textContent = `${formatNumber(failed)} / ${formatNumber(queued)}`;
 
-  const health = document.getElementById('live-health');
-  const healthDetail = document.getElementById('live-health-detail');
-  if (health && healthDetail) {
-    const failedRate = processed > 0 ? failed / processed : 0;
-    let label = 'OK';
-    let cls = 'health-pill health-ok';
-    let detail = `${formatNumber(ok)} OK`;
-    if (data.pause_kind || failedRate >= 0.1 || queued > 0) {
-      label = 'Atencion';
-      cls = 'health-pill health-bad';
-      detail = queued > 0 ? `${formatNumber(queued)} reintentos` : `${formatPercent(failedRate * 100)} fallos`;
-    } else if (data.finished) {
-      label = 'Completado';
-      cls = 'health-pill health-ok';
-      detail = `${formatNumber(ok)} OK`;
-    } else if (data.active && processed === 0 && arbiterWork > 0) {
-      label = 'Procesando';
-      cls = 'health-pill health-ok';
-      detail = `${formatNumber(arbiterWork)} evaluaciones`;
-    } else if (failed > 0 || !data.active) {
-      label = 'Vigilar';
-      cls = 'health-pill health-warn';
-      detail = failed > 0 ? `${formatNumber(failed)} fallos` : state;
-    }
-    health.textContent = label;
-    health.className = cls;
-    healthDetail.textContent = detail;
-  }
-  updateProgressBars(processed, total, datasetTotal, data);
   updateCharts(data);
 
   const speedTitle = document.getElementById('chart-speed-title');
@@ -1984,8 +2009,6 @@ function renderLiveStats(data) {
     }
   }
 
-  statsOK = ok;
-  statsFailed = failed;
   updateStats();
 
   const arbiters = Object.entries(data.arbiters || {});
@@ -2107,24 +2130,6 @@ function formatDurationFromMinutes(minutes) {
   const hours = Math.floor(n / 60);
   const mins = Math.round(n % 60);
   return mins ? `${hours}h ${mins}m` : `${hours}h`;
-}
-
-function recentItemsPerMinute(currentProcessed = null) {
-  const points = speedHistory.slice();
-  if (currentProcessed !== null) points.push({ t: Date.now(), p: Number(currentProcessed || 0) });
-  if (points.length < 2) return 0;
-  const rates = [];
-  for (let i = Math.max(1, points.length - 20); i < points.length; i++) {
-    const dt = (points[i].t - points[i - 1].t) / 60000;
-    const dp = points[i].p - points[i - 1].p;
-    if (dt > 0 && dp > 0) rates.push(dp / dt);
-  }
-  if (!rates.length) return 0;
-  // La mediana evita que la carga inicial del modelo convierta una sola
-  // evaluacion lenta en una ETA absurda para todo el dataset.
-  rates.sort((a, b) => a - b);
-  const mid = Math.floor(rates.length / 2);
-  return rates.length % 2 ? rates[mid] : (rates[mid - 1] + rates[mid]) / 2;
 }
 
 function formatMetric(value, decimals = 3) {
@@ -2624,12 +2629,12 @@ function renderRunLists() {
 
   const errorsEl = document.getElementById('errors-list');
   if (!runErrors.length) {
-    errorsEl.innerHTML = 'Sin errores detectados.';
+    errorsEl.innerHTML = 'Sin incidentes activos.';
   } else {
     errorsEl.innerHTML = `${runErrors.slice(-30).reverse().map(e => `
-      <div class="p-2 mb-2 rounded" style="background:#130b10;border:1px solid #3f1f2a">
+      <div class="p-2 mb-2 rounded" style="background:${e.severity === 'error' ? '#130b10' : '#151107'};border:1px solid ${e.severity === 'error' ? '#3f1f2a' : '#49350e'}">
         <div class="d-flex justify-content-between">
-          <span class="text-danger fw-semibold">${escapeHtml(e.kind)}</span>
+          <span class="${e.severity === 'error' ? 'text-danger' : 'text-warning'} fw-semibold">${escapeHtml(e.kind)}</span>
           <span class="text-secondary" style="font-size:.68rem">${e.time || ''}</span>
         </div>
         <div class="text-secondary" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.76rem;word-break:break-word">${escapeHtml(e.detail)}</div>
@@ -2664,12 +2669,12 @@ function populateErrorsModal() {
   const body = document.getElementById('errors-modal-body');
   document.getElementById('errors-modal-count').textContent = runErrors.length;
   if (!runErrors.length) {
-    body.innerHTML = '<p class="text-secondary small">Sin errores detectados.</p>';
+    body.innerHTML = '<p class="text-secondary small">Sin incidentes activos.</p>';
   } else {
     body.innerHTML = runErrors.map((e, i) => `
-      <div class="p-2 mb-2 rounded" style="background:#130b10;border:1px solid #3f1f2a">
+      <div class="p-2 mb-2 rounded" style="background:${e.severity === 'error' ? '#130b10' : '#151107'};border:1px solid ${e.severity === 'error' ? '#3f1f2a' : '#49350e'}">
         <div class="d-flex justify-content-between">
-          <span class="text-danger fw-semibold">#${i+1}  -  ${escapeHtml(e.kind)}</span>
+          <span class="${e.severity === 'error' ? 'text-danger' : 'text-warning'} fw-semibold">#${i+1}  -  ${escapeHtml(e.kind)}</span>
           <span class="text-secondary" style="font-size:.68rem">${e.time || ''}</span>
         </div>
         <div class="text-secondary" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.76rem;word-break:break-word">${escapeHtml(e.detail)}</div>
@@ -2714,7 +2719,7 @@ function syncDynamicControlLocks() {
 
 function setRunning(running) {
   const startButton = document.getElementById('btn-start');
-  startButton.disabled = !runStateHydrated || running;
+  startButton.disabled = !runStateHydrated || running || !_datasetConfigRevision || _datasetSelectionDirty;
   startButton.innerHTML = !runStateHydrated
     ? '<span class="spinner-border spinner-border-sm me-2"></span>Sincronizando'
     : running
@@ -2762,33 +2767,73 @@ async function loadRunStats(keepPosition = false) {
     limit: resultPageLimitParam(),
     offset: String(resultsOffset),
   });
-  const res = await fetch(`${APP_BASE}/api/run/stats?${params.toString()}`);
+  let res;
+  try {
+    res = await fetch(`${APP_BASE}/api/run/stats?${params.toString()}`);
+  } catch (error) {
+    document.getElementById('stats-panel').style.display = 'none';
+    document.getElementById('btn-open-run-analysis').style.display = 'none';
+    document.getElementById('btn-download-labeled').style.display = 'none';
+    document.getElementById('results-panel').style.display = '';
+    document.getElementById('stats-results-count').textContent = 'Sin actualizar';
+    document.getElementById('stats-results-table').innerHTML = `<div class="p-3 rounded text-danger" style="background:#150b0e;border:1px solid #5c1a22"><i class="bi bi-wifi-off me-2"></i>No se pudieron actualizar los resultados: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
   if (res.status === 202) {
     const pending = await res.json();
     document.getElementById('stats-panel').style.display = 'none';
+    document.getElementById('btn-open-run-analysis').style.display = 'none';
+    document.getElementById('btn-download-labeled').style.display = 'none';
     document.getElementById('results-panel').style.display = '';
     document.getElementById('stats-results-count').textContent = 'Esperando consensos';
     document.getElementById('results-controls').innerHTML = '';
     document.getElementById('stats-results-table').innerHTML = `
       <div class="p-3 rounded text-secondary" style="background:#0a0c14;border:1px solid #2d3148">
         <i class="bi bi-hourglass-split me-2 text-info"></i>${escapeHtml(pending.message || 'Esperando entradas consolidadas.')}
-        ${pending.execution_order === 'arbiter_major' ? '<div class="small mt-2">Las evaluaciones y recursos avanzan en Estado en vivo; esta tabla aparecera al completar los arbitros necesarios.</div>' : ''}
+        ${pending.execution_order === 'arbiter_major' ? '<div class="small mt-2">Las evaluaciones y recursos avanzan en Estado operativo; esta tabla aparecera al completar los arbitros necesarios.</div>' : ''}
       </div>`;
     return;
   }
   if (!res.ok) {
+    if (res.status === 410) {
+      const missing = await res.json();
+      document.getElementById('stats-panel').style.display = 'none';
+      document.getElementById('btn-open-run-analysis').style.display = 'none';
+      document.getElementById('btn-download-labeled').style.display = 'none';
+      document.getElementById('results-panel').style.display = '';
+      document.getElementById('stats-results-count').textContent = 'Resultado no disponible';
+      document.getElementById('results-controls').innerHTML = '';
+      document.getElementById('stats-results-table').innerHTML = `
+        <div class="p-3 rounded text-danger" style="background:#150b0e;border:1px solid #5c1a22">
+          <i class="bi bi-file-earmark-x me-2"></i>${escapeHtml(missing.error || 'El artefacto final ya no existe.')}
+        </div>`;
+      return;
+    }
     if (res.status === 404) {
       document.getElementById('stats-panel').style.display = 'none';
       document.getElementById('results-panel').style.display = 'none';
-      document.getElementById('paper-summary-panel').innerHTML = '';
+      document.getElementById('btn-open-run-analysis').style.display = 'none';
+      document.getElementById('btn-download-labeled').style.display = 'none';
       document.getElementById('stats-results-table').innerHTML = '';
+      return;
     }
+    let failure = {};
+    try { failure = await res.json(); } catch (_) {}
+    document.getElementById('stats-panel').style.display = 'none';
+    document.getElementById('btn-open-run-analysis').style.display = 'none';
+    document.getElementById('btn-download-labeled').style.display = 'none';
+    document.getElementById('results-panel').style.display = '';
+    document.getElementById('stats-results-count').textContent = `Error ${res.status}`;
+    document.getElementById('results-controls').innerHTML = '';
+    document.getElementById('stats-results-table').innerHTML = `
+      <div class="p-3 rounded text-danger" style="background:#150b0e;border:1px solid #5c1a22">
+        <i class="bi bi-exclamation-octagon me-2"></i>${escapeHtml(failure.error || 'No se pudieron cargar los resultados de esta ejecucion.')}
+      </div>`;
     return;
   }
   const data = await res.json();
   if (data.error) return;
   resultsOffset = Number(data.results_offset || 0);
-  appendStatsActivity(data);
 
   const panel = document.getElementById('stats-panel');
   panel.style.display = '';
@@ -2799,6 +2844,15 @@ async function loadRunStats(keepPosition = false) {
   document.getElementById('stats-failed-rows').textContent = formatNumber(data.failed_rows);
   document.getElementById('stats-tpr').textContent = formatNumber(data.tokens_per_processed_row || data.tokens_per_row || 0);
   document.getElementById('stats-total-latency').textContent = formatSeconds(data.total_latency_s);
+
+  const runId = data.run_id || latestDashboard?.identity?.run_id || '';
+  const analysisButton = document.getElementById('btn-open-run-analysis');
+  if (runId && ['completed', 'completed_with_issues'].includes(latestDashboard?.lifecycle?.code)) {
+    analysisButton.href = `${APP_BASE}/history/${encodeURIComponent(runId)}`;
+    analysisButton.style.display = '';
+  } else {
+    analysisButton.style.display = 'none';
+  }
 
   const arbiters = Object.entries(data.arbiters || {});
   const tbody = arbiters.map(([id, s]) => `
@@ -2835,8 +2889,6 @@ async function loadRunStats(keepPosition = false) {
     </table>
     </div>`;
 
-  renderPaperSummary(data.paper_summary);
-  renderAgreementMetrics(data.agreement);
   renderResultsTable(data);
 }
 
@@ -2846,6 +2898,19 @@ async function loadRunStats(keepPosition = false) {
 let _currentServerPath = '';
 let _savedDatasetConfig = null;
 let _datasetProfile = null;
+let _datasetConfigRevision = '';
+let _datasetSelectionDirty = true;
+
+function setDatasetSelectionDirty(dirty) {
+  _datasetSelectionDirty = Boolean(dirty);
+  const startButton = document.getElementById('btn-start');
+  if (startButton) {
+    startButton.disabled = !runStateHydrated || Boolean(authoritativeRunning) || !_datasetConfigRevision || _datasetSelectionDirty;
+  }
+  if (_datasetSelectionDirty) {
+    document.getElementById('ds-ready-banner').style.display = 'none';
+  }
+}
 
 function onDragOver(e) { e.preventDefault(); e.stopPropagation(); document.getElementById('ds-dropzone').classList.add('drag-over'); }
 function onDragLeave(e) { e.preventDefault(); e.stopPropagation(); document.getElementById('ds-dropzone').classList.remove('drag-over'); }
@@ -2853,6 +2918,9 @@ function onDrop(e) { e.preventDefault(); e.stopPropagation(); document.getElemen
 
 function onFileSelected(files) {
   if (!files?.length) return;
+  _savedDatasetConfig = null;
+  _datasetConfigRevision = '';
+  setDatasetSelectionDirty(true);
   const file = files[0];
   const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
   if (!['.csv', '.xlsx', '.xls'].includes(ext)) { showUploadError(`Formato '${ext}' no soportado. Usa .csv, .xlsx o .xls`); return; }
@@ -2960,6 +3028,7 @@ function renderDsProfile(profile) {
     colSel.value = _savedDatasetConfig.text_column;
     onColumnChange();
     showReadyBanner(_savedDatasetConfig);
+    setDatasetSelectionDirty(false);
     document.getElementById('step-3-num').className = 'ds-step-num done';
   }
 
@@ -2978,6 +3047,7 @@ function switchDsTab(tab) {
 }
 
 function onColumnChange() {
+  setDatasetSelectionDirty(true);
   const col = document.getElementById('ds-column').value;
   const detail = document.getElementById('ds-col-detail');
   if (!col || !_datasetProfile) { detail.style.display = 'none'; return; }
@@ -2996,6 +3066,7 @@ function onColumnChange() {
 
 async function onSheetChange() {
   if (!_currentServerPath) return;
+  setDatasetSelectionDirty(true);
   const sheet = document.getElementById('ds-sheet').value;
   setDsSpinner(true, 'Cargando hoja...');
   try {
@@ -3023,6 +3094,8 @@ async function confirmColumn() {
   const data = await res.json();
   if (!res.ok) { showToast(data.error || 'Error al guardar', 'error'); return; }
   _savedDatasetConfig = data;
+  _datasetConfigRevision = data.revision || '';
+  setDatasetSelectionDirty(false);
   document.getElementById('step-3-num').className = 'ds-step-num done';
   showToast('Dataset configurado. Listo para ejecutar.');
   showReadyBanner(data);
@@ -3054,6 +3127,8 @@ function resetUpload() {
   _currentServerPath = '';
   _savedDatasetConfig = null;
   _datasetProfile = null;
+  _datasetConfigRevision = '';
+  setDatasetSelectionDirty(true);
   document.getElementById('ds-upload-bar').style.display = 'none';
   document.getElementById('ds-upload-error').style.display = 'none';
   document.getElementById('ds-file-input').value = '';
@@ -3072,6 +3147,8 @@ async function loadDatasetConfig() {
     const cfg = await res.json();
     if (!res.ok || !cfg.input_file) return;
     _savedDatasetConfig = cfg;
+    _datasetConfigRevision = cfg.revision || '';
+    setDatasetSelectionDirty(false);
     _currentServerPath = cfg.input_file;
     showReadyBanner(cfg);
     setDatasetPanelCollapsed(true);
@@ -3127,14 +3204,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
 // ---------- init ----------
 initCharts();
-showChartOverlay('success',    'Inicia un proceso para ver datos en vivo');
-showChartOverlay('principles', 'Inicia un proceso para ver datos en vivo');
+showChartOverlay('success',    'Inicia una ejecucion para generar datos');
+showChartOverlay('principles', 'Inicia una ejecucion para generar datos');
 loadPrincipleCounts();
 principleCountsTimer = setInterval(loadPrincipleCounts, 15000);
 loadConfigSummary();
 loadCheckpoint();
 loadOutputs();
-loadFailedQueue();
 loadRunStats();
 syncRunSnapshot().then(snapshot => {
   if (snapshot?.running) {
@@ -3163,7 +3239,7 @@ window.addEventListener('pagehide', () => {
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body pt-3" id="errors-modal-body">
-        <p class="text-secondary small">Sin errores detectados.</p>
+        <p class="text-secondary small">Sin incidentes activos.</p>
       </div>
       <div class="modal-footer border-0">
         <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>

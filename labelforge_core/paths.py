@@ -23,6 +23,7 @@ HW_PROFILE_PATH = MODELS_DIR / "hw_profile.json"
 SECRETS_DIR = BASE_DIR / "secrets"
 LOGS_DIR = BASE_DIR / "logs"
 OUTPUT_DIR = BASE_DIR / "output"
+RUN_RECORDS_DIR = OUTPUT_DIR / ".manifests"
 CHECKPOINTS_DIR = BASE_DIR / "checkpoints"
 ARCHIVE_DIR = BASE_DIR / "archive"
 DATA_DIR = BASE_DIR / "data"
@@ -41,4 +42,3 @@ def resolve_config_file_path(path: str | Path | None) -> Path:
 def resolve_local_models_config_path() -> Path:
     """Ruta canonica del config del catalogo GGUF."""
     return LOCAL_MODELS_CONFIG_PATH
-

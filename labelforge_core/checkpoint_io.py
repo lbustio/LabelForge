@@ -25,6 +25,8 @@ FAILED_QUEUE_PATH = CHECKPOINTS_DIR / "failed_queue.jsonl"
 RUN_STATE_PATH = CHECKPOINTS_DIR / "run_state.json"
 CLAIM_RESULTS_PATH = CHECKPOINTS_DIR / "claim_results.jsonl"
 ARBITER_RESULTS_PATH = CHECKPOINTS_DIR / "arbiter_results.jsonl"
+RUN_INCIDENTS_PATH = CHECKPOINTS_DIR / "run_incidents.jsonl"
+RUN_PERFORMANCE_PATH = CHECKPOINTS_DIR / "run_performance.jsonl"
 
 
 def now_iso() -> str:
@@ -79,6 +81,8 @@ def clear_runtime_checkpoints(
         paths.append(CLAIM_RESULTS_PATH)
     if include_run_state:
         paths.append(RUN_STATE_PATH)
+        paths.append(RUN_INCIDENTS_PATH)
+        paths.append(RUN_PERFORMANCE_PATH)
 
     cleared = []
     for path in paths:
@@ -103,6 +107,81 @@ def load_run_state() -> dict:
 
 def save_run_state(state: dict) -> None:
     write_json_atomic(RUN_STATE_PATH, state)
+
+
+def record_run_incident(
+    incident_id: str,
+    *,
+    run_id: str,
+    kind: str,
+    message: str,
+    severity: str = "error",
+    status: str = "open",
+    row_index=None,
+    arbiter_id: str | None = None,
+    reason_code: str = "unknown",
+) -> None:
+    append_jsonl_durable(RUN_INCIDENTS_PATH, {
+        "id": incident_id,
+        "run_id": run_id,
+        "kind": kind,
+        "message": message,
+        "severity": severity,
+        "status": status,
+        "row_index": row_index,
+        "arbiter_id": arbiter_id,
+        "reason_code": reason_code,
+        "updated_at": now_iso(),
+    })
+
+
+def load_run_incidents(run_id: str | None = None) -> list[dict]:
+    latest = load_jsonl_latest(RUN_INCIDENTS_PATH, ("id",))
+    items = list(latest.values())
+    if run_id:
+        items = [item for item in items if str(item.get("run_id")) == str(run_id)]
+    return sorted(items, key=lambda item: str(item.get("updated_at", "")), reverse=True)
+
+
+def resolve_row_incidents(run_id: str, row_index) -> None:
+    for item in load_run_incidents(run_id):
+        if item.get("status") == "open" and str(item.get("row_index")) == str(row_index):
+            record_run_incident(
+                item["id"], run_id=run_id, kind=item.get("kind", "Incidente"),
+                message=item.get("message", ""), severity=item.get("severity", "error"),
+                status="resolved", row_index=row_index,
+                arbiter_id=item.get("arbiter_id"), reason_code=item.get("reason_code", "unknown"),
+            )
+
+
+def append_performance_sample(
+    *, run_id: str, completed: int, total: int, total_tokens: int,
+    unit: str, arbiter_id: str | None = None, timestamp: str | None = None,
+) -> None:
+    append_jsonl_durable(RUN_PERFORMANCE_PATH, {
+        "run_id": run_id,
+        "timestamp": timestamp or datetime.now().isoformat(timespec="milliseconds"),
+        "completed": int(completed),
+        "total": int(total),
+        "total_tokens": int(total_tokens),
+        "unit": unit,
+        "arbiter_id": arbiter_id,
+    })
+
+
+def load_performance_samples(run_id: str, limit: int = 2000) -> list[dict]:
+    if not RUN_PERFORMANCE_PATH.exists():
+        return []
+    samples = []
+    with open(RUN_PERFORMANCE_PATH, "r", encoding="utf-8") as f:
+        for line in f:
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if str(item.get("run_id")) == str(run_id):
+                samples.append(item)
+    return samples[-max(1, int(limit)):]
 
 
 def append_claim_result(row_index: int, record: dict, status: str = "ok") -> None:
@@ -166,16 +245,21 @@ def save_checkpoint(last_index: int, results: dict) -> None:
     log.debug("Checkpoint guardado en indice %s", last_index)
 
 
-def append_failed_queue(row_index: int, row: dict, reason: str = "") -> None:
+def append_failed_queue(row_index: int, row: dict, reason: str = "", **metadata) -> None:
     append_jsonl_durable(FAILED_QUEUE_PATH, {
         "index": row_index,
         "row": row,
         "reason": reason,
+        "created_at": metadata.get("created_at") or now_iso(),
+        "arbiter_id": metadata.get("arbiter_id"),
+        "reason_code": metadata.get("reason_code") or "unknown",
+        "attempts": int(metadata.get("attempts", 0) or 0),
+        "status": metadata.get("status") or "pending",
     })
 
 
-def append_to_failed_queue(row_index: int, row: dict, reason: str = "") -> None:
-    append_failed_queue(row_index, row, reason)
+def append_to_failed_queue(row_index: int, row: dict, reason: str = "", **metadata) -> None:
+    append_failed_queue(row_index, row, reason, **metadata)
 
 
 def load_failed_queue() -> list:

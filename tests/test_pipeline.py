@@ -468,6 +468,17 @@ class TestRunResume(unittest.TestCase):
 
         self.assertFalse(should_reuse_run_state(state, args, 10))
 
+    def test_higher_limit_can_reuse_legacy_run_state(self):
+        state = {
+            "status": "paused", "input_file": "data/input.csv",
+            "config_file": "config/arbiters_config.json", "total_rows": 10,
+        }
+        args = Namespace(
+            input="data/input.csv", config="config/arbiters_config.json", fresh=False,
+        )
+        self.assertTrue(should_reuse_run_state(state, args, 20))
+        self.assertFalse(should_reuse_run_state(state, args, 5))
+
 
 class TestProviderPreflight(unittest.TestCase):
     def test_non_local_config_does_not_require_hw_profile(self):
@@ -498,6 +509,8 @@ class TestCheckpointIO(unittest.TestCase):
                 "CLAIM_RESULTS_PATH": root / "claim_results.jsonl",
                 "ARBITER_RESULTS_PATH": root / "arbiter_results.jsonl",
                 "RUN_STATE_PATH": root / "run_state.json",
+                "RUN_INCIDENTS_PATH": root / "run_incidents.jsonl",
+                "RUN_PERFORMANCE_PATH": root / "run_performance.jsonl",
             }
             for path in paths.values():
                 path.write_text("{}", encoding="utf-8")
@@ -520,6 +533,8 @@ class TestCheckpointIO(unittest.TestCase):
                 "CLAIM_RESULTS_PATH": root / "claim_results.jsonl",
                 "ARBITER_RESULTS_PATH": root / "arbiter_results.jsonl",
                 "RUN_STATE_PATH": root / "run_state.json",
+                "RUN_INCIDENTS_PATH": root / "run_incidents.jsonl",
+                "RUN_PERFORMANCE_PATH": root / "run_performance.jsonl",
             }
 
             with mock.patch.multiple(checkpoint_io, **paths):

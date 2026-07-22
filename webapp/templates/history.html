@@ -40,15 +40,15 @@
 <div class="container-fluid py-4" style="max-width:1400px">
   <div class="mb-4">
     <h4 class="mb-0" style="color:#e2e8f0"><i class="bi bi-clock-history me-2"></i>Historial de resultados</h4>
-    <div class="text-secondary small mt-1">Selecciona un archivo para ver sus metricas detalladas.</div>
+    <div class="text-secondary small mt-1">Selecciona una ejecucion para revisar su configuracion, calidad y recursos.</div>
   </div>
 
   <div class="row g-4">
     <!-- Lista de outputs -->
     <div class="col-lg-4">
       <div class="d-flex align-items-center justify-content-between mb-2">
-        <div class="fw-semibold small text-secondary"><i class="bi bi-files me-1"></i>Archivos</div>
-        <button class="btn btn-sm btn-outline-secondary" onclick="loadOutputList()">
+        <div class="fw-semibold small text-secondary"><i class="bi bi-files me-1"></i>Ejecuciones</div>
+        <button class="btn btn-sm btn-outline-secondary" onclick="loadRunList()">
           <i class="bi bi-arrow-clockwise"></i>
         </button>
       </div>
@@ -62,7 +62,7 @@
       <div id="detail-panel">
         <div class="text-secondary text-center py-5" style="color:#4a5180!important">
           <i class="bi bi-arrow-left-circle" style="font-size:2rem"></i>
-          <div class="mt-2">Selecciona un archivo para ver sus metricas</div>
+          <div class="mt-2">Selecciona una ejecucion para ver su analisis</div>
         </div>
       </div>
     </div>
@@ -78,22 +78,24 @@ function escapeHtml(value) {
 
 const IS_ADMIN = {{ 'true' if current_user and current_user.role == 'admin' else 'false' }};
 let _outputs = [];
-let _selectedName = null;
+let _selectedRunId = null;
+const INITIAL_RUN_ID = {{ initial_run_id|tojson }};
 
-async function loadOutputList() {
+async function loadRunList() {
   const listEl = document.getElementById('output-list');
   listEl.innerHTML = '<div class="text-secondary small"><div class="spinner-border spinner-border-sm me-2"></div>Cargando...</div>';
   try {
-    _outputs = await fetch(APP_BASE + '/api/outputs').then(r => r.json());
+    _outputs = await fetch(APP_BASE + '/api/runs').then(r => r.json());
     if (!Array.isArray(_outputs) || !_outputs.length) {
-      listEl.innerHTML = '<div class="text-secondary small">No hay archivos de resultados.</div>';
+      listEl.innerHTML = '<div class="text-secondary small">No hay ejecuciones terminadas.</div>';
       return;
     }
-    listEl.innerHTML = _outputs.map(o => outputCard(o)).join('');
-    if (_selectedName) {
-      const card = document.querySelector(`[data-name="${CSS.escape(_selectedName)}"]`);
+    listEl.innerHTML = _outputs.map(o => runCard(o)).join('');
+    if (_selectedRunId) {
+      const card = document.querySelector(`[data-run-id="${CSS.escape(_selectedRunId)}"]`);
       if (card) card.classList.add('selected');
     }
+    if (INITIAL_RUN_ID && !_selectedRunId) await selectRun(INITIAL_RUN_ID, false);
   } catch(e) {
     listEl.innerHTML = `<div class="text-danger small">${escapeHtml(e.message)}</div>`;
   }
@@ -108,35 +110,61 @@ function ownerBadge(owner) {
   return `<span style="display:inline-flex;align-items:center;background:#1e2540;border:1px solid #2d3a5a;border-radius:.3rem;padding:.05rem .35rem;font-size:.65rem;color:#8899cc">${avatar}${escapeHtml(name)}</span>`;
 }
 
-function outputCard(o) {
-  const ts = o.run_timestamp || o.modified || o.name;
-  const rows = o.row_count != null ? `${o.row_count} entradas` : '';
+function runCard(o) {
+  const ts = o.completed_at || o.updated_at || o.run_id;
+  const rows = o.total_rows != null ? `${o.total_rows} entradas` : '';
   const arbs = (o.arbiters || []).length ? `${o.arbiters.length} arb.` : '';
   const prins = (o.principles || []).length ? `${o.principles.length} princ.` : '';
   const chips = [rows, arbs, prins].filter(Boolean).join(' · ');
-  return `<div class="output-card" data-name="${escapeHtml(o.name)}" onclick="selectOutput(this.dataset.name)">
+  return `<div class="output-card" data-run-id="${escapeHtml(o.run_id)}" onclick="selectRun(this.dataset.runId)">
     <div class="d-flex align-items-start justify-content-between gap-1 mb-1">
       <div class="fw-semibold small" style="color:#c8d0e8">${escapeHtml(ts)}</div>
       ${ownerBadge(o.owner)}
     </div>
-    <div class="text-secondary" style="font-size:.72rem">${escapeHtml(o.name)}</div>
+    <div class="text-secondary" style="font-size:.72rem">${escapeHtml(o.run_id)}${o.output_file ? ` · ${escapeHtml(o.output_file)}` : ''}</div>
     ${chips ? `<div class="mt-1" style="font-size:.7rem;color:#6a7a9a">${escapeHtml(chips)}</div>` : ''}
   </div>`;
 }
 
-async function selectOutput(name) {
-  _selectedName = name;
-  document.querySelectorAll('.output-card').forEach(c => c.classList.toggle('selected', c.dataset.name === name));
+async function selectRun(runId, updateUrl = true) {
+  _selectedRunId = runId;
+  document.querySelectorAll('.output-card').forEach(c => c.classList.toggle('selected', c.dataset.runId === runId));
   const panel = document.getElementById('detail-panel');
   panel.innerHTML = '<div class="text-secondary small text-center py-4"><div class="spinner-border spinner-border-sm me-2"></div>Calculando metricas...</div>';
   try {
-    const stats = await fetch(`${APP_BASE}/api/outputs/${encodeURIComponent(name)}/stats`).then(r => r.json());
-    if (stats.error) throw new Error(stats.error);
-    const meta = _outputs.find(o => o.name === name) || {};
-    panel.innerHTML = renderDetail(name, stats, meta.owner);
+    const response = await fetch(`${APP_BASE}/api/runs/${encodeURIComponent(runId)}`);
+    const data = await response.json();
+    if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
+    const manifest = data.manifest || {};
+    panel.innerHTML = data.stats
+      ? renderDetail(manifest.output_file || runId, data.stats, manifest.owner, manifest)
+      : renderManifestOnly(manifest);
+    if (updateUrl) history.pushState({runId}, '', `${APP_BASE}/history/${encodeURIComponent(runId)}`);
   } catch(e) {
     panel.innerHTML = `<div class="text-danger small">${escapeHtml(e.message)}</div>`;
   }
+}
+
+function renderManifestOnly(manifest) {
+  const ownerLine = IS_ADMIN && manifest.owner
+    ? `<div class="mt-2">${ownerBadge(manifest.owner)}</div>`
+    : '';
+  const config = manifest.configuration || {};
+  return `
+    <div class="fw-semibold mb-1" style="color:#c8d0e8">Run ${escapeHtml(manifest.run_id || '')}</div>
+    <div class="text-secondary small mb-3">${escapeHtml(manifest.completed_at || manifest.updated_at || '')}</div>
+    <div class="p-3 rounded mb-3 text-warning" style="background:#211b0c;border:1px solid #5a4818">
+      <i class="bi bi-file-earmark-x me-2"></i>El manifiesto de la ejecucion se conserva, pero su CSV ya no esta disponible. Las metricas recalculadas no pueden mostrarse.
+    </div>
+    <div class="metric-box text-start">
+      <div class="small text-secondary mb-2">Configuracion registrada</div>
+      <div class="small">Entrada: ${escapeHtml(manifest.input_file || '-')}</div>
+      <div class="small">Columna: ${escapeHtml(manifest.text_column || '-')}</div>
+      <div class="small">Orden: ${escapeHtml(manifest.execution_order || '-')}</div>
+      <div class="small">Filas: ${escapeHtml(manifest.total_rows ?? '-')}</div>
+      <div class="small">Contrato: ${escapeHtml(config.fingerprint || config.dataset_fingerprint || 'registrado')}</div>
+      ${ownerLine}
+    </div>`;
 }
 
 function kappaClass(k) {
@@ -151,7 +179,7 @@ function fmt(v, decimals = 1) {
   return typeof v === 'number' ? v.toFixed(decimals) : v;
 }
 
-function renderDetail(name, s, owner) {
+function renderDetail(name, s, owner, manifest = {}) {
   const ps = s.paper_summary || {};
   const ds = ps.dataset || {};
   const cq = ps.consensus_quality || {};
@@ -314,6 +342,7 @@ function renderDetail(name, s, owner) {
   return `
     <div class="d-flex align-items-start justify-content-between mb-3 gap-2">
       <div>
+        <div class="text-secondary small mb-1">Run ${escapeHtml(manifest.run_id || '')} · ${escapeHtml(manifest.status || '')}</div>
         <div class="fw-semibold" style="color:#c8d0e8">${escapeHtml(name)}</div>
         <div class="text-secondary small">${escapeHtml(s.source_file || name)}</div>
         ${ownerLine}
@@ -336,6 +365,9 @@ function renderDetail(name, s, owner) {
     ${resourcesSection}`;
 }
 
-loadOutputList();
+window.addEventListener('popstate', event => {
+  if (event.state?.runId) selectRun(event.state.runId, false);
+});
+loadRunList();
 </script>
 {% endblock %}

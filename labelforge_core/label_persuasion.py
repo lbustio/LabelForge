@@ -72,6 +72,7 @@ from labelforge_core.checkpoint_io import (
 from labelforge_core.dataset_io import DatasetError, load_dataset
 from labelforge_core.llm_json import parse_llm_json
 from labelforge_core.prompting import build_user_prompt, split_claim_for_arbiter
+from labelforge_core.run_contract import build_resume_contract, compare_resume_contract
 from labelforge_core.secrets_io import provider_api_key_env, secrets_env_path, set_secret_value
 from labelforge_core.provider_preflight import require_provider_preflight
 from labelforge_core.usage_metrics import (
@@ -909,18 +910,33 @@ def save_progress_state(
     save_run_state(state)
 
 
-def should_reuse_run_state(state: dict, args, total: int, resolved_input: str = "") -> bool:
+def should_reuse_run_state(
+    state: dict, args, total: int, resolved_input: str = "",
+    *, cfg: dict | None = None, sheet: str = "", text_column: str = "",
+) -> bool:
     if getattr(args, "fresh", False):
         return False
     if not state:
         return False
     if state.get("status") not in {"running", "paused"}:
         return False
-    return (
+    base_matches = (
         state.get("input_file") == str(resolved_input or args.input or "")
         and state.get("config_file") == str(args.config)
-        and int(state.get("total_rows", -1)) == int(total)
+        and int(total) >= int(state.get("total_rows", -1))
     )
+    if not base_matches:
+        return False
+    if not state.get("resume_contract") or cfg is None:
+        return True
+    current = build_resume_contract(
+        cfg,
+        input_file=str(resolved_input or args.input or ""),
+        sheet=sheet,
+        text_column=text_column,
+        total_rows=total,
+    )
+    return compare_resume_contract(state.get("resume_contract"), current)["compatible"]
 
 
 def is_record_final(record: dict, principles: list) -> bool:
@@ -1098,7 +1114,11 @@ def populate_arbiter_major_results(
                 cfg["_last_failure_kind"] = kind
                 cfg["_last_failure_retryable"] = arb.get("_last_retryable", True)
                 cfg["_pause_requested"] = True
-                append_to_failed_queue(row_index, rows[row_index], reason)
+                append_to_failed_queue(
+                    row_index, rows[row_index], reason,
+                    arbiter_id=arb_id, reason_code=kind,
+                    attempts=retry_attempts + 1,
+                )
                 log.warning(
                     "[entrada %s] Arbitro %s fallo  -  entrada encolada  -  %s",
                     row_index, arb_id, reason[:240],
@@ -1106,6 +1126,7 @@ def populate_arbiter_major_results(
                 emit_run_metric(
                     "claim_failed", run_id=run_id, row_index=row_index,
                     stage=f"arbiter_pass:{arb_id}", reason=reason,
+                    arbiter_id=arb_id, reason_code=kind,
                     queued=True, definitive=False,
                 )
                 return False, "arbiter_pass_failure", (
@@ -1306,7 +1327,14 @@ def main():
         log.info("Modo --fresh: checkpoints reanudables previos limpiados")
 
     previous_state = load_run_state()
-    if should_reuse_run_state(previous_state, args, total, resolved_input=str(input_file)):
+    current_resume_contract = build_resume_contract(
+        cfg, input_file=str(input_file), sheet=sheet,
+        text_column=text_column, total_rows=total,
+    )
+    if should_reuse_run_state(
+        previous_state, args, total, resolved_input=str(input_file),
+        cfg=cfg, sheet=sheet, text_column=text_column,
+    ):
         run_id = previous_state.get("run_id", RUN_ID)
         output_path = Path(previous_state.get("output_path", OUTPUT_DIR / f"labeled_{run_id}.csv"))
         state = previous_state
@@ -1326,6 +1354,7 @@ def main():
             "text_column": text_column,
             "config_file": str(args.config),
             "total_rows": total,
+            "dataset_total_rows": len(rows),
             "output_file": output_path.name,
             "output_path": str(output_path),
             "log_path": str(LOG_PATH),
@@ -1340,7 +1369,14 @@ def main():
             ],
             "principles": principles,
             "safety": cfg.get("safety", {}),
+            "resume_contract": current_resume_contract,
         }
+
+    # Los checkpoints heredados que superaron la comparacion basica quedan
+    # actualizados al contrato fuerte a partir de esta reanudacion.
+    state["resume_contract"] = current_resume_contract
+    state["total_rows"] = total
+    state["dataset_total_rows"] = len(rows)
 
     log.info(f"=== RUN_ID={run_id} ===")
     log.info(f"Config    : {args.config}")
@@ -1424,6 +1460,7 @@ def main():
         eligible_rows=nonempty_rows,
         arbiter_work_total=nonempty_rows * len(arbiters),
         arbiter_work_completed=initial_arbiter_work,
+        arbiter_work_before_start=initial_arbiter_work,
         initial_resource_summary=summarize_arbiter_checkpoints(partial_arbiter_results, arbiters),
         principles=principles,
         arbiters=[
@@ -1482,7 +1519,12 @@ def main():
         log_claim_start(i, claim, "main", i + 1, total, run_id)
         record = process_claim(i, claim, cfg, rate_limiters, partial_arbiter_results)
         if record is None:
-            append_to_failed_queue(i, row, cfg.get("_last_failure_reason", "sin detalle"))
+            append_to_failed_queue(
+                i, row, cfg.get("_last_failure_reason", "sin detalle"),
+                arbiter_id=cfg.get("_last_failure_arbiter"),
+                reason_code=cfg.get("_last_failure_kind", "unknown"),
+                attempts=1,
+            )
             pause_kind = cfg.get("_last_failure_kind", "unknown")
             pause_reason = cfg.get("_last_failure_reason", "sin detalle")
             failing_arbiter = cfg.get("_last_failure_arbiter", "unknown")
@@ -1494,6 +1536,8 @@ def main():
                 row_index=i,
                 stage="main",
                 reason=pause_reason,
+                arbiter_id=failing_arbiter,
+                reason_code=pause_kind,
                 queued=True,
                 definitive=False,
                 claim=row.get(text_column, ""),
@@ -1568,6 +1612,8 @@ def main():
                     row_index=idx,
                     stage="retry",
                     reason=reason,
+                    arbiter_id=cfg.get("_last_failure_arbiter") or item.get("arbiter_id"),
+                    reason_code=kind,
                     queued=False,
                     # Solo es definitivo si la politica permite continuar y
                     # se materializara una fila fallida. Una pausa conserva la
