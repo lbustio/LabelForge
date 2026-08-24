@@ -41,7 +41,9 @@ def normalize_arbiter(data: dict, existing: dict = None) -> dict:
             "type": p.get("type", "gemini"),
             "model": p.get("model", ""),
             "model_path": p.get("model_path", ""),
-            "n_ctx": int(p.get("n_ctx", 4096) or 4096),
+            # llama-cpp-python 0.3.x documenta 0 como la ventana del modelo.
+            "n_ctx": int(p.get("n_ctx", 0) or 0),
+            "context_window": int(p.get("context_window", 0) or 0),
             "api_key_env": api_key_env,
             "api_key_override": "",
             "base_url": p.get("base_url", ""),
@@ -208,4 +210,3 @@ def merge_arbiters(current: list, imported: list, mode: str = "merge") -> tuple[
         "kept": kept,
         "total": len(merged),
     }
-

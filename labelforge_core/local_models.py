@@ -15,6 +15,7 @@ Responsabilidades:
 from __future__ import annotations
 
 import concurrent.futures
+import gc
 import hashlib
 import json
 import logging
@@ -81,8 +82,23 @@ def _catalog_llm_model(provider: str) -> str:
 # Clave: (model_path_str, n_ctx)  Valor: (instancia Llama, ultimo acceso float)
 # ---------------------------------------------------------------------------
 _LLAMA_MODEL_CACHE: dict = {}   # {key: (Llama, last_access_time)}
+_LLAMA_NEGOTIATED_CONTEXTS: dict[str, int] = {}
 _cache_lock = threading.Lock()
 _LLAMA_MAX_LOADED_MODELS = 1
+
+
+def _release_llama_instance(instance) -> None:
+    """Libera de forma determinista el contexto nativo y la memoria GPU/CPU."""
+    close = getattr(instance, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception as exc:
+            log.warning("[local_models] El cierre explicito del modelo fallo: %s", exc)
+    # llama-cpp-python conserva recursos nativos fuera del heap de Python. El
+    # recolector debe ejecutarse antes de intentar reservar VRAM para otro GGUF.
+    del instance
+    gc.collect()
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +109,7 @@ def load_hw_profile() -> dict:
     if not HW_PROFILE.exists():
         raise FileNotFoundError(
             f"No se encontro {HW_PROFILE}. "
-            "Ejecuta 'python setup_env.py' antes de usar modelos locales."
+            "Ejecuta 'python setup/setup_env.py' antes de usar modelos locales."
         )
     with open(HW_PROFILE, encoding="utf-8") as f:
         return json.load(f)
@@ -154,11 +170,54 @@ def _read_gguf_n_layers(model_path: Path) -> Optional[int]:
     return None
 
 
+def _read_gguf_context_length(model_path: Path) -> Optional[int]:
+    """Lee ``<arquitectura>.context_length`` sin crear un llama_context."""
+    scalar_formats = {
+        0: "<B", 1: "<b", 2: "<H", 3: "<h", 4: "<I", 5: "<i",
+        6: "<f", 7: "<?", 10: "<Q", 11: "<q", 12: "<d",
+    }
+    try:
+        with open(model_path, "rb") as metadata_file:
+            if metadata_file.read(4) != b"GGUF":
+                return None
+            version = struct.unpack("<I", metadata_file.read(4))[0]
+            if version not in (2, 3):
+                return None
+            metadata_file.read(8)  # tensor count
+            metadata_count = struct.unpack("<Q", metadata_file.read(8))[0]
+
+            def read_string() -> str:
+                length = struct.unpack("<Q", metadata_file.read(8))[0]
+                return metadata_file.read(length).decode("utf-8", errors="replace")
+
+            def read_value(value_type: int):
+                if value_type == 8:
+                    return read_string()
+                if value_type == 9:
+                    element_type = struct.unpack("<I", metadata_file.read(4))[0]
+                    count = struct.unpack("<Q", metadata_file.read(8))[0]
+                    return [read_value(element_type) for _ in range(count)]
+                value_format = scalar_formats.get(value_type)
+                if not value_format:
+                    raise ValueError(f"Tipo GGUF no soportado: {value_type}")
+                return struct.unpack(value_format, metadata_file.read(struct.calcsize(value_format)))[0]
+
+            for _ in range(metadata_count):
+                key = read_string()
+                value_type = struct.unpack("<I", metadata_file.read(4))[0]
+                value = read_value(value_type)
+                if key.endswith(".context_length") and isinstance(value, int) and value > 0:
+                    return value
+    except Exception as exc:
+        log.debug("[local_models] No se pudo leer context_length de %s: %s", model_path.name, exc)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Calculo de parametros optimos
 # ---------------------------------------------------------------------------
 
-def get_optimal_params(model_path: str, n_ctx: int = 4096, hw_profile: Optional[dict] = None) -> dict:
+def get_optimal_params(model_path: str, n_ctx: int = 0, hw_profile: Optional[dict] = None) -> dict:
     """
     Calcula {n_gpu_layers, n_threads, n_batch} optimos para un modelo GGUF
     segun el hardware disponible en hw_profile.json.
@@ -235,8 +294,8 @@ _FALLBACK_CATALOG = [
         "description": "Llama 3.2 3B  -  balance calidad/velocidad para sistemas medianos",
     },
     {
-        "repo_id": "bartowski/Llama-3.1-8B-Instruct-GGUF",
-        "filename": "Llama-3.1-8B-Instruct-Q4_K_M.gguf",
+        "repo_id": "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF",
+        "filename": "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
         "size_gb": 4.9, "ram_min_gb": 8, "tier": "medium",
         "description": "Llama 3.1 8B  -  buena calidad, requiere al menos 8 GB RAM/VRAM",
     },
@@ -448,6 +507,12 @@ def _synthesize_catalog(responses: list[list[dict]]) -> list[dict]:
     for response in responses:
         seen_in_this = set()
         for item in response:
+            if "tinyllama-1.1b-chat-v1.0" in item.get("filename", "").lower():
+                item = {
+                    **item,
+                    "repo_id": "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF",
+                    "filename": "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
+                }
             key = item["filename"].lower()
             if key in seen_in_this:
                 continue
@@ -477,6 +542,8 @@ def _load_catalog_cache() -> Optional[list[dict]]:
         return None
     try:
         data = json.loads(CATALOG_CACHE.read_text(encoding="utf-8"))
+        if data.get("source") != "huggingface":
+            return None
         if time.time() - data.get("timestamp", 0) > _catalog_ttl_s():
             return None
         return data.get("catalog")
@@ -487,14 +554,78 @@ def _load_catalog_cache() -> Optional[list[dict]]:
 def _save_catalog_cache(catalog: list[dict]):
     MODELS_DIR.mkdir(exist_ok=True)
     with open(CATALOG_CACHE, "w", encoding="utf-8") as f:
-        json.dump({"timestamp": time.time(), "catalog": catalog}, f, ensure_ascii=False, indent=2)
+        json.dump({"timestamp": time.time(), "source": "huggingface", "catalog": catalog}, f, ensure_ascii=False, indent=2)
+
+
+def _catalog_from_huggingface() -> list[dict]:
+    """Obtiene repositorios y archivos exactos con una unica consulta al Hub."""
+    from huggingface_hub import HfApi
+
+    cfg = _load_catalog_cfg()
+    quantization = str(cfg.get("quantization", "Q4_K_M")).lower()
+    api = HfApi(token=_hf_token())
+    models = api.list_models(
+        filter=cfg.get("filter", "gguf"),
+        search=cfg.get("search", "instruct"),
+        sort=cfg.get("sort", "downloads"),
+        limit=int(cfg.get("limit", 100)),
+        expand=["gguf", "siblings", "downloads", "likes", "gated", "tags"],
+    )
+    catalog = []
+    seen_files = set()
+    for info in models:
+        if getattr(info, "private", False) or getattr(info, "gated", False):
+            continue
+        repo_id = str(info.id)
+        gguf_meta = getattr(info, "gguf", None) or {}
+        total_params = int(gguf_meta.get("total") or 0)
+        if not total_params:
+            continue
+        context_length = int(gguf_meta.get("context_length") or 0)
+        siblings = getattr(info, "siblings", None) or []
+        filenames = [
+            s.rfilename for s in siblings
+            if s.rfilename.lower().endswith(".gguf")
+            and quantization in s.rfilename.lower()
+            and "/" not in s.rfilename
+        ]
+        for filename in filenames[:1]:
+            key = (repo_id.lower(), filename.lower())
+            if key in seen_files:
+                continue
+            seen_files.add(key)
+            # Q4_K_M usa aproximadamente 4.8 bits/peso mas metadatos. Esto se
+            # marca como estimacion; la ruta nunca se deriva ni se modifica.
+            size_gb = round(total_params * 0.62 / (1024 ** 3), 2) if total_params else 0
+            params_b = total_params / 1_000_000_000 if total_params else 0
+            if params_b >= 30:
+                tier = "large"
+            elif params_b >= 6:
+                tier = "medium"
+            elif params_b >= 2:
+                tier = "small"
+            else:
+                tier = "micro"
+            catalog.append({
+                "repo_id": repo_id,
+                "filename": filename,
+                "size_gb": size_gb,
+                "size_estimated": True,
+                "ram_min_gb": max(2, int(size_gb * 1.35 + 0.99)) if size_gb else 0,
+                "tier": tier,
+                "description": f"GGUF Q4_K_M listado directamente por Hugging Face ({params_b:.1f}B parametros).",
+                "parameters": total_params,
+                "context_length": context_length,
+                "downloads": int(getattr(info, "downloads", 0) or 0),
+                "source": "huggingface",
+            })
+    return catalog
 
 
 def build_dynamic_catalog(hw_profile: dict, force: bool = False) -> list[dict]:
     """
-    Consulta en paralelo a todos los LLMs disponibles (Gemini, Anthropic, OpenAI)
-    para obtener recomendaciones de modelos GGUF adaptadas al hardware.
-    Usa cache de 7 dias. Fallback al catalogo estatico si todo falla.
+    Consulta Hugging Face una vez y conserva exactamente sus repo_id/filename.
+    Usa cache local para no repetir la consulta en cada apertura del modal.
     """
     if not force:
         cached = _load_catalog_cache()
@@ -502,35 +633,9 @@ def build_dynamic_catalog(hw_profile: dict, force: bool = False) -> list[dict]:
             log.info("[catalog] Usando catalogo en cache (%d modelos)", len(cached))
             return cached
 
-    log.info("[catalog] Consultando LLMs para catalogo dinamico de modelos GGUF...")
-
-    queries = [
-        ("Gemini",    _query_gemini),
-        ("Anthropic", _query_anthropic),
-        ("OpenAI",    _query_openai),
-    ]
-
-    responses: list[list[dict]] = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-        futures = {pool.submit(fn, hw_profile): name for name, fn in queries}
-        for fut in concurrent.futures.as_completed(futures):
-            name = futures[fut]
-            try:
-                result = fut.result()
-                if result:
-                    log.info("[catalog] %s aporto %d modelos", name, len(result))
-                    responses.append(result)
-                else:
-                    log.info("[catalog] %s: sin clave o sin modelos validos", name)
-            except Exception as exc:
-                log.warning("[catalog] %s error: %s", name, exc)
-
-    if not responses:
-        log.info("[catalog] Ningun LLM respondio  -  usando catalogo fallback")
-        return _FALLBACK_CATALOG
-
-    catalog = _synthesize_catalog(responses)
-    log.info("[catalog] Catalogo dinamico: %d modelos unicos (de %d LLMs)", len(catalog), len(responses))
+    log.info("[catalog] Consultando catalogo GGUF directamente en Hugging Face...")
+    catalog = _catalog_from_huggingface()
+    log.info("[catalog] Hugging Face devolvio %d archivos Q4_K_M exactos", len(catalog))
     _save_catalog_cache(catalog)
     return catalog
 
@@ -538,8 +643,7 @@ def build_dynamic_catalog(hw_profile: dict, force: bool = False) -> list[dict]:
 def recommended_models(hw_profile: Optional[dict] = None, force_refresh: bool = False) -> list[dict]:
     """
     Retorna modelos recomendados para el hardware disponible.
-    Consulta LLMs configurados para obtener recomendaciones actualizadas.
-    Usa cache de 7 dias. Fallback al catalogo estatico si no hay LLMs disponibles.
+    Consulta el catalogo de Hugging Face y filtra por el hardware local.
     """
     if hw_profile is None:
         try:
@@ -930,12 +1034,12 @@ def _resolve_gguf_filename(repo_id: str, filename: str) -> str:
     except Exception as exc:
         exc_str = str(exc)
         # Propagar errores de acceso para que el usuario sepa que hacer
-        if any(k in exc_str for k in ("gated", "access", "restricted", "401", "403", "forbidden", "unauthorized")):
-            raise RuntimeError(
-                f"No se pudo acceder al repositorio '{repo_id}'. "
-                "Si es un modelo de Meta (Llama), debes aceptar la licencia en "
-                "huggingface.co/meta-llama/Llama-3.1-8B-Instruct y luego reintenta."
-            ) from exc
+        if any(k in exc_str.lower() for k in ("gated", "access", "restricted", "401", "403", "forbidden", "unauthorized")):
+            if "meta-llama" in repo_id.lower():
+                detail = "Acepta la licencia del modelo original de Meta y verifica HF_TOKEN."
+            else:
+                detail = "El repositorio puede no existir, ser privado o requerir HF_TOKEN; verifica el repo_id y el archivo exactos."
+            raise RuntimeError(f"No se pudo acceder al repositorio '{repo_id}'. {detail}") from exc
         log.debug("[local_models] No se pudo listar archivos de %s: %s", repo_id, exc)
     return filename
 
@@ -1058,7 +1162,7 @@ def download_model(
     try:
         import requests as req_lib  # noqa: F401
     except ImportError:
-        raise RuntimeError("requests no disponible. Ejecuta 'python setup_env.py' primero.")
+        raise RuntimeError("requests no disponible. Ejecuta 'python setup/setup_env.py' primero.")
 
     MODELS_DIR.mkdir(exist_ok=True)
     log.info("[local_models] Descargando %s/%s", repo_id, filename)
@@ -1076,59 +1180,9 @@ def download_model(
     except DownloadCancelled:
         raise
     except Exception as exc:
-        exc_str = str(exc)
-        if any(k in exc_str for k in ("404", "Not Found", "not found")):
-            # Intentar corregir el nombre del archivo (case, quant-suffix, etc.)
-            corrected_file = _resolve_gguf_filename(repo_id, filename)
-
-            # Si el repo mismo no existe, probar variantes comunes del repo_id
-            # (ej. el LLM omite el prefijo "Meta-" del nombre del repo)
-            repo_to_use = repo_id
-            if corrected_file == filename:
-                repo_name = repo_id.split("/", 1)[-1]
-                alt_repos = []
-                if not repo_name.startswith("Meta-"):
-                    alt_repos.append(f"{repo_id.split('/')[0]}/Meta-{repo_name}")
-                for alt in alt_repos:
-                    try:
-                        alt_file = _resolve_gguf_filename(alt, filename)
-                        repo_to_use = alt
-                        corrected_file = alt_file
-                        log.warning("[local_models] Repo corregido: %s -> %s (archivo: %s)",
-                                    repo_id, alt, corrected_file)
-                        break
-                    except Exception:
-                        pass
-
-            if corrected_file != filename or repo_to_use != repo_id:
-                dest = MODELS_DIR / corrected_file
-                url  = _hf_download_url(repo_to_use, corrected_file)
-                if dest.exists():
-                    log.info("[local_models] Modelo corregido ya existe en cache: %s", dest.name)
-                    _update_models_json(dest, repo_id=repo_to_use, description=description)
-                    return dest
-                try:
-                    _stream_download(url, dest, progress_callback=progress_callback)
-                    filename = corrected_file
-                    repo_id  = repo_to_use
-                except DownloadCancelled:
-                    raise
-                except Exception as exc2:
-                    raise RuntimeError(
-                        f"Descarga fallida para {repo_to_use}/{corrected_file}: {exc2}"
-                    ) from exc2
-            else:
-                try:
-                    from huggingface_hub import HfApi
-                    files = [f for f in HfApi(token=_hf_token()).list_repo_files(repo_id) if f.endswith(".gguf")]
-                    hint = f" Archivos disponibles: {', '.join(files[:6])}" if files else ""
-                except Exception:
-                    hint = ""
-                raise RuntimeError(
-                    f"Archivo '{filename}' no encontrado en {repo_id}.{hint}"
-                ) from exc
-        else:
-            raise RuntimeError(f"Descarga fallida para {repo_id}/{filename}: {exc}") from exc
+        # repo_id y filename provienen del catalogo de Hugging Face. No intentar
+        # adivinar aliases, cambiar mayusculas ni consultar de nuevo el repo.
+        raise RuntimeError(f"Descarga fallida para {repo_id}/{filename}: {exc}") from exc
 
     log.info("[local_models] Descarga completada: %s (%.2f GB)",
              dest.name, dest.stat().st_size / (1024 ** 3))
@@ -1201,7 +1255,7 @@ def _mark_model_moved(filename: str, destination: Path) -> None:
 # Cache de instancias Llama
 # ---------------------------------------------------------------------------
 
-def get_or_load_llama(model_path: str, n_ctx: int = 4096, **llama_kwargs):
+def get_or_load_llama(model_path: str, n_ctx: int = 0, **llama_kwargs):
     """
     Retorna una instancia Llama del cache o la carga desde disco.
     Thread-safe mediante _cache_lock.
@@ -1212,7 +1266,7 @@ def get_or_load_llama(model_path: str, n_ctx: int = 4096, **llama_kwargs):
         from llama_cpp import Llama
     except ImportError:
         raise RuntimeError(
-            "llama-cpp-python no instalado. Ejecuta 'python setup_env.py' primero."
+            "llama-cpp-python no instalado. Ejecuta 'python setup/setup_env.py' primero."
         )
 
     key = (model_path, n_ctx)
@@ -1231,50 +1285,93 @@ def get_or_load_llama(model_path: str, n_ctx: int = 4096, **llama_kwargs):
                 "Descargalo desde la webapp (Arbitros  ->  Descargar modelos)."
             )
         optimal = get_optimal_params(str(path), n_ctx)
+        trained_context = _read_gguf_context_length(path) if n_ctx == 0 else None
+        negotiated_context = _LLAMA_NEGOTIATED_CONTEXTS.get(str(path.resolve())) if n_ctx == 0 else None
+        if n_ctx > 0:
+            context_candidates = [n_ctx]
+        elif negotiated_context:
+            context_candidates = []
+            candidate = negotiated_context
+            while candidate >= 4096:
+                context_candidates.append(candidate)
+                candidate //= 2
+            if 4096 not in context_candidates:
+                context_candidates.append(4096)
+        elif trained_context:
+            context_candidates = []
+            candidate = trained_context
+            while candidate >= 4096:
+                context_candidates.append(candidate)
+                candidate //= 2
+            if 4096 not in context_candidates:
+                context_candidates.append(4096)
+        else:
+            # 0 pide primero la capacidad nativa. Si la reserva falla, se
+            # negocia hacia abajo sin perder texto: el pipeline fragmenta.
+            context_candidates = [0, 65536, 32768, 16384, 8192, 4096]
 
         while True:
             while len(_LLAMA_MODEL_CACHE) >= _LLAMA_MAX_LOADED_MODELS:
                 lru_key = min(_LLAMA_MODEL_CACHE, key=lambda k: _LLAMA_MODEL_CACHE[k][1])
                 lru_name = Path(lru_key[0]).name
-                del _LLAMA_MODEL_CACHE[lru_key]
+                evicted_instance, _ = _LLAMA_MODEL_CACHE.pop(lru_key)
                 log.info(
                     "[local_models] Liberando '%s' antes de cargar '%s'",
                     lru_name, path.name,
                 )
+                _release_llama_instance(evicted_instance)
+                del evicted_instance
 
-            log.info("[local_models] Cargando modelo: %s (n_gpu_layers=%s, n_ctx=%d)",
-                     path.name, optimal["n_gpu_layers"], n_ctx)
-            try:
-                instance = Llama(
-                    model_path=str(path),
-                    n_ctx=n_ctx,
-                    n_gpu_layers=llama_kwargs.get("n_gpu_layers", optimal["n_gpu_layers"]),
-                    n_threads=llama_kwargs.get("n_threads", optimal["n_threads"]),
-                    n_batch=llama_kwargs.get("n_batch", optimal["n_batch"]),
-                    verbose=False,
-                    **{k: v for k, v in llama_kwargs.items()
-                       if k not in ("n_gpu_layers", "n_threads", "n_batch")},
-                )
-                _LLAMA_MODEL_CACHE[key] = (instance, time.monotonic())
-                log.info("[local_models] Modelo cargado y en cache: %s", path.name)
-                return instance
-            except Exception as exc:
-                if _LLAMA_MODEL_CACHE:
-                    lru_key = min(_LLAMA_MODEL_CACHE, key=lambda k: _LLAMA_MODEL_CACHE[k][1])
-                    lru_name = Path(lru_key[0]).name
-                    del _LLAMA_MODEL_CACHE[lru_key]
-                    log.warning(
-                        "[local_models] Fallo al cargar '%s' (%s)  -  "
-                        "evictando '%s' (LRU) y reintentando",
-                        path.name, exc, lru_name,
+            last_context_error = None
+            for candidate_ctx in context_candidates:
+                ctx_label = "nativo del modelo" if candidate_ctx == 0 else str(candidate_ctx)
+                log.info("[local_models] Cargando modelo: %s (n_gpu_layers=%s, contexto=%s)",
+                         path.name, optimal["n_gpu_layers"], ctx_label)
+                try:
+                    instance = Llama(
+                        model_path=str(path),
+                        n_ctx=candidate_ctx,
+                        n_gpu_layers=llama_kwargs.get("n_gpu_layers", optimal["n_gpu_layers"]),
+                        n_threads=llama_kwargs.get("n_threads", optimal["n_threads"]),
+                        n_batch=llama_kwargs.get("n_batch", optimal["n_batch"]),
+                        verbose=False,
+                        **{k: v for k, v in llama_kwargs.items()
+                           if k not in ("n_gpu_layers", "n_threads", "n_batch")},
                     )
-                else:
+                except Exception as exc:
+                    if n_ctx == 0 and "create llama_context" in str(exc).lower():
+                        last_context_error = exc
+                        log.warning(
+                            "[local_models] Contexto %s no cabe para %s; probando una ventana menor",
+                            ctx_label, path.name,
+                        )
+                        continue
                     raise
+
+                _LLAMA_MODEL_CACHE[key] = (instance, time.monotonic())
+                actual_ctx = instance.n_ctx() if callable(getattr(instance, "n_ctx", None)) else candidate_ctx
+                if n_ctx == 0 and actual_ctx:
+                    _LLAMA_NEGOTIATED_CONTEXTS[str(path.resolve())] = int(actual_ctx)
+                log.info(
+                    "[local_models] Modelo cargado y en cache: %s (contexto efectivo=%s tokens%s)",
+                    path.name, actual_ctx,
+                    ", ajustado al hardware" if n_ctx == 0 and trained_context and actual_ctx < trained_context else "",
+                )
+                return instance
+            if last_context_error:
+                raise RuntimeError(
+                    f"No se pudo crear un contexto local ni siquiera con {context_candidates[-1]} tokens"
+                ) from last_context_error
+            raise RuntimeError(f"No se pudo cargar el modelo local: {path.name}")
 
 
 def clear_model_cache():
     """Libera todos los modelos cargados en memoria."""
     with _cache_lock:
+        instances = [entry[0] for entry in _LLAMA_MODEL_CACHE.values()]
         _LLAMA_MODEL_CACHE.clear()
+        for instance in instances:
+            _release_llama_instance(instance)
+        instances.clear()
+        gc.collect()
     log.info("[local_models] Cache de modelos Llama vaciada")
-

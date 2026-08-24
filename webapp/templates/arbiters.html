@@ -95,6 +95,9 @@
                 <button type="button" class="btn btn-sm provider-tab" data-provider="llama_cpp"   onclick="selectProvider('llama_cpp')">
                   <i class="bi bi-cpu me-1"></i>Local (GGUF)
                 </button>
+                <button type="button" class="btn btn-sm provider-tab" data-provider="ollama" onclick="selectProvider('ollama')">
+                  <i class="bi bi-box me-1"></i>Ollama
+                </button>
                 <button type="button" class="btn btn-sm provider-tab" data-provider="openai_compat" onclick="selectProvider('openai_compat')">
                   <i class="bi bi-plug me-1"></i>Compatible con OpenAI
                 </button>
@@ -106,8 +109,8 @@
           <div class="row g-3 mb-3" id="local-gguf-section" style="display:none!important">
             <div class="col-md-4">
               <label class="form-label small text-secondary">Contexto (tokens)</label>
-              <input type="number" id="arb-n-ctx" class="form-control" value="4096" min="512" max="131072" step="512">
-              <div class="form-text text-secondary">Ventana de contexto maximo del modelo</div>
+              <input type="number" id="arb-n-ctx" class="form-control" value="0" min="0" max="1048576" step="512">
+              <div class="form-text text-secondary"><strong>0 = capacidad nativa declarada por el GGUF.</strong> Un valor mayor limita deliberadamente la memoria de contexto.</div>
             </div>
             <div class="col-12 d-flex align-items-center gap-2 flex-wrap">
               <button type="button" class="btn btn-sm btn-outline-info" onclick="openDownloadModal()">
@@ -129,6 +132,9 @@
               <label class="form-label small text-secondary">Clave de API</label>
               <div class="input-group">
                 <input type="password" id="arb-api-key-override" class="form-control" placeholder="Pega la clave y verifica">
+                <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('arb-api-key-override', this)" title="Mostrar" aria-label="Mostrar clave de API">
+                  <i class="bi bi-eye"></i>
+                </button>
                 <button class="btn btn-outline-secondary" type="button" onclick="verifyProviderKey()" title="Verificar, guardar y refrescar modelos">
                   <i class="bi bi-shield-check"></i>
                 </button>
@@ -170,9 +176,9 @@
               <div class="d-flex align-items-center gap-2">
                 <div class="btn-group btn-group-sm" id="tier-filter-group">
                   <button type="button" class="btn btn-outline-secondary active" id="filter-all"   onclick="filterModels('all')">Todos</button>
-                  <button type="button" class="btn btn-outline-secondary"        id="filter-pro"   onclick="filterModels('pro')">Pro/Opus</button>
-                  <button type="button" class="btn btn-outline-secondary"        id="filter-flash" onclick="filterModels('mid')">Flash/Sonnet</button>
-                  <button type="button" class="btn btn-outline-secondary"        id="filter-lite"  onclick="filterModels('lite')">Lite/Haiku</button>
+                  <button type="button" class="btn btn-outline-secondary"        id="filter-pro"  onclick="filterModels('pro')">Alta</button>
+                  <button type="button" class="btn btn-outline-secondary"        id="filter-mid"  onclick="filterModels('mid')">Balance</button>
+                  <button type="button" class="btn btn-outline-secondary"        id="filter-lite" onclick="filterModels('lite')">Ligera</button>
                 </div>
                 <button class="btn btn-sm btn-outline-secondary" onclick="reloadModels()" title="Recargar modelos">
                   <i class="bi bi-arrow-clockwise"></i>
@@ -245,7 +251,10 @@
           </div>
         </div>
         <label class="form-label small text-secondary">Contrasena de cifrado</label>
-        <input type="password" id="export-password" class="form-control" autocomplete="new-password" minlength="8">
+        <div class="input-group">
+          <input type="password" id="export-password" class="form-control" autocomplete="new-password" minlength="8">
+          <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('export-password', this)" title="Mostrar" aria-label="Mostrar contrasena"><i class="bi bi-eye"></i></button>
+        </div>
         <div class="form-text text-secondary">Minimo 8 caracteres. No se guarda en LabelForge.</div>
       </div>
       <div class="modal-footer border-0">
@@ -271,7 +280,10 @@
         <input type="file" id="import-file" class="form-control mb-3" accept=".lfarb,application/json">
 
         <label class="form-label small text-secondary">Contrasena</label>
-        <input type="password" id="import-password" class="form-control mb-3" autocomplete="current-password" minlength="8">
+        <div class="input-group mb-3">
+          <input type="password" id="import-password" class="form-control" autocomplete="current-password" minlength="8">
+          <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('import-password', this)" title="Mostrar" aria-label="Mostrar contrasena"><i class="bi bi-eye"></i></button>
+        </div>
 
         <label class="form-label small text-secondary">Modo</label>
         <select id="import-mode" class="form-select">
@@ -425,12 +437,12 @@
 // ---------------------------------------------------------------------------
 // Tier labels como variable para evitar conflictos con Jinja2
 const TIER_LABELS = {};
-TIER_LABELS['pro']   = 'Pro';
-TIER_LABELS['mid']   = 'Flash';
-TIER_LABELS['lite']  = 'Lite';
+TIER_LABELS['pro']   = 'Alta';
+TIER_LABELS['mid']   = 'Balance';
+TIER_LABELS['lite']  = 'Ligera';
 TIER_LABELS['other'] = 'Otro';
 let arbiters       = [];
-let maxArbiters    = 10;
+let maxArbiters    = 1;
 let preflightByArbiter = {};
 let preflightIssues = [];
 let localHardwareProfile = null;
@@ -440,6 +452,8 @@ let selectedModel  = "";
 let activeProvider = "gemini";
 let activeFilter   = "all";
 let pendingDeleteId = null;
+let modelsRequestController = null;
+let modelsRequestSequence = 0;
 
 // Env vars por defecto por proveedor
 const DEFAULT_ENV = {
@@ -448,6 +462,7 @@ const DEFAULT_ENV = {
   anthropic:     "ANTHROPIC_API_KEY",
   openai:        "OPENAI_API_KEY",
   openai_compat: "OPENAI_API_KEY",
+  ollama:        "",
   llama_cpp:     "",
 };
 
@@ -456,8 +471,9 @@ const API_KEY_HELP = {
   anthropic:     "Claude/Anthropic: se verificara y guardara como ANTHROPIC_API_KEY en secrets/secrets.env.",
   openai:        "OpenAI: se verificara y guardara como OPENAI_API_KEY en secrets/secrets.env.",
   openai_compat: "Compatible con OpenAI: se verificara contra la direccion base y se guardara como OPENAI_API_KEY en secrets/secrets.env.",
+  ollama:        "Ollama consulta directamente los modelos instalados en el servidor local; no requiere API key.",
   vertex_gemini: "Vertex AI usa credenciales de Google Cloud, no una API key directa aqui.",
-  llama_cpp:     "Modelo local GGUF - sin API key. El backend se detecta automaticamente al ejecutar setup_env.py.",
+  llama_cpp:     "Modelo local GGUF - sin API key. El backend se detecta automaticamente al ejecutar setup/setup_env.py.",
 };
 
 function updateApiKeyHelp() {
@@ -486,7 +502,7 @@ function updateApiKeyStatus(arbId) {
   const keyInp = document.getElementById('arb-api-key-override');
   if (!el) return;
 
-  const needsKey = !['llama_cpp', 'vertex_gemini'].includes(activeProvider);
+  const needsKey = !['llama_cpp', 'vertex_gemini', 'ollama'].includes(activeProvider);
   if (!needsKey || !arbId) {
     el.innerHTML = '';
     if (keyInp) { _clearKeySentinel(keyInp); keyInp.placeholder = 'Pega la clave y verifica'; }
@@ -554,10 +570,12 @@ function selectProvider(p) {
   });
 
   // Mostrar/ocultar secciones
-  const needKey    = !["llama_cpp", "vertex_gemini"].includes(p);
-  const needUrl    = ["openai_compat"].includes(p);
+  const needKey    = !["llama_cpp", "vertex_gemini", "ollama"].includes(p);
+  const needUrl    = ["openai_compat", "ollama"].includes(p);
   const needVertex = p === "vertex_gemini";
   const needLocal  = p === "llama_cpp";
+  document.getElementById('gguf-hw-check-panel').style.display = 'none';
+  document.getElementById('gguf-hw-check-body').innerHTML = '';
   document.getElementById('apikey-section').style.setProperty('display', needKey   ? '' : 'none', 'important');
   document.getElementById('baseurl-section').style.setProperty('display', needUrl  ? '' : 'none', 'important');
   document.getElementById('vertex-section').style.setProperty('display', needVertex ? '' : 'none', 'important');
@@ -574,6 +592,9 @@ function selectProvider(p) {
   // Default env var
   const envInp = document.getElementById('arb-api-key-env');
   envInp.value = DEFAULT_ENV[p] || "";
+  if (p === 'ollama' && !document.getElementById('arb-base-url').value.trim()) {
+    document.getElementById('arb-base-url').value = 'http://localhost:11434/v1';
+  }
 
   // Reset modelo seleccionado y cargar modelos
   selectedModel = "";
@@ -585,21 +606,27 @@ function selectProvider(p) {
 // ---------------------------------------------------------------------------
 // Cargar modelos del proveedor actual
 // ---------------------------------------------------------------------------
-async function loadModels() {
+async function loadModels(force = false) {
   normalizeApiKeyInputs();
+  const requestProvider = activeProvider;
+  const requestSequence = ++modelsRequestSequence;
+  if (modelsRequestController) modelsRequestController.abort();
+  modelsRequestController = new AbortController();
+  const requestController = modelsRequestController;
   const grid = document.getElementById('model-grid');
   grid.innerHTML = `<div class="col-12 text-center text-secondary py-4">
-    <div class="spinner-border spinner-border-sm me-2"></div>Cargando modelos...
+    <div class="spinner-border spinner-border-sm me-2"></div>Verificando credenciales y cargando modelos de ${escapeHtml(requestProvider)}...
   </div>`;
 
   const rawKey  = document.getElementById('arb-api-key-override').value;
   const apiKey  = (rawKey === KEY_SENTINEL) ? '' : rawKey.trim();
-  const apiKeyEnv = DEFAULT_ENV[activeProvider] || '';
+  const apiKeyEnv = DEFAULT_ENV[requestProvider] || '';
   const baseUrl = document.getElementById('arb-base-url').value.trim();
   const project = document.getElementById('arb-vertex-project').value.trim();
   const location = document.getElementById('arb-vertex-location').value.trim();
 
-  const payload = { provider: activeProvider };
+  const payload = { provider: requestProvider };
+  if (force)     payload.force       = true;
   if (apiKey)    payload.api_key     = apiKey;
   if (apiKeyEnv) payload.api_key_env = apiKeyEnv;
   if (baseUrl)   payload.base_url    = baseUrl;
@@ -611,6 +638,7 @@ async function loadModels() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal: requestController.signal,
     });
     const ct = res.headers.get('content-type') || '';
     if (!ct.includes('application/json')) {
@@ -618,6 +646,7 @@ async function loadModels() {
     }
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || "Error desconocido");
+    if (requestSequence !== modelsRequestSequence || requestProvider !== activeProvider) return;
     currentModels = data;
     activeFilter  = 'all';
     ['all','pro','mid','lite'].forEach(f =>
@@ -625,11 +654,14 @@ async function loadModels() {
     );
     renderModelGrid();
   } catch(e) {
+    if (e.name === 'AbortError' || requestSequence !== modelsRequestSequence || requestProvider !== activeProvider) return;
     grid.innerHTML = `<div class="col-12 py-3">
-      <div class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>${e.message}</div>
+      <div class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(e.message)}</div>
       <div class="text-secondary small mt-1">Verifica tu clave de API o la direccion del servidor local.</div>
     </div>`;
     currentModels = [];
+  } finally {
+    if (modelsRequestController === requestController) modelsRequestController = null;
   }
 }
 
@@ -639,11 +671,12 @@ async function reloadModels() {
     await verifyProviderKey();
     return;
   }
-  await loadModels();
+  await loadModels(true);
 }
 
 async function verifyProviderKey() {
   normalizeApiKeyInputs();
+  const verifyProvider = activeProvider;
   const keyInp = document.getElementById('arb-api-key-override');
   const envInp = document.getElementById('arb-api-key-env');
   const rawKey = keyInp.value;
@@ -669,13 +702,14 @@ async function verifyProviderKey() {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
-      provider: activeProvider,
+      provider: verifyProvider,
       api_key: apiKey,
       api_key_env: apiKeyEnv,
       base_url: baseUrl,
     }),
   });
   const data = await res.json().catch(() => ({}));
+  if (verifyProvider !== activeProvider) return;
   if (!res.ok || data.error) {
     grid.innerHTML = `<div class="col-12 py-3">
       <div class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>${data.error || 'No se pudo verificar la clave'}</div>
@@ -708,9 +742,9 @@ async function verifyProviderKey() {
 // ---------------------------------------------------------------------------
 function getTier(id) {
   const l = id.toLowerCase();
-  if (l.includes('lite') || l.includes('haiku') || l.includes('mini')) return 'lite';
-  if (l.includes('opus') || (l.includes('pro') && !l.includes('lite'))) return 'pro';
-  if (l.includes('flash') || l.includes('sonnet') || l.includes('gpt-')) return 'mid';
+  if (/\b(lite|haiku|mini|nano|small|1b|2b|3b)\b/.test(l)) return 'lite';
+  if (/\b(opus|pro|gpt-5|gpt-4\.1|gpt-4o|large|70b)\b/.test(l) || /^o[134](?:-|$)/.test(l)) return 'pro';
+  if (/\b(flash|sonnet|gpt-4|gpt-3\.5|medium|7b|8b|14b)\b/.test(l)) return 'mid';
   return 'other';
 }
 
@@ -727,16 +761,25 @@ function renderModelGrid() {
     return;
   }
 
-  grid.innerHTML = list.map(m => {
+  const sourceLabel = activeProvider === 'llama_cpp'
+    ? 'modelos GGUF activos en models/'
+    : activeProvider === 'ollama'
+      ? 'modelos instalados reportados por Ollama'
+      : 'modelos reportados para las credenciales actuales';
+  const status = `<div class="col-12 text-secondary small pb-1">
+    <i class="bi bi-cloud-check me-1"></i>${list.length} de ${currentModels.length} ${sourceLabel}
+  </div>`;
+
+  grid.innerHTML = status + list.map(m => {
     const tier = getTier(m.id);
     const sel  = m.id === selectedModel;
     return `<div class="col-xl-3 col-lg-4 col-md-6">
-      <div class="model-card ${sel?'selected':''}" onclick="selectModel('${m.id}')" style="position:relative">
+      <div class="model-card ${sel?'selected':''}" data-model="${escapeHtml(m.id)}" onclick="selectModel(this.dataset.model)" style="position:relative">
         <i class="bi bi-check2 mcheck"></i>
         <div class="mname">
-          <span class="tier-badge tier-${tier}">${TIER_LABELS[tier]||tier}</span>${m.display_name}
+          <span class="tier-badge tier-${tier}">${TIER_LABELS[tier]||tier}</span>${escapeHtml(m.display_name || m.id)}
         </div>
-        <div class="mdesc">${m.task_description}</div>
+        <div class="mdesc">${escapeHtml(m.task_description || '')}</div>
       </div>
     </div>`;
   }).join('');
@@ -825,8 +868,8 @@ async function checkLocalGgufHardware() {
   const arbId  = document.getElementById('arb-editing-id').value.trim();
 
   panel.style.display = '';
-  if (!arbId) {
-    body.innerHTML = `<span class="text-warning"><i class="bi bi-info-circle me-1"></i>Guarda el arbitro primero para poder verificar el hardware.</span>`;
+  if (activeProvider !== 'llama_cpp') {
+    body.innerHTML = `<span class="text-secondary"><i class="bi bi-cloud me-1"></i>Este proveedor es remoto; el hardware local no aplica.</span>`;
     return;
   }
 
@@ -835,7 +878,15 @@ async function checkLocalGgufHardware() {
   </div>`;
 
   try {
-    const r    = await fetch(`${APP_BASE}/api/arbiters/${encodeURIComponent(arbId)}/hw-check`);
+    const selected = currentModels.find(m => m.id === selectedModel);
+    const params = new URLSearchParams({
+      provider: activeProvider,
+      model: selectedModel || '',
+      model_path: selected?.path || '',
+      n_ctx: document.getElementById('arb-n-ctx')?.value || '0',
+    });
+    const targetId = arbId || '__preview__';
+    const r    = await fetch(`${APP_BASE}/api/arbiters/${encodeURIComponent(targetId)}/hw-check?${params.toString()}`);
     const data = await r.json();
     if (!r.ok) { body.innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(data.error || 'Error')}</span>`; return; }
 
@@ -881,14 +932,19 @@ async function checkLocalGgufHardware() {
       </div>`;
     }
 
-    // Sugerencias de modelos mejores
-    if (data.suggestions?.length) {
+    // Un unico ganador: primero se decide por hardware/capacidad; despues se
+    // muestra si esta descargado o si hay que obtenerlo.
+    if (data.best_model) {
       html += `<div style="font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#64748b;margin-bottom:.4rem">
-        <i class="bi bi-stars me-1" style="color:#c4b5fd"></i>Modelos mas capaces compatibles con tu hardware
+        <i class="bi bi-stars me-1" style="color:#c4b5fd"></i>Mejor modelo recomendado para tu hardware
       </div>`;
-      html += data.suggestions.map(m => ggufCard(m, 'recommended', {downloaded: m.downloaded})).join('');
-    } else if (!data.fit?.startsWith('no') && !data.fit?.includes('missing')) {
-      html += `<div class="text-secondary" style="font-size:.82rem"><i class="bi bi-check2-circle me-1 text-success"></i>El modelo configurado es apropiado para este hardware o no hay alternativas mas grandes en el catalogo.</div>`;
+      html += ggufCard(data.best_model, 'recommended', {
+        downloaded: data.best_model.downloaded,
+        selectable: true,
+        border: 'rgba(196,181,253,.45)',
+      });
+    } else {
+      html += `<div class="text-warning" style="font-size:.82rem"><i class="bi bi-exclamation-triangle me-1"></i>No se encontro un modelo del catalogo confirmado como compatible con este hardware.</div>`;
     }
 
     body.innerHTML = html;
@@ -904,7 +960,7 @@ async function loadArbiters() {
     fetch(APP_BASE + '/api/arbiters').then(r => r.json()),
     fetch(APP_BASE + '/api/local/hardware').then(r => r.json()).catch(() => null),
     fetch(APP_BASE + '/api/config').then(r => r.json()).then(cfg => {
-      maxArbiters = cfg.safety?.max_arbiters || 10;
+      maxArbiters = Math.max(1, arbiters.length);
     }),
   ]);
   await loadArbiterPreflight(false);
@@ -1079,14 +1135,15 @@ function openModal(arbId = null) {
     document.getElementById('arb-base-url').value            = a.provider?.base_url || '';
     document.getElementById('arb-vertex-project').value      = a.provider?.vertex_project || '';
     document.getElementById('arb-vertex-location').value     = a.provider?.vertex_location || 'us-central1';
+    document.getElementById('arb-n-ctx').value              = a.provider?.n_ctx ?? 0;
     selectedModel  = a.provider?.model || '';
     activeProvider = a.provider?.type || 'gemini';
     // Activar tab correcto sin recargar modelos aun
     document.querySelectorAll('.provider-tab').forEach(b =>
       b.classList.toggle('active', b.dataset.provider === activeProvider)
     );
-    const needKey   = !["llama_cpp", "vertex_gemini"].includes(activeProvider);
-    const needUrl   = ["openai_compat"].includes(activeProvider);
+    const needKey   = !["llama_cpp", "vertex_gemini", "ollama"].includes(activeProvider);
+    const needUrl   = ["openai_compat", "ollama"].includes(activeProvider);
     const needVertex = activeProvider === "vertex_gemini";
     const needLocal  = activeProvider === "llama_cpp";
     document.getElementById('apikey-section').style.setProperty('display', needKey    ? '' : 'none', 'important');
@@ -1113,6 +1170,7 @@ function openModal(arbId = null) {
     document.getElementById('arb-base-url').value            = '';
     document.getElementById('arb-vertex-project').value      = '';
     document.getElementById('arb-vertex-location').value     = 'us-central1';
+    document.getElementById('arb-n-ctx').value              = '0';
     document.getElementById('api-key-status').innerHTML      = '';
     activeProvider = 'gemini';
     document.querySelectorAll('.provider-tab').forEach(b =>
@@ -1126,6 +1184,7 @@ function openModal(arbId = null) {
   }
 
   bootstrap.Modal.getOrCreateInstance(document.getElementById('arbModal')).show();
+  if (!arbId) loadModels();
 }
 
 // ---------------------------------------------------------------------------
@@ -1142,7 +1201,7 @@ async function saveArbiter() {
       type:             activeProvider,
       model:            selectedModel,
       model_path:       activeProvider === 'llama_cpp' ? (currentModels.find(m => m.id === selectedModel)?.path || '') : '',
-      n_ctx:            activeProvider === 'llama_cpp' ? parseInt(document.getElementById('arb-n-ctx')?.value || '4096') : undefined,
+      n_ctx:            activeProvider === 'llama_cpp' ? parseInt(document.getElementById('arb-n-ctx')?.value || '0') : undefined,
       api_key_env:      DEFAULT_ENV[activeProvider] || '',
       api_key_override: '',
       base_url:         document.getElementById('arb-base-url').value.trim(),
@@ -1224,7 +1283,7 @@ function localRuntimeStatus(hw) {
       label: 'No configurado',
       tone: 'warning',
       icon: 'bi-exclamation-triangle',
-      detail: 'Ejecuta python setup_env.py para detectar hardware.',
+      detail: 'Ejecuta python setup/setup_env.py para detectar hardware.',
     };
   }
   const backend = (hw.best_backend || 'cpu').toLowerCase();
@@ -1323,7 +1382,7 @@ async function importArbiters() {
     showToast('Escribe la contrasena del archivo', 'error');
     return;
   }
-  if (mode === 'replace' && !confirm('Esto reemplazara todos los arbitros actuales. Continuar?')) {
+  if (mode === 'replace' && !await appConfirm('Esto reemplazara todos los arbitros actuales.', {title:'Reemplazar arbitros', confirmText:'Reemplazar'})) {
     return;
   }
 
@@ -1440,7 +1499,7 @@ function ggufSize(model) {
     if (b >= 1024 ** 2) return `${(b / (1024 ** 2)).toFixed(1)} MB`;
     return `${Math.round(b / 1024)} KB`;
   }
-  return model.size_gb ? `${model.size_gb} GB` : '-';
+  return model.size_gb ? `${model.size_estimated ? '~' : ''}${model.size_gb} GB${model.size_estimated ? ' estimados' : ''}` : '-';
 }
 
 function ggufStatusHtml(filename, show = false) {
@@ -1493,7 +1552,9 @@ function ggufCard(model, kind, options = {}) {
       <button class="btn btn-sm btn-outline-danger" onclick="deleteModel('${escapeHtml(filename)}', this)" title="Eliminar"><i class="bi bi-trash3"></i></button>`;
   } else if (kind === 'recommended') {
     actions = options.downloaded
-      ? `<span style="font-size:.72rem;color:#34d399"><i class="bi bi-check-circle me-1"></i>Ya descargado</span>`
+      ? (options.selectable
+        ? `<button class="btn btn-sm btn-outline-success" onclick="useRecommendedGguf('${escapeHtml(filename)}')"><i class="bi bi-check2-circle me-1"></i>Usar modelo</button>`
+        : `<span style="font-size:.72rem;color:#34d399"><i class="bi bi-check-circle me-1"></i>Ya descargado</span>`)
       : `<button class="btn btn-sm btn-outline-info" onclick="startDownload('${escapeHtml(repoId)}','${escapeHtml(filename)}',this,decodeURIComponent('${encodeURIComponent(description)}'))"><i class="bi bi-download me-1"></i>Descargar</button>`;
   }
 
@@ -1516,6 +1577,21 @@ function ggufCard(model, kind, options = {}) {
     </div>`;
 }
 
+async function useRecommendedGguf(filename) {
+  let model = currentModels.find(m => m.id === filename);
+  if (!model) {
+    await loadModels(true);
+    model = currentModels.find(m => m.id === filename);
+  }
+  if (!model) {
+    showToast('El archivo ya no esta disponible en la cache local. Actualiza o descargalo nuevamente.', 'error');
+    return;
+  }
+  selectModel(model.id);
+  showToast(`${filename} seleccionado para este arbitro`, 'success');
+  await checkLocalGgufHardware();
+}
+
 async function openDownloadModal() {
   bootstrap.Modal.getOrCreateInstance(document.getElementById('downloadModal')).show();
   document.getElementById('download-progress-area').style.display = ggufActiveDownloads.size ? '' : 'none';
@@ -1524,7 +1600,7 @@ async function openDownloadModal() {
   try {
     const hw = await fetch(APP_BASE + '/api/local/hardware').then(r => r.json());
     if (!hw || !hw.os) {
-      hwBody.innerHTML = '<span class="text-warning">No se encontro hw_profile.json. Ejecuta <code>python setup_env.py</code> primero.</span>';
+      hwBody.innerHTML = '<span class="text-warning">No se encontro hw_profile.json. Ejecuta <code>python setup/setup_env.py</code> primero.</span>';
     } else {
       const gpu = hw.gpu || {};
       const npu = hw.npu || {};
@@ -1564,7 +1640,7 @@ async function loadCachedModels() {
 }
 
 async function deleteModel(filename, btn) {
-  if (!confirm(`Eliminar ${filename}?`)) return;
+  if (!await appConfirm(`Se eliminara el modelo local «${filename}».`, {title:'Eliminar modelo', confirmText:'Eliminar'})) return;
   btn.disabled = true;
   try {
     const res = await fetch(`${APP_BASE}/api/local/model/${encodeURIComponent(filename)}`, {method: 'DELETE'});
@@ -1617,12 +1693,8 @@ async function loadRecommended(forceRefresh) {
       listEl.innerHTML = '<div class="text-secondary small">No hay modelos recomendados pendientes para descargar.</div>';
       return;
     }
-    const hasVotes = models.some(m => m.consensus_votes > 0);
     if (sourceEl) {
-      const maxVotes = hasVotes ? Math.max(...models.map(m => m.consensus_votes || 0)) : 0;
-      sourceEl.innerHTML = hasVotes
-        ? `<i class="bi bi-stars me-1" style="color:#a78bfa"></i>Catalogo generado por ${maxVotes} LLM(s)`
-        : `<i class="bi bi-archive me-1"></i>Usando catalogo base`;
+      sourceEl.innerHTML = `<i class="bi bi-cloud-check me-1" style="color:#38bdf8"></i>Fuente: catalogo oficial de Hugging Face; repositorios y archivos exactos`;
     }
     const hwKnown = models.some(m => m.fits_in_memory !== null);
     const compatible = models.filter(m => m.fits_in_memory !== false);
@@ -1630,7 +1702,7 @@ async function loadRecommended(forceRefresh) {
     let html = '';
     if (!hwKnown) {
       html += `<div class="small mb-2 p-2 rounded" style="background:#2a2415;border:1px solid #4a3f20;color:#fbbf24">
-        <i class="bi bi-exclamation-triangle me-1"></i>Perfil de hardware no disponible. Ejecuta <code>python setup_env.py</code>.
+        <i class="bi bi-exclamation-triangle me-1"></i>Perfil de hardware no disponible. Ejecuta <code>python setup/setup_env.py</code>.
       </div>`;
     }
     html += compatible.map(m => ggufCard(m, 'recommended', {border: m.fits_in_memory === null ? '#3a3520' : '#2d3148'})).join('');
@@ -1685,43 +1757,42 @@ async function startDownload(repoId, filename, btn, description = '') {
     btn.innerHTML = '<i class="bi bi-x-circle me-1"></i>Cancelar';
     btn.onclick = () => cancelDownload(data.job_id, filename, btn);
 
-    const es = new EventSource(`${APP_BASE}/api/local/download/${data.job_id}`);
-    es.onmessage = (e) => {
-      const d = JSON.parse(e.data);
-      if (d.status === 'done') {
-        ggufSetStatus(filename, 'done', 100, `<i class="bi bi-check2-circle me-1"></i>${escapeHtml(filename)} descargado correctamente`);
-        btn.innerHTML = '<i class="bi bi-check2"></i>';
-        btn.disabled = true;
-        ggufActiveDownloads.delete(filename);
-        es.close();
-        setTimeout(() => { loadModels(); loadCachedModels(); loadRecommended(false); }, 500);
-      } else if (d.status === 'error') {
-        ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(d.error || 'Error de descarga')}`);
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-download me-1"></i>Reintentar';
-        ggufActiveDownloads.delete(filename);
-        es.close();
-      } else if (d.status === 'canceled') {
-        ggufSetStatus(filename, 'canceled', 100, `<i class="bi bi-x-circle me-1"></i>${escapeHtml(d.error || 'Descarga cancelada')}`);
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-download me-1"></i>Descargar';
-        btn.onclick = () => startDownload(repoId, filename, btn, description);
-        ggufActiveDownloads.delete(filename);
-        es.close();
-      } else if (d.status === 'canceling') {
-        ggufSetStatus(filename, 'canceling', d.progress || 10, `Cancelando ${escapeHtml(filename)}...`);
-        btn.disabled = true;
-      } else {
-        ggufSetStatus(filename, 'downloading', d.progress || 10, `Descargando ${escapeHtml(filename)}... (${d.progress || 0}%)`);
+    const pollDownload = async () => {
+      try {
+        const statusRes = await fetch(`${APP_BASE}/api/local/download/${encodeURIComponent(data.job_id)}/status`, {cache: 'no-store'});
+        const d = await statusRes.json();
+        if (!statusRes.ok) throw new Error(d.error || `Error ${statusRes.status}`);
+        if (d.status === 'done') {
+          ggufSetStatus(filename, 'done', 100, `<i class="bi bi-check2-circle me-1"></i>${escapeHtml(filename)} descargado correctamente`);
+          btn.innerHTML = '<i class="bi bi-check2"></i>';
+          btn.disabled = true;
+          ggufActiveDownloads.delete(filename);
+          setTimeout(() => { loadModels(); loadCachedModels(); loadRecommended(false); }, 500);
+        } else if (d.status === 'error') {
+          ggufSetStatus(filename, 'error', 100, `<i class="bi bi-exclamation-triangle me-1"></i>${escapeHtml(d.error || 'Error de descarga')}`);
+          btn.disabled = false;
+          btn.innerHTML = '<i class="bi bi-download me-1"></i>Reintentar';
+          ggufActiveDownloads.delete(filename);
+        } else if (d.status === 'canceled') {
+          ggufSetStatus(filename, 'canceled', 100, `<i class="bi bi-x-circle me-1"></i>${escapeHtml(d.error || 'Descarga cancelada')}`);
+          btn.disabled = false;
+          btn.innerHTML = '<i class="bi bi-download me-1"></i>Descargar';
+          btn.onclick = () => startDownload(repoId, filename, btn, description);
+          ggufActiveDownloads.delete(filename);
+        } else {
+          const canceling = d.status === 'canceling';
+          ggufSetStatus(filename, canceling ? 'canceling' : 'downloading', d.progress || 1,
+            canceling ? `Cancelando ${escapeHtml(filename)}...` : `Descargando ${escapeHtml(filename)}... (${d.progress || 0}%)`);
+          if (canceling) btn.disabled = true;
+          setTimeout(pollDownload, 1000);
+        }
+      } catch (pollError) {
+        if (!ggufActiveDownloads.has(filename)) return;
+        ggufSetStatus(filename, 'downloading', 1, `Reconectando seguimiento: ${escapeHtml(pollError.message)}`);
+        setTimeout(pollDownload, 2000);
       }
     };
-    es.onerror = () => {
-      ggufSetStatus(filename, 'error', 100, 'Conexion perdida con el servidor de descarga.');
-      btn.disabled = false;
-      btn.innerHTML = '<i class="bi bi-download me-1"></i>Reintentar';
-      ggufActiveDownloads.delete(filename);
-      es.close();
-    };
+    pollDownload();
   } catch(e) {
     ggufSetStatus(filename, 'error', 100, escapeHtml(e.message));
     btn.disabled = false;

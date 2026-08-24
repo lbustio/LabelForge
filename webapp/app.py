@@ -92,7 +92,14 @@ from labelforge_core.arbiters_io import (
     require_export_password,
     validate_imported_arbiters,
 )
-from labelforge_core.checkpoint_io import clear_runtime_checkpoints, CLAIM_RESULTS_PATH
+from labelforge_core.checkpoint_io import (
+    clear_runtime_checkpoints,
+    load_arbiter_results,
+    load_failed_queue,
+    load_run_state,
+    save_run_state,
+    CLAIM_RESULTS_PATH,
+)
 from labelforge_core.dataset_io import (
     DatasetError,
     inspect_dataset,
@@ -108,7 +115,6 @@ from labelforge_core.run_reporting import (
 from labelforge_core.secrets_io import provider_api_key_env, resolve_gcp_credentials, secrets_env_path, set_secret_value
 from labelforge_core.rate_limits import (
     compute_min_delay,
-    get_defaults as _rl_get_defaults,
     load_config as _rl_load_config,
     save_config as _rl_save_config,
 )
@@ -157,24 +163,29 @@ LOGS_DIR.mkdir(exist_ok=True)
 _LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s %(message)s"
 _LOG_FORMATTER = _logging.Formatter(_LOG_FORMAT)
 
+# Todos los loggers de la web comparten los mismos handlers. En Windows no es
+# seguro abrir varios RotatingFileHandler contra el mismo archivo: cuando uno
+# intenta renombrarlo, los demas mantienen webapp.log abierto y la rotacion
+# falla con WinError 32.
+_WEB_STREAM_HANDLER = _logging.StreamHandler()
+_WEB_STREAM_HANDLER.setFormatter(_LOG_FORMATTER)
+
+_WEB_FILE_HANDLER = _RotatingFileHandler(
+    LOGS_DIR / "webapp.log",
+    maxBytes=2_000_000,
+    backupCount=5,
+    encoding="utf-8",
+)
+_WEB_FILE_HANDLER.setFormatter(_LOG_FORMATTER)
+
 
 def _configure_logger(logger: _logging.Logger, level: int = _logging.INFO) -> _logging.Logger:
     logger.setLevel(level)
     logger.propagate = False
     logger.handlers.clear()
 
-    stream_handler = _logging.StreamHandler()
-    stream_handler.setFormatter(_LOG_FORMATTER)
-    logger.addHandler(stream_handler)
-
-    file_handler = _RotatingFileHandler(
-        LOGS_DIR / "webapp.log",
-        maxBytes=2_000_000,
-        backupCount=5,
-        encoding="utf-8",
-    )
-    file_handler.setFormatter(_LOG_FORMATTER)
-    logger.addHandler(file_handler)
+    logger.addHandler(_WEB_STREAM_HANDLER)
+    logger.addHandler(_WEB_FILE_HANDLER)
     return logger
 
 
@@ -183,6 +194,9 @@ _configure_logger(_req_log)
 
 _log = _logging.getLogger(__name__)
 _configure_logger(_log)
+# Alias usado por manejadores de API historicos. Sin esta asignacion, cualquier
+# excepcion en esas rutas provocaba un NameError secundario al intentar loguearla.
+logger = _log
 _configure_logger(app.logger)
 
 _run_log = _logging.getLogger("labelforge.run")
@@ -329,7 +343,6 @@ _ADMIN_API_EXACT = frozenset({
     "/api/rate-limits",
     "/api/rate-limits/summary",
     "/api/rate-limits/config",
-    "/api/rate-limits/config/defaults",
     "/api/dataset/config",
     "/api/dataset/inspect",
     "/api/dataset/profile",
@@ -706,10 +719,14 @@ def _safe_next_url(next_url: str | None) -> str:
 
 def _login_required_response(message: str):
     session.clear()
-    _next = request.script_root + (request.full_path if request.query_string else request.path)
+    requested_return = request.headers.get("X-Return-To", "").strip()
+    _next = _safe_next_url(
+        requested_return
+        or request.script_root + (request.full_path if request.query_string else request.path)
+    )
     login_url = url_for("login", next=_next)
     if request.path.startswith("/api/"):
-        return jsonify({"error": message, "login_url": url_for("login")}), 401
+        return jsonify({"error": message, "login_url": login_url}), 401
     return redirect(login_url)
 
 
@@ -783,6 +800,7 @@ def login():
 
 @app.route("/logout", methods=["GET", "POST"])
 def logout():
+    next_url = _safe_next_url(request.values.get("next"))
     if request.method == "POST":
         provided = request.form.get("csrf_token", "") or request.headers.get("X-CSRF-Token", "")
         expected = session.get("csrf_token", "")
@@ -793,7 +811,7 @@ def logout():
         # Evita logout por navegacion/preload GET. El boton real usa POST.
         if _session_user():
             return redirect(url_for("index"))
-    return redirect(url_for("login"))
+    return redirect(url_for("login", next=next_url))
 
 
 @app.route("/avatars/<filename>")
@@ -1206,7 +1224,7 @@ def _load_hw_profile() -> dict:
         _log.warning(
             "models/hw_profile.json no encontrado. "
             "Los modelos locales GGUF no estaran disponibles. "
-            "Ejecuta 'python setup_env.py' para habilitarlos."
+            "Ejecuta 'python setup/setup_env.py' para habilitarlos."
         )
         return {}
     try:
@@ -1277,6 +1295,7 @@ MODELS_CACHE_TTL = 300
 # Estado global del proceso
 # ---------------------------------------------------------------------------
 METRIC_PREFIX = "__RUN_METRIC__ "
+SERVER_INSTANCE_ID = uuid.uuid4().hex
 
 
 def _empty_current_run_stats() -> dict:
@@ -1293,6 +1312,7 @@ def _empty_current_run_stats() -> dict:
         "completed_before_start": 0,
         "total_rows": 0,
         "dataset_total_rows": 0,
+        "eligible_rows": 0,
         "processed_rows": 0,
         "successful_rows": 0,
         "failed_rows": 0,
@@ -1306,15 +1326,26 @@ def _empty_current_run_stats() -> dict:
         "principles": [],
         "principle_counts": {},
         "checkpoint_every": 10,
+        "execution_order": "row_major",
+        "arbiter_count": 0,
+        "arbiter_work_total": 0,
+        "arbiter_work_completed": 0,
+        "current_arbiter_id": None,
+        "current_pass_position": 0,
+        "current_pass_total": 0,
+        "current_pass_completed": 0,
+        "current_pass_work_total": 0,
         "arbiters": {},
         "last_claim": None,
         "_claim_statuses": {},
         "_queued_indices": set(),
+        "_arbiter_result_keys": set(),
     }
 
 
 _process_state = {
     "running":   False,
+    "stop_requested": False,
     "pid":       None,
     "log_lines": [],
     "log_seq":   0,
@@ -1347,6 +1378,8 @@ def _public_current_stats(stats: dict = None) -> dict:
             "tokens_in":  arb_stats.get("prompt_tokens", 0),
             "tokens_out": arb_stats.get("completion_tokens", 0),
             "ok": arb_stats.get("calls", 0),
+            "evaluations": arb_stats.get("evaluations", arb_stats.get("calls", 0)),
+            "model_calls": arb_stats.get("model_calls", arb_stats.get("calls", 0)),
         }
         for arb_id, arb_stats in stats.get("arbiters", {}).items()
     }
@@ -1354,7 +1387,23 @@ def _public_current_stats(stats: dict = None) -> dict:
         0,
         int(public.get("total_rows", 0) or 0) - processed_rows,
     )
-    public["queued_rows"] = len(stats.get("_queued_indices", set()))
+    queued_indices = sorted(
+        stats.get("_queued_indices", set()),
+        key=lambda value: (0, int(value)) if str(value).isdigit() else (1, str(value)),
+    )
+    public["queued_rows"] = len(queued_indices)
+    public["queued_indices"] = queued_indices
+    # En orden por arbitro una fila no queda consolidada hasta reunir todos sus
+    # votos. La cobertura live debe reflejar cuantas entradas ya recibieron al
+    # menos un analisis, no solo cuantas alcanzaron el consenso final.
+    arbiter_evaluated_rows = max(
+        (int(arb.get("evaluations", arb.get("calls", 0)) or 0) for arb in public["arbiters"].values()),
+        default=0,
+    )
+    public["evaluated_rows"] = min(
+        int(public.get("eligible_rows", public.get("total_rows", 0)) or 0),
+        max(processed_rows, arbiter_evaluated_rows),
+    )
     public["total_latency_s"] = round(public.get("total_latency_s", 0) or 0, 3)
     public["tokens_per_processed_row"] = round(total_tokens / processed_rows) if processed_rows else 0
     public["tokens_per_successful_row"] = round(total_tokens / successful_rows) if successful_rows else 0
@@ -1383,7 +1432,7 @@ def _append_web_run_log_file(line: str):
 
 _SENSITIVE_LOG_PATTERNS = [
     re.compile(r"(?i)\b(authorization)(\s*:\s*)(?:bearer|basic)?\s*[^\s,;]+"),
-    re.compile(r"(?i)\b(api[_-]?key|token|secret|password|passwd|pwd|csrf)[\w .:-]*([=:]\s*)([^\s,;]+)"),
+    re.compile(r"(?i)\b(api[_-]?key|access[_-]?token|auth[_-]?token|refresh[_-]?token|id[_-]?token|secret|password|passwd|pwd|csrf)[\w .:-]*([=:]\s*)([^\s,;]+)"),
     re.compile(r"(?i)\b(OPENAI_API_KEY|ANTHROPIC_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY|LABELFORGE_SECRET_KEY|LABELFORGE_CSRF_TOKEN)\b\s*=\s*[^\s,;]+"),
     re.compile(r"(?i)\b(Bearer|Basic)\s+[A-Za-z0-9._~+/\-]+=*"),
 ]
@@ -1405,7 +1454,7 @@ def _sanitize_run_log_for_ui(line: str) -> str:
     base = re.escape(str(BASE_DIR))
     text = re.sub(base + r"[\\/][^\s\"']*", "[ruta-proyecto]", text, flags=re.IGNORECASE)
     text = re.sub(r"\b[A-Za-z]:\\[^\s\"']+", "[ruta-servidor]", text)
-    text = re.sub(r"(?<!:)//?[A-Za-z0-9_.-]+(?:/[^\s\"']*)?", lambda m: m.group(0) if m.group(0).startswith(("http://", "https://")) else "[ruta-servidor]", text)
+    text = re.sub(r"(?<![\w:])/(?!/)[A-Za-z0-9_.-]+(?:/[^\s\"']*)?", "[ruta-servidor]", text)
     return text
 
 
@@ -1429,6 +1478,90 @@ def _reset_current_stats():
         _process_state["current_stats"] = _empty_current_run_stats()
 
 
+def _hydrate_current_stats_from_disk() -> None:
+    """Restaura el panel tras reiniciar Flask sin inventar una ejecucion activa."""
+    with _process_state["stats_lock"]:
+        if _process_state["current_stats"].get("run_id"):
+            return
+    state = load_run_state()
+    if not state:
+        return
+
+    restored = _empty_current_run_stats()
+    restored["run_id"] = state.get("run_id")
+    restored["active"] = False
+    restored["finished"] = state.get("status") == "completed"
+    restored["source_file"] = state.get("output_file")
+    restored["output_path"] = state.get("output_path")
+    restored["input_file"] = state.get("input_file")
+    restored["config_file"] = state.get("config_file")
+    restored["started_at"] = state.get("created_at")
+    restored["updated_at"] = state.get("updated_at")
+    restored["total_rows"] = int(state.get("total_rows") or 0)
+    restored["dataset_total_rows"] = int(state.get("total_rows") or 0)
+    restored["eligible_rows"] = int(state.get("eligible_rows") or 0)
+    restored["pause_kind"] = state.get("pause_kind", "")
+    restored["pause_reason"] = state.get("pause_reason", "")
+    restored["principles"] = state.get("principles", [])
+    restored["arbiter_count"] = len(state.get("arbiters", []))
+    try:
+        restored["execution_order"] = read_config().get("processing", {}).get("execution_order", "row_major")
+    except Exception:
+        restored["execution_order"] = "row_major"
+    for arb in state.get("arbiters", []):
+        _ensure_live_arbiter(restored, arb.get("id"), arb.get("name"))
+
+    summary = state.get("summary", {})
+    if summary:
+        _apply_initial_summary(restored, summary)
+
+    partial = load_arbiter_results()
+    if not restored["eligible_rows"]:
+        input_rows, _ = _load_input_rows_for_run_state(state)
+        text_column = state.get("text_column") or ""
+        restored["eligible_rows"] = sum(
+            1 for row in input_rows if str(row.get(text_column, "") or "").strip()
+        ) if text_column else restored["total_rows"]
+    restored["arbiter_work_total"] = restored["eligible_rows"] * restored["arbiter_count"]
+    partial_evaluations = sum(len(v) for v in partial.values())
+    restored["arbiter_work_completed"] = partial_evaluations or (
+        (int(summary.get("successful_rows", 0) or 0) + int(summary.get("failed_rows", 0) or 0))
+        * restored["arbiter_count"]
+    )
+    # arbiter_results.jsonl contiene el acumulado completo, incluso para filas
+    # ya consolidadas. Sustituye los recursos del resumen para evitar tanto
+    # perdida al reanudar como doble conteo.
+    checkpoint_resources = {"total_tokens_global": 0, "total_latency_s": 0.0, "arbiters": {}}
+    for arbiter_results in partial.values():
+        for arb_id, result in arbiter_results.items():
+            usage = result.get("_usage", {}) if isinstance(result, dict) else {}
+            latency = float(result.get("_latency_s", 0) or 0) if isinstance(result, dict) else 0.0
+            chunks = max(1, int(result.get("_chunks", 1) or 1)) if isinstance(result, dict) else 1
+            incoming = checkpoint_resources["arbiters"].setdefault(arb_id, {
+                "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+                "evaluations": 0, "model_calls": 0, "latency_total_s": 0.0,
+                "latency_min_s": None, "latency_max_s": None,
+            })
+            prompt = int(usage.get("prompt_tokens", 0) or 0)
+            completion = int(usage.get("completion_tokens", 0) or 0)
+            incoming["prompt_tokens"] += prompt
+            incoming["completion_tokens"] += completion
+            incoming["total_tokens"] += prompt + completion
+            incoming["evaluations"] += 1
+            incoming["model_calls"] += chunks
+            incoming["latency_total_s"] += latency
+            incoming["latency_min_s"] = latency if incoming["latency_min_s"] is None else min(incoming["latency_min_s"], latency)
+            incoming["latency_max_s"] = latency if incoming["latency_max_s"] is None else max(incoming["latency_max_s"], latency)
+            checkpoint_resources["total_tokens_global"] += prompt + completion
+            checkpoint_resources["total_latency_s"] += latency
+    _apply_resource_summary(restored, checkpoint_resources)
+    restored["_queued_indices"] = {str(item.get("index")) for item in load_failed_queue()}
+
+    with _process_state["stats_lock"]:
+        if not _process_state["current_stats"].get("run_id"):
+            _process_state["current_stats"] = restored
+
+
 def _reset_runtime_state_for_new_run():
     with _process_state["state_lock"]:
         _process_state["run_log_path"] = str(_new_web_run_log_path())
@@ -1439,21 +1572,68 @@ def _reset_runtime_state_for_new_run():
     _reset_current_stats()
 
 
+def _run_is_active() -> bool:
+    with _process_state["state_lock"]:
+        return bool(_process_state.get("running"))
+
+
+def _mark_user_stopped_state() -> None:
+    """Convierte una terminacion solicitada en pausa reanudable y coherente."""
+    reason = "Ejecucion detenida por el usuario; los resultados persistidos pueden reanudarse."
+    with _process_state["stats_lock"]:
+        stats = _process_state["current_stats"]
+        stats["active"] = False
+        stats["finished"] = False
+        stats["pause_kind"] = "user_stopped"
+        stats["pause_reason"] = reason
+        stats["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    state = load_run_state()
+    if state and state.get("status") in {"running", "paused"}:
+        state["status"] = "paused"
+        state["pause_kind"] = "user_stopped"
+        state["pause_reason"] = reason
+        state["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+        save_run_state(state)
+
+
+def _terminate_run_process(proc: subprocess.Popen, timeout: float = 5.0) -> None:
+    """Termina el runner y fuerza el cierre si no responde a terminate()."""
+    if proc.poll() is not None:
+        return
+    try:
+        proc.terminate()
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=timeout)
+    except OSError:
+        pass
+
+
 def _runtime_snapshot(since: int = 0) -> dict:
+    _hydrate_current_stats_from_disk()
     with _process_state["state_lock"]:
         seq = int(_process_state.get("log_seq", 0) or 0)
         lines = list(_process_state.get("log_lines", []))
         base_seq = max(0, seq - len(lines))
         start = max(0, int(since or 0) - base_seq)
         payload_lines = lines[start:]
+        first_payload_seq = base_seq + start + 1
+        log_entries = [
+            {"seq": first_payload_seq + offset, "line": line}
+            for offset, line in enumerate(payload_lines)
+        ]
         runtime = {
+            "server_instance_id": SERVER_INSTANCE_ID,
             "running": bool(_process_state.get("running")),
             "pid": _process_state.get("pid"),
             "seq": seq,
             "lines": payload_lines,
+            "log_entries": log_entries,
             "exit_code": _process_state.get("exit_code"),
             "last_error": _process_state.get("last_error", ""),
             "run_log_available": bool(_process_state.get("run_log_path")),
+            "stop_requested": bool(_process_state.get("stop_requested")),
         }
     with _process_state["stats_lock"]:
         runtime["stats"] = _public_current_stats(_process_state["current_stats"])
@@ -1469,6 +1649,8 @@ def _ensure_live_arbiter(stats: dict, arb_id: str, name: str = None) -> dict:
             "completion_tokens": 0,
             "total_tokens": 0,
             "calls": 0,
+            "evaluations": 0,
+            "model_calls": 0,
             "latency_total_s": 0.0,
             "latency_min_s": None,
             "latency_max_s": None,
@@ -1488,7 +1670,25 @@ def _apply_initial_summary(stats: dict, summary: dict):
         arb_stats = _ensure_live_arbiter(stats, arb_id)
         for key in ["prompt_tokens", "completion_tokens", "total_tokens", "calls"]:
             arb_stats[key] = incoming.get(key, arb_stats.get(key, 0))
+        arb_stats["evaluations"] = int(incoming.get("evaluations", incoming.get("calls", 0)) or 0)
+        arb_stats["model_calls"] = int(incoming.get("model_calls", incoming.get("calls", 0)) or 0)
         arb_stats["latency_total_s"] = incoming.get("latency_total_s", 0) or 0
+        arb_stats["latency_min_s"] = incoming.get("latency_min_s") or None
+        arb_stats["latency_max_s"] = incoming.get("latency_max_s") or None
+
+
+def _apply_resource_summary(stats: dict, summary: dict):
+    """Reemplaza el acumulado de recursos con una fuente completa y durable."""
+    if not summary:
+        return
+    stats["total_tokens_global"] = int(summary.get("total_tokens_global", 0) or 0)
+    stats["total_latency_s"] = float(summary.get("total_latency_s", 0) or 0)
+    for arb_id, incoming in summary.get("arbiters", {}).items():
+        arb_stats = _ensure_live_arbiter(stats, arb_id)
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens", "evaluations", "model_calls"):
+            arb_stats[key] = int(incoming.get(key, 0) or 0)
+        arb_stats["calls"] = arb_stats["evaluations"]
+        arb_stats["latency_total_s"] = float(incoming.get("latency_total_s", 0) or 0)
         arb_stats["latency_min_s"] = incoming.get("latency_min_s") or None
         arb_stats["latency_max_s"] = incoming.get("latency_max_s") or None
 
@@ -1534,7 +1734,12 @@ def _apply_run_metric_event(event: dict) -> dict:
             stats["updated_at"] = event.get("timestamp")
             stats["total_rows"] = int(event.get("total_rows") or 0)
             stats["dataset_total_rows"] = int(event.get("dataset_total_rows") or 0)
+            stats["eligible_rows"] = int(event.get("eligible_rows") or stats["total_rows"])
             stats["completed_before_start"] = int(event.get("completed_before_start") or 0)
+            stats["execution_order"] = event.get("execution_order") or "row_major"
+            stats["arbiter_count"] = int(event.get("arbiter_count") or len(event.get("arbiters", [])))
+            stats["arbiter_work_total"] = int(event.get("arbiter_work_total") or 0)
+            stats["arbiter_work_completed"] = int(event.get("arbiter_work_completed") or 0)
             stats["principles"] = event.get("principles", [])
             try:
                 _cfg = read_config()
@@ -1544,25 +1749,30 @@ def _apply_run_metric_event(event: dict) -> dict:
             for arb in event.get("arbiters", []):
                 _ensure_live_arbiter(stats, arb.get("id"), arb.get("name"))
             _apply_initial_summary(stats, event.get("initial_summary", {}))
+            _apply_resource_summary(stats, event.get("initial_resource_summary", {}))
 
         elif kind == "claim_ok":
             _set_live_claim_status(stats, event.get("row_index"), "ok")
             stats["_queued_indices"].discard(str(event.get("row_index")))
-            stats["total_tokens_global"] += int(event.get("total_tokens") or 0)
-            if event.get("total_latency_s") is not None:
-                stats["total_latency_s"] += float(event.get("total_latency_s") or 0)
+            if stats.get("execution_order") != "arbiter_major":
+                stats["total_tokens_global"] += int(event.get("total_tokens") or 0)
+                if event.get("total_latency_s") is not None:
+                    stats["total_latency_s"] += float(event.get("total_latency_s") or 0)
             stats["last_claim"] = event
-            for arb in event.get("arbiters", []):
-                arb_stats = _ensure_live_arbiter(stats, arb.get("id"), arb.get("name"))
-                arb_stats["prompt_tokens"] += int(arb.get("prompt_tokens") or 0)
-                arb_stats["completion_tokens"] += int(arb.get("completion_tokens") or 0)
-                arb_stats["total_tokens"] += int(arb.get("total_tokens") or 0)
-                if arb.get("latency_s") is not None:
-                    latency = float(arb.get("latency_s") or 0)
-                    arb_stats["calls"] += 1
-                    arb_stats["latency_total_s"] += latency
-                    arb_stats["latency_min_s"] = latency if arb_stats["latency_min_s"] is None else min(arb_stats["latency_min_s"], latency)
-                    arb_stats["latency_max_s"] = latency if arb_stats["latency_max_s"] is None else max(arb_stats["latency_max_s"], latency)
+            if stats.get("execution_order") != "arbiter_major":
+                for arb in event.get("arbiters", []):
+                    arb_stats = _ensure_live_arbiter(stats, arb.get("id"), arb.get("name"))
+                    arb_stats["prompt_tokens"] += int(arb.get("prompt_tokens") or 0)
+                    arb_stats["completion_tokens"] += int(arb.get("completion_tokens") or 0)
+                    arb_stats["total_tokens"] += int(arb.get("total_tokens") or 0)
+                    if arb.get("latency_s") is not None:
+                        latency = float(arb.get("latency_s") or 0)
+                        arb_stats["calls"] += 1
+                        arb_stats["evaluations"] += 1
+                        arb_stats["model_calls"] += max(1, int(arb.get("model_calls") or 1))
+                        arb_stats["latency_total_s"] += latency
+                        arb_stats["latency_min_s"] = latency if arb_stats["latency_min_s"] is None else min(arb_stats["latency_min_s"], latency)
+                        arb_stats["latency_max_s"] = latency if arb_stats["latency_max_s"] is None else max(arb_stats["latency_max_s"], latency)
             for p, val in event.get("consensus", {}).items():
                 pc = stats["principle_counts"]
                 if p not in pc:
@@ -1575,8 +1785,54 @@ def _apply_run_metric_event(event: dict) -> dict:
         elif kind == "claim_start":
             stats["last_claim"] = event
 
+        elif kind == "arbiter_claim_start":
+            stats["last_claim"] = event
+            stats["current_arbiter_id"] = event.get("arbiter_id")
+            stats["current_pass_position"] = int(event.get("pass_position") or 0)
+            stats["current_pass_total"] = int(event.get("pass_total") or 0)
+            pending_total = int(event.get("pass_pending_total") or 0)
+            pending_position = int(event.get("position") or 0)
+            stats["current_pass_work_total"] = int(event.get("pass_work_total") or stats["eligible_rows"])
+            stats["current_pass_completed"] = max(
+                0, stats["current_pass_work_total"] - pending_total + pending_position - 1,
+            )
+
+        elif kind == "arbiter_pass_start":
+            stats["current_arbiter_id"] = event.get("arbiter_id")
+            stats["current_pass_position"] = int(event.get("position") or 0)
+            stats["current_pass_total"] = int(event.get("total_arbiters") or 0)
+            pending_rows = int(event.get("pending_rows") or 0)
+            stats["current_pass_work_total"] = int(event.get("pass_work_total") or stats["eligible_rows"])
+            stats["current_pass_completed"] = max(0, stats["current_pass_work_total"] - pending_rows)
+
+        elif kind == "arbiter_result":
+            arb_id = event.get("arbiter_id")
+            result_key = f"{event.get('row_index')}:{arb_id}"
+            if result_key not in stats["_arbiter_result_keys"]:
+                stats["_arbiter_result_keys"].add(result_key)
+                stats["arbiter_work_completed"] += 1
+                stats["total_tokens_global"] += int(event.get("total_tokens") or 0)
+                latency = float(event.get("latency_s") or 0)
+                stats["total_latency_s"] += latency
+                arb_stats = _ensure_live_arbiter(stats, arb_id, event.get("arbiter_name"))
+                arb_stats["prompt_tokens"] += int(event.get("prompt_tokens") or 0)
+                arb_stats["completion_tokens"] += int(event.get("completion_tokens") or 0)
+                arb_stats["total_tokens"] += int(event.get("total_tokens") or 0)
+                arb_stats["calls"] += 1
+                arb_stats["evaluations"] += 1
+                arb_stats["model_calls"] += max(1, int(event.get("chunks") or 1))
+                arb_stats["latency_total_s"] += latency
+                arb_stats["latency_min_s"] = latency if arb_stats["latency_min_s"] is None else min(arb_stats["latency_min_s"], latency)
+                arb_stats["latency_max_s"] = latency if arb_stats["latency_max_s"] is None else max(arb_stats["latency_max_s"], latency)
+                if arb_id == stats.get("current_arbiter_id"):
+                    stats["current_pass_completed"] = min(
+                        stats.get("current_pass_work_total") or stats["total_rows"],
+                        int(stats.get("current_pass_completed") or 0) + 1,
+                    )
+
         elif kind == "claim_failed":
-            _set_live_claim_status(stats, event.get("row_index"), "failed")
+            if event.get("definitive"):
+                _set_live_claim_status(stats, event.get("row_index"), "failed")
             if event.get("queued"):
                 stats["_queued_indices"].add(str(event.get("row_index")))
             stats["last_claim"] = event
@@ -1651,9 +1907,11 @@ def api_models():
     base_url = (body.get("base_url") or "").strip()
     project  = (body.get("project") or "").strip() or os.environ.get("GOOGLE_CLOUD_PROJECT", "").strip()
     location = (body.get("location") or "").strip() or os.environ.get("VERTEX_LOCATION", "us-central1").strip()
-    force    = body.get("force") == "1"
+    force_raw = body.get("force")
+    force = force_raw is True or str(force_raw).strip().lower() in {"1", "true", "yes"}
 
-    cache_key = f"{provider}:{env_var}:{base_url}:{project}:{location}"
+    credential_fingerprint = hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:12] if api_key else "adc-or-local"
+    cache_key = f"{provider}:{env_var}:{credential_fingerprint}:{base_url}:{project}:{location}"
     now = time.time()
     if not force and cache_key in _models_cache and (now - _models_cache[cache_key]["ts"]) < MODELS_CACHE_TTL:
         return jsonify(_models_cache[cache_key]["data"])
@@ -1667,7 +1925,9 @@ def api_models():
             result = _list_anthropic_models(api_key)
         elif provider == "openai":
             result = _list_openai_models(api_key)
-        elif provider in ("ollama", "openai_compat"):
+        elif provider == "ollama":
+            result = _list_ollama_models(base_url)
+        elif provider == "openai_compat":
             result = _list_openai_compat_models(api_key, base_url)
         elif provider == "llama_cpp":
             result = _list_local_gguf_models()
@@ -1736,13 +1996,17 @@ def _list_gemini_models(api_key: str) -> list:
         raise ValueError("Se requiere GEMINI_API_KEY en secrets/secrets.env o como parametro.")
     from google import genai as gai
     client = gai.Client(api_key=api_key)
-    raw    = list(client.models.list())
+    try:
+        raw = list(client.models.list(config={"page_size": 100, "query_base": True}))
+    finally:
+        client.close()
 
     EXCLUDE = ["tts", "image", "robotics", "lyria", "computer-use",
                "deep-research", "antigravity", "nano-banana", "clip"]
     result  = []
     for m in raw:
-        if "generateContent" not in (m.supported_actions or []):
+        actions = {str(action).replace("_", "").lower() for action in (m.supported_actions or [])}
+        if "generatecontent" not in actions:
             continue
         mid = m.name.replace("models/", "")
         if any(k in mid.lower() for k in EXCLUDE):
@@ -1758,22 +2022,35 @@ def _list_vertex_gemini_models(project: str, location: str) -> list:
     if not project:
         raise ValueError("Se requiere GOOGLE_CLOUD_PROJECT o project para Vertex AI.")
 
-    # Vertex AI no necesita API Key y se autentica con ADC / Service Account.
-    # Mantenemos una lista curada de modelos generativos de texto para evitar
-    # depender del endpoint de AI Studio al configurar arbitros Vertex.
-    model_ids = [
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-2.0-flash-001",
-        "gemini-2.0-flash-lite-001",
-        "gemini-1.5-pro",
-        "gemini-1.5-flash",
-    ]
-    result = [
-        {"id": mid, "display_name": mid, "task_description": GEMINI_MODEL_DESCRIPTIONS.get(mid, _generic_desc(mid))}
-        for mid in model_ids
-    ]
+    # Vertex se consulta con ADC / Service Account para respetar el proyecto,
+    # la region y los permisos efectivos en vez de usar una lista fija.
+    from google import genai as gai
+    client = gai.Client(vertexai=True, project=project, location=location or "us-central1")
+    try:
+        raw = list(client.models.list(config={"page_size": 100, "query_base": True}))
+    finally:
+        client.close()
+
+    excluded = ("embedding", "imagen", "veo", "chirp", "lyria", "tts", "image", "video", "audio", "computer-use")
+    result = []
+    seen = set()
+    for model in raw:
+        full_name = str(getattr(model, "name", "") or "")
+        mid = full_name.rsplit("/", 1)[-1]
+        if not mid or mid in seen or not mid.lower().startswith("gemini"):
+            continue
+        if any(token in mid.lower() for token in excluded):
+            continue
+        actions = {str(action).replace("_", "").lower() for action in (getattr(model, "supported_actions", None) or [])}
+        if actions and "generatecontent" not in actions:
+            continue
+        seen.add(mid)
+        result.append({
+            "id": mid,
+            "display_name": getattr(model, "display_name", None) or mid,
+            "task_description": GEMINI_MODEL_DESCRIPTIONS.get(mid, _generic_desc(mid)),
+            "source": "vertex_credentials",
+        })
 
     result.sort(key=lambda m: _tier_sort(m["id"]))
     return result
@@ -1784,9 +2061,15 @@ def _list_anthropic_models(api_key: str) -> list:
         raise ValueError("Se requiere ANTHROPIC_API_KEY en secrets/secrets.env o como parametro.")
     import anthropic
     client = anthropic.Anthropic(api_key=api_key)
-    raw    = client.models.list(limit=50)
+    page = client.models.list(limit=100)
+    raw = []
+    while True:
+        raw.extend(page.data)
+        if not page.has_next_page():
+            break
+        page = page.get_next_page()
     result = []
-    for m in raw.data:
+    for m in raw:
         mid  = m.id
         desc = ANTHROPIC_MODEL_DESCRIPTIONS.get(mid, _generic_desc(mid))
         result.append({"id": mid, "display_name": m.display_name or mid, "task_description": desc})
@@ -1800,10 +2083,16 @@ def _list_openai_models(api_key: str) -> list:
     from openai import OpenAI
     client = OpenAI(api_key=api_key)
     raw    = client.models.list()
-    CHAT_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt")
+    non_text_markers = (
+        "embedding", "moderation", "whisper", "dall-e", "tts", "transcribe",
+        "realtime", "image", "video", "sora",
+    )
     result = []
     for m in raw.data:
-        if not any(m.id.startswith(p) for p in CHAT_PREFIXES):
+        mid = m.id.lower()
+        is_known_text = mid.startswith(("gpt-", "o1", "o3", "o4", "chatgpt", "ft:"))
+        is_custom = getattr(m, "owned_by", "openai") not in {"openai", "system"}
+        if any(marker in mid for marker in non_text_markers) or not (is_known_text or is_custom):
             continue
         desc = OPENAI_MODEL_DESCRIPTIONS.get(m.id, _generic_desc(m.id))
         result.append({"id": m.id, "display_name": m.id, "task_description": desc})
@@ -1842,6 +2131,41 @@ def _list_openai_compat_models(api_key: str, base_url: str) -> list:
         for m in raw.data
     ]
     result.sort(key=lambda m: m["id"])
+    return result
+
+
+def _list_ollama_models(base_url: str) -> list:
+    """Lista los modelos instalados usando el endpoint nativo de Ollama."""
+    if not base_url:
+        base_url = "http://localhost:11434"
+    _validate_base_url(base_url)
+    from urllib.parse import urlsplit, urlunsplit
+    import requests
+
+    parsed = urlsplit(base_url)
+    root_path = parsed.path.rstrip("/")
+    if root_path.endswith("/v1"):
+        root_path = root_path[:-3]
+    tags_url = urlunsplit((parsed.scheme, parsed.netloc, f"{root_path}/api/tags", "", ""))
+    response = requests.get(tags_url, timeout=10)
+    response.raise_for_status()
+    models = response.json().get("models", [])
+    result = []
+    for item in models:
+        mid = str(item.get("model") or item.get("name") or "").strip()
+        if not mid:
+            continue
+        details = item.get("details") or {}
+        size_gb = round(float(item.get("size") or 0) / (1024 ** 3), 2)
+        family = details.get("family") or details.get("format") or "modelo local"
+        result.append({
+            "id": mid,
+            "display_name": mid,
+            "task_description": f"Ollama {family} - {size_gb} GB" if size_gb else f"Ollama {family}",
+            "size_gb": size_gb,
+            "source": "ollama_tags",
+        })
+    result.sort(key=lambda model: model["id"].lower())
     return result
 
 
@@ -2012,7 +2336,10 @@ def api_rate_limits_summary():
 @app.route("/api/rate-limits/config", methods=["GET"])
 def api_rate_limits_config_get():
     """Retorna la configuracion de rate limits desde config/rate_limits.json."""
-    return jsonify(_rl_load_config())
+    try:
+        return jsonify(_rl_load_config())
+    except (FileNotFoundError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/api/rate-limits/config", methods=["PUT"])
@@ -2030,12 +2357,6 @@ def api_rate_limits_config_put():
         logger.error(f"Error al guardar config rate-limit: {exc}", exc_info=True)
         return jsonify({"error": "Error al guardar la configuracion."}), 500
     return jsonify({"ok": True})
-
-
-@app.route("/api/rate-limits/config/defaults", methods=["GET"])
-def api_rate_limits_config_defaults():
-    """Retorna los valores predeterminados de rate limits (sin modificar el archivo)."""
-    return jsonify(_rl_get_defaults())
 
 
 # ---------------------------------------------------------------------------
@@ -2156,6 +2477,13 @@ def api_local_download():
         except Exception as exc:
             job["status"] = "error"
             job["error"] = str(exc)
+            logger.error(
+                "Error descargando GGUF %s/%s: %s",
+                repo_id,
+                filename,
+                exc,
+                exc_info=True,
+            )
 
     t = threading.Thread(target=_run, daemon=True)
     t.start()
@@ -2190,9 +2518,23 @@ def api_local_download_status(job_id: str):
     return Response(
         stream_with_context(generate()),
         mimetype="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
-                 "Connection": "keep-alive"},
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.route("/api/local/download/<job_id>/status", methods=["GET"])
+def api_local_download_status_json(job_id: str):
+    """Estado JSON para seguimiento robusto desde la interfaz."""
+    with _download_jobs_lock:
+        job = _download_jobs.get(job_id)
+        if not job:
+            return jsonify({"error": "job no encontrado"}), 404
+        return jsonify({
+            "status": job.get("status"),
+            "progress": job.get("progress", 0),
+            "error": job.get("error"),
+            "filename": job.get("filename"),
+        })
 
 
 @app.route("/api/local/download/<job_id>/cancel", methods=["POST"])
@@ -2423,6 +2765,8 @@ def api_get_dataset_config():
 @app.route("/api/dataset/config", methods=["PUT"])
 def api_update_dataset_config():
     """Guarda la configuracion del dataset (input_file, sheet, text_column)."""
+    if _run_is_active():
+        return jsonify({"error": "No se puede cambiar el dataset durante una ejecucion activa."}), 409
     cfg  = read_config()
     data = request.get_json() or {}
 
@@ -2657,11 +3001,13 @@ def _preflight_status_by_arbiter(cfg: dict) -> dict:
                 models = _list_anthropic_models(_get_api_key("anthropic"))
             elif ptype == "openai":
                 models = _list_openai_models(_get_api_key("openai"))
-            elif ptype in {"ollama", "openai_compat"}:
+            elif ptype == "ollama":
+                models = _list_ollama_models(provider.get("base_url", ""))
+            elif ptype == "openai_compat":
                 models = _list_openai_compat_models(_get_api_key(ptype), provider.get("base_url", ""))
             elif ptype == "vertex_gemini":
-                # validate_provider_preflight already checks ADC/project. Vertex model discovery
-                # is curated locally to avoid extra provider calls in this screen.
+                # validate_provider_preflight ya comprobo ADC/proyecto; esta consulta
+                # confirma que el modelo aparece para esas credenciales y region.
                 models = _list_vertex_gemini_models(
                     provider.get("vertex_project", "") or os.environ.get("GOOGLE_CLOUD_PROJECT", ""),
                     provider.get("vertex_location", "") or os.environ.get("VERTEX_LOCATION", "us-central1"),
@@ -2728,10 +3074,24 @@ def api_get_arbiter(arb_id):
 def api_arbiter_hw_check(arb_id):
     """Verifica si el modelo del arbitro es adecuado para el hardware local."""
     arb = next((a for a in read_config()["arbiters"] if a["id"] == arb_id), None)
-    if not arb:
+    preview_type = request.args.get("provider", "").strip()
+    if not arb and not preview_type:
         return jsonify({"error": f"Arbitro '{arb_id}' no encontrado"}), 404
 
-    prov = arb.get("provider", {})
+    # El modal puede estar editando un proveedor/modelo distinto al que sigue
+    # guardado. Para el chequeo usamos esa configuracion provisional.
+    if preview_type:
+        allowed_types = {"gemini", "anthropic", "openai", "vertex_gemini", "llama_cpp", "ollama", "openai_compat"}
+        if preview_type not in allowed_types:
+            return jsonify({"error": "Proveedor no reconocido"}), 400
+        prov = {
+            "type": preview_type,
+            "model": request.args.get("model", "").strip(),
+            "model_path": request.args.get("model_path", "").strip(),
+            "n_ctx": request.args.get("n_ctx", "0").strip(),
+        }
+    else:
+        prov = arb.get("provider", {})
     prov_type = prov.get("type", "gemini")
 
     CLOUD_TYPES = {"gemini", "anthropic", "openai", "vertex_gemini"}
@@ -2769,12 +3129,43 @@ def api_arbiter_hw_check(arb_id):
         },
     }
 
+    # La recomendacion se decide exclusivamente por capacidad y compatibilidad
+    # con el hardware. La presencia en cache solo determina la accion posterior.
+    if prov_type == "llama_cpp" and hw:
+        try:
+            from labelforge_core.local_models import list_cached_models, recommended_models
+            cached_filenames = {m["filename"].lower() for m in list_cached_models()}
+            compatible = [
+                m for m in recommended_models(hw_profile=hw)
+                if m.get("fits_in_memory") is True
+            ]
+            tier_score = {"large": 4, "medium": 3, "small": 2, "micro": 1}
+            compatible.sort(
+                key=lambda m: (tier_score.get(m.get("tier"), 0), m.get("size_gb", 0)),
+                reverse=True,
+            )
+            if compatible:
+                best = compatible[0]
+                result["best_model"] = {
+                    "filename": best["filename"],
+                    "repo_id": best.get("repo_id", ""),
+                    "size_gb": best.get("size_gb"),
+                    "description": best.get("description", ""),
+                    "tier": best.get("tier", ""),
+                    "downloaded": best["filename"].lower() in cached_filenames,
+                }
+        except Exception:
+            result["best_model"] = None
+
     if prov_type == "llama_cpp":
         from labelforge_core.local_models import get_optimal_params
         model_path_rel = prov.get("model_path", "")
         if not model_path_rel:
             result["fit"] = "no_model_path"
-            result["fit_msg"] = "El arbitro no tiene model_path configurado."
+            result["fit_msg"] = (
+                "La recomendacion se calculo usando la memoria y aceleracion disponibles. "
+                "Ahora puedes descargarla o seleccionarla si ya esta en cache."
+            )
             return jsonify(result)
 
         mpath = Path(model_path_rel)
@@ -2789,12 +3180,12 @@ def api_arbiter_hw_check(arb_id):
             result["fit_msg"] = f"El archivo del modelo no se encontro: {model_path_rel}"
         elif not hw:
             result["fit"] = "no_hw_profile"
-            result["fit_msg"] = "No hay perfil de hardware (hw_profile.json). Ejecuta 'python setup_env.py'."
+            result["fit_msg"] = "No hay perfil de hardware (hw_profile.json). Ejecuta 'python setup/setup_env.py'."
         else:
             from labelforge_core.local_models import get_optimal_params, list_cached_models, recommended_models
             size_gb = round(mpath.stat().st_size / (1024 ** 3), 2)
             result["model_size_gb"] = size_gb
-            n_ctx = int(prov.get("n_ctx") or 4096)
+            n_ctx = int(prov.get("n_ctx") or 0)
             optimal = get_optimal_params(str(mpath), n_ctx=n_ctx, hw_profile=hw)
             result["optimal_params"] = optimal
 
@@ -2869,7 +3260,7 @@ def api_arbiter_hw_check(arb_id):
     elif prov_type == "ollama":
         if not hw:
             result["fit"] = "no_hw_profile"
-            result["fit_msg"] = "No hay perfil de hardware. Ejecuta 'python setup_env.py'."
+            result["fit_msg"] = "No hay perfil de hardware. Ejecuta 'python setup/setup_env.py'."
         else:
             ram_gb = hw.get("ram_gb", 0)
             vram_gb = gpu.get("vram_gb") or 0
@@ -2905,7 +3296,7 @@ def api_arbiter_hw_check(arb_id):
             )
         else:
             result["fit"] = "no_hw_profile"
-            result["fit_msg"] = "No hay perfil de hardware. Ejecuta 'python setup_env.py'."
+            result["fit_msg"] = "No hay perfil de hardware. Ejecuta 'python setup/setup_env.py'."
 
     return jsonify(result)
 
@@ -3046,7 +3437,9 @@ def api_update_processing():
     cfg     = read_config()
     data    = request.get_json()
     allowed = {
-        "checkpoint_every": int, "claim_max_chars": int,
+        "execution_order": str, "arbiter_major_retry_attempts": int,
+        "checkpoint_every": int, "systemic_failure_threshold": int, "context_window_fallback": int,
+        "context_safety_margin_tokens": int, "chunk_overlap_chars": int,
         "base_delay_seconds": float, "min_delay_seconds": float, "max_delay_seconds": float,
         "rate_limit_backoff_multiplier": float, "server_error_backoff_multiplier": float,
         "recovery_threshold_successes": int, "recovery_delay_multiplier": float,
@@ -3058,32 +3451,10 @@ def api_update_processing():
             except: errors.append(f"Valor invalido para '{key}'")
     if errors:
         return jsonify({"error": "; ".join(errors)}), 400
-
-    if "base_delay_seconds" in updated:
-        n_arbiters = len(cfg.get("arbiters", [])) or 1
-        provider_delays = []
-        for arb in cfg.get("arbiters", []):
-            provider = arb.get("provider", {})
-            if provider.get("model"):
-                delay_info = compute_min_delay(
-                    provider.get("type", "gemini"),
-                    provider["model"],
-                    "free",
-                    n_arbiters,
-                )
-                if delay_info.get("limit_kind") != "local":
-                    provider_delays.append(delay_info)
-        if provider_delays:
-            min_delay = max(r["min_delay_s"] for r in provider_delays)
-            if updated["base_delay_seconds"] < min_delay:
-                worst = max(provider_delays, key=lambda r: r["min_delay_s"])
-                return jsonify({
-                    "error": (f"La espera base es demasiado baja para los limites del proveedor/modelo. "
-                              f"Minimo recomendado: {min_delay}s "
-                              f"(limitado por {worst.get('provider')} / {worst['model']} a {worst['rpm']} RPM)."),
-                    "min_delay_seconds": min_delay,
-                    "safe_delay_seconds": max(r["safe_delay_s"] for r in provider_delays),
-                }), 400
+    if "execution_order" in updated and updated["execution_order"] not in {"row_major", "arbiter_major"}:
+        return jsonify({"error": "execution_order debe ser 'row_major' o 'arbiter_major'"}), 400
+    if int(updated.get("arbiter_major_retry_attempts", 0)) < 0:
+        return jsonify({"error": "arbiter_major_retry_attempts no puede ser negativo"}), 400
 
     cfg["processing"].update(updated)
     write_config(cfg)
@@ -3102,6 +3473,7 @@ def api_run_start():
             app.logger.info("[run/start] Ya hay un proceso corriendo -> 409")
             return jsonify({"error": "Ya hay un proceso corriendo"}), 409
         _process_state["running"] = True  # claim slot atomically before releasing lock
+        _process_state["stop_requested"] = False
 
     data  = request.get_json() or {}
     limit = data.get("limit")
@@ -3183,13 +3555,18 @@ def api_run_start():
             _push_run_log("--- Lanzando proceso de etiquetado ---")
             proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1, cwd=str(BASE_DIR), env=env,
+                text=True, encoding="utf-8", errors="replace", bufsize=1,
+                cwd=str(BASE_DIR), env=env,
             )
             with _process_state["state_lock"]:
                 _process_state["proc"] = proc
                 _process_state["pid"]  = proc.pid
+                stop_requested = bool(_process_state.get("stop_requested"))
             app.logger.info("[run/start] Subprocess PID=%s", proc.pid)
             _push_run_log(f"Subprocess PID={proc.pid}")
+            if stop_requested:
+                _push_run_log("--- Detencion solicitada durante el arranque ---")
+                _terminate_run_process(proc)
             for line in iter(proc.stdout.readline, ""):
                 line = line.rstrip("\r\n")
                 if not line:
@@ -3214,7 +3591,10 @@ def api_run_start():
             app.logger.info("[run/start] %s", exit_msg)
             _push_run_log(exit_msg)
             with _process_state["state_lock"]:
-                _process_state["exit_code"] = proc.returncode
+                if _process_state.get("stop_requested"):
+                    _process_state["exit_code"] = "STOPPED"
+                else:
+                    _process_state["exit_code"] = proc.returncode
         except Exception as e:
             app.logger.error("[run/start] Excepcion en subprocess: %s", e)
             err_msg = "--- Error en proceso ---"
@@ -3224,6 +3604,10 @@ def api_run_start():
                 # No exponer detalles internos del error al cliente
                 _process_state["last_error"] = "Error interno en el proceso de etiquetado"
         finally:
+            with _process_state["state_lock"]:
+                was_stopped = bool(_process_state.get("stop_requested"))
+            if was_stopped:
+                _mark_user_stopped_state()
             with _process_state["state_lock"]:
                 _process_state["running"] = False
                 _process_state["proc"]    = None
@@ -3235,20 +3619,27 @@ def api_run_start():
 
 @app.route("/api/run/stop", methods=["POST"])
 def api_run_stop():
+    app.logger.info("[run/stop] Solicitud recibida")
     with _process_state["state_lock"]:
         proc    = _process_state.get("proc")
         running = _process_state["running"]
-    if proc and running:
-        try:
-            proc.terminate()
-        except OSError:
-            pass
-        with _process_state["state_lock"]:
-            _process_state["running"] = False
-            _process_state["exit_code"] = "STOPPED"
-        _push_run_log("--- Proceso detenido por el usuario ---")
-        return jsonify({"ok": True})
-    return jsonify({"error": "No hay proceso activo"}), 400
+        if running:
+            _process_state["stop_requested"] = True
+    if not running:
+        return jsonify({"error": "No hay proceso activo"}), 400
+
+    _push_run_log("--- Detencion solicitada por el usuario ---")
+    if proc:
+        # No bloquear la respuesta HTTP mientras Windows espera a que cierre el
+        # runner. La interfaz recibe confirmacion inmediata y sigue consultando
+        # el estado hasta que el hilo de captura finaliza.
+        threading.Thread(
+            target=_terminate_run_process,
+            args=(proc,),
+            daemon=True,
+            name="labelforge-run-stop",
+        ).start()
+    return jsonify({"ok": True, "stopping": True})
 
 
 @app.route("/api/run/status", methods=["GET"])
@@ -3268,7 +3659,11 @@ def api_run_snapshot():
         since = int(request.args.get("since", 0) or 0)
     except (TypeError, ValueError):
         since = 0
-    return jsonify(_runtime_snapshot(since))
+    response = jsonify(_runtime_snapshot(since))
+    # El estado de ejecucion es efimero y autoritativo. Evita que el navegador
+    # reutilice un snapshot previo al logout/login o desde su cache de recarga.
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    return response
 
 
 def _describe_output_csv(path: Path) -> dict:
@@ -3364,6 +3759,8 @@ def api_archive_all_outputs():
     denied = _require_admin()
     if denied:
         return denied
+    if _run_is_active():
+        return jsonify({"error": "No se puede archivar mientras hay una ejecucion activa."}), 409
     import re
     from datetime import datetime
     files = list(OUTPUT_DIR.glob("labeled_*.csv")) if OUTPUT_DIR.exists() else []
@@ -3391,6 +3788,50 @@ def api_archive_all_outputs():
         "ok": True,
         "archived": count,
         "archive_dir": f"archive/partial_{stamp}",
+        "cleared": cleared,
+    })
+
+
+@app.route("/api/outputs/clear-all", methods=["DELETE"])
+def api_clear_all_outputs():
+    """Elimina ejecuciones actuales y deja el pipeline listo para empezar de cero."""
+    denied = _require_admin()
+    if denied:
+        return denied
+    with _process_state["state_lock"]:
+        if _process_state.get("running"):
+            return jsonify({"error": "Deten la ejecucion activa antes de limpiar todo"}), 409
+
+    import re
+    files = list(OUTPUT_DIR.glob("labeled_*.csv")) if OUTPUT_DIR.exists() else []
+    files = [f for f in files if re.match(r"^labeled_\d{8}_\d{6}\.csv$", f.name)]
+    deleted = []
+    for path in files:
+        path.unlink()
+        deleted.append(path.name)
+
+    cleared = _clear_runtime_checkpoint_files(
+        include_run_state=True,
+        include_claim_results=True,
+    )
+    _reset_current_stats()
+    with _process_state["state_lock"]:
+        _process_state["pid"] = None
+        _process_state["proc"] = None
+        _process_state["log_lines"] = []
+        _process_state["log_seq"] = 0
+        _process_state["run_log_path"] = None
+        _process_state["exit_code"] = None
+        _process_state["last_error"] = ""
+        _process_state["stop_requested"] = False
+    with _auth_db() as conn:
+        conn.execute("DELETE FROM run_ownership")
+        conn.commit()
+
+    return jsonify({
+        "ok": True,
+        "deleted_outputs": len(deleted),
+        "deleted_files": deleted,
         "cleared": cleared,
     })
 
@@ -3497,8 +3938,42 @@ def api_run_stats():
     rows: list[dict] = []
     fieldnames: list[str] = []
     source_file: str = ""
+    run_state: dict = {}
+    run_state_path = CHECKPOINTS_DIR / "run_state.json"
+    if run_state_path.exists():
+        try:
+            with open(run_state_path, "r", encoding="utf-8") as f:
+                run_state = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            run_state = {}
 
-    if OUTPUT_DIR.exists():
+    # Una ejecucion activa/pausada es siempre la fuente vigente. Nunca mezclar
+    # sus filas parciales con un CSV historico que simplemente tenga mas filas.
+    if run_state.get("status") in {"running", "paused"}:
+        rows, fieldnames, source_file = _load_checkpoint_result_rows()
+        if not rows:
+            return jsonify({
+                "pending": True,
+                "run_id": run_state.get("run_id"),
+                "status": run_state.get("status"),
+                "execution_order": read_config().get("processing", {}).get("execution_order", "row_major"),
+                "source_file": f"checkpoint:{run_state.get('run_id') or ''}",
+                "message": "La ejecucion actual aun no tiene entradas consolidadas.",
+            }), 202
+
+    if not rows and run_state.get("status") == "completed":
+        current_output = _resolve_project_path(run_state.get("output_path"))
+        if current_output and current_output.exists() and current_output.suffix.lower() == ".csv":
+            try:
+                with open(current_output, "r", encoding="utf-8") as f:
+                    reader = _csv.DictReader(f)
+                    fieldnames = reader.fieldnames or []
+                    rows = list(reader)
+                source_file = current_output.name
+            except Exception as exc:
+                app.logger.warning("[run/stats] Error leyendo CSV vigente %s: %s", current_output.name, exc)
+
+    if not rows and OUTPUT_DIR.exists():
         csvs = sorted(OUTPUT_DIR.glob("labeled_*.csv"), reverse=True)
         if csvs:
             latest = csvs[0]
@@ -3511,11 +3986,9 @@ def api_run_stats():
             except Exception as e:
                 app.logger.warning("[run/stats] Error leyendo CSV %s: %s", latest.name, e)
 
-    # Use checkpoint rows (claim_results.jsonl) only while a run is underway (run_state.json
-    # exists). This avoids showing stale data from a previous run after the CSV was archived
-    # but the checkpoint was not yet cleared.
-    run_state_path = CHECKPOINTS_DIR / "run_state.json"
-    if run_state_path.exists():
+    # Sin una ejecucion activa, el checkpoint incremental puede ser mas reciente
+    # que el CSV y se usa solo si pertenece al mismo estado y aporta mas filas.
+    if run_state_path.exists() and run_state.get("status") == "completed":
         checkpoint_rows, checkpoint_fieldnames, checkpoint_source = _load_checkpoint_result_rows()
         if len(checkpoint_rows) > len(rows):
             rows = checkpoint_rows
@@ -3540,13 +4013,16 @@ def api_run_stats():
             result_limit = 250
         result_limit = max(1, min(result_limit, 1000))
 
-    return jsonify(build_run_stats(
+    payload = build_run_stats(
         rows,
         fieldnames,
         source_file,
         result_limit=result_limit,
         result_offset=result_offset,
-    ))
+    )
+    payload["run_id"] = run_state.get("run_id") if run_state else None
+    payload["run_status"] = run_state.get("status") if run_state else None
+    return jsonify(payload)
 
 
 @app.route("/api/checkpoint/status", methods=["GET"])
@@ -3565,12 +4041,28 @@ def api_checkpoint_status():
                 "updated_at": raw_state.get("updated_at"),
                 "output_file": raw_state.get("output_file"),
                 "total_rows": raw_state.get("total_rows"),
+                "eligible_rows": raw_state.get("eligible_rows", raw_state.get("total_rows")),
                 "pause_kind": raw_state.get("pause_kind", ""),
                 "pause_reason": raw_state.get("pause_reason", ""),
                 "processed_rows": summary.get("processed_rows", 0),
                 "successful_rows": summary.get("successful_rows", 0),
                 "failed_rows": summary.get("failed_rows", 0),
             }
+            processing_cfg = read_config().get("processing", {})
+            run_state["execution_order"] = processing_cfg.get("execution_order", "row_major")
+            partial = load_arbiter_results()
+            arbiter_count = len(raw_state.get("arbiters", []))
+            partial_evaluations = sum(len(v) for v in partial.values())
+            run_state["arbiter_evaluations_saved"] = partial_evaluations or (
+                (int(summary.get("successful_rows", 0) or 0) + int(summary.get("failed_rows", 0) or 0))
+                * arbiter_count
+            )
+            run_state["arbiter_evaluations_total"] = int(
+                raw_state.get("eligible_rows", raw_state.get("total_rows", 0)) or 0
+            ) * arbiter_count
+            # Alias temporal para clientes anteriores a la aclaracion de unidades.
+            run_state["arbiter_votes_saved"] = run_state["arbiter_evaluations_saved"]
+            run_state["arbiter_votes_total"] = run_state["arbiter_evaluations_total"]
             if run_state["status"] == "completed":
                 # claim_results.jsonl is intentionally preserved after completion
                 # so the next run with a higher limit can skip already-done entries.
@@ -3596,30 +4088,21 @@ def api_checkpoint_status():
 
 @app.route("/api/failed-queue", methods=["GET"])
 def api_failed_queue():
-    path = CHECKPOINTS_DIR / "failed_queue.jsonl"
-    if not path.exists():
-        return jsonify([])
     items = []
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                item = json.loads(line)
-                row = item.get("row", {})
-                items.append({
-                    "index": item.get("index"),
-                    "reason": item.get("reason", "sin detalle"),
-                    "claim": row.get("claim", ""),
-                })
-            except json.JSONDecodeError:
-                continue
+    for item in load_failed_queue():
+        row = item.get("row", {})
+        items.append({
+            "index": item.get("index"),
+            "reason": item.get("reason", "sin detalle"),
+            "claim": row.get("claim") or row.get("txt") or "",
+        })
     return jsonify(items)
 
 
 @app.route("/api/checkpoint/clear", methods=["POST"])
 def api_checkpoint_clear():
+    if _run_is_active():
+        return jsonify({"error": "No se puede limpiar el checkpoint durante una ejecucion activa."}), 409
     cleared = _clear_runtime_checkpoint_files(include_run_state=True, include_claim_results=True)
     _reset_current_stats()
     return jsonify({"ok": True, "cleared": cleared})

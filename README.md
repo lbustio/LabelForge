@@ -54,7 +54,13 @@ hace fact-checking, no se usa contexto externo y no se infiere intencion oculta.
 
 ```text
 LabelForge/
-|-- setup_env.py                 # Detecta hardware e instala backend local GGUF
+|-- README.md                    # Portada y guia principal mostrada por GitHub
+|-- setup/                       # Creacion y configuracion de entornos
+|   |-- setup_env.py             # Detecta hardware e instala backend local GGUF
+|   |-- requirements.txt
+|   |-- environment.yml
+|   `-- build_llama_cuda.cmd
+|-- docs/                        # Bitacora, contexto y backlog del proyecto
 |-- main_cli.py                  # Entrypoint del pipeline CLI
 |-- main_webapp.py               # Entrypoint de la webapp Flask
 |-- main_tui.py                  # TUI interactiva estilo menús numerados
@@ -86,6 +92,9 @@ LabelForge/
 
 ## Instalación rápida
 
+Los archivos necesarios para crear y preparar entornos están centralizados en
+`setup/`. Los comandos siguientes se ejecutan desde la raíz del repositorio.
+
 Requisitos:
 
 - Python 3.10+
@@ -102,13 +111,13 @@ python -m venv .venv
 # Linux/macOS
 source .venv/bin/activate
 
-pip install -r requirements.txt
+pip install -r setup/requirements.txt
 ```
 
 ### Con Conda:
 
 ```bash
-conda env create -f environment.yml
+conda env create -f setup/environment.yml
 conda activate labelforge
 ```
 
@@ -117,10 +126,10 @@ conda activate labelforge
 Después de instalar las dependencias, para habilitar modelos locales GGUF:
 
 ```bash
-python setup_env.py
+python setup/setup_env.py
 ```
 
-`setup_env.py`:
+`setup/setup_env.py`:
 - Detecta OS/CPU/RAM/GPU/NPU
 - Instala `llama-cpp-python` con backend apropiado cuando puede: CUDA para NVIDIA, ROCm para AMD Linux, Metal para Apple Silicon, Vulkan para AMD/Intel compatibles y CPU como fallback
 - Instala OpenVINO si aplica para NPU Intel

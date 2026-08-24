@@ -2,7 +2,7 @@
 main_tui.py  —  Interfaz interactiva estilo TUI para LabelForge.
 
 Navegación por menús numerados, sin flags de línea de comandos.
-Requiere: pip install rich  (incluido en requirements.txt)
+Requiere: pip install rich  (incluido en setup/requirements.txt)
 
 Uso:
     python main_tui.py

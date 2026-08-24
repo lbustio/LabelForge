@@ -1,7 +1,7 @@
 # LabelForge - Dependencias directas
 # Python >= 3.10
-# Instalar base: pip install -r requirements.txt
-# Instalar con soporte de hardware local: python setup_env.py
+# Instalar base: pip install -r setup/requirements.txt
+# Instalar con soporte de hardware local: python setup/setup_env.py
 
 # --- Cloud LLM providers ---
 google-genai>=2.8.0

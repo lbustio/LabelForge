@@ -68,6 +68,19 @@
     line-height: 1.35;
     word-break: break-word;
   }
+  .live-claim-text {
+    max-height: 9rem;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: .35rem .55rem .35rem 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    scrollbar-gutter: stable;
+  }
+  .live-claim-text::-webkit-scrollbar { width: .45rem; }
+  .live-claim-text::-webkit-scrollbar-track { background: rgba(15,23,42,.45); border-radius: 999px; }
+  .live-claim-text::-webkit-scrollbar-thumb { background: #475569; border-radius: 999px; }
+  .live-claim-text::-webkit-scrollbar-thumb:hover { background: #64748b; }
   /* ── Dataset card ──────────────────────────────────────────────────── */
   .ds-step-hdr { display:flex; align-items:center; gap:.75rem; margin-bottom:.85rem; }
   .ds-step-num {
@@ -177,6 +190,10 @@
   .quality-details-body {
     padding: .85rem;
   }
+  .dataset-panel-toggle { color:#94a3b8; border-color:#334155; }
+  .dataset-panel-toggle:hover { color:#e2e8f0; border-color:#38bdf8; }
+  .dataset-panel-toggle .bi-chevron-down { transition:transform .2s ease; }
+  .dataset-panel-toggle[aria-expanded="true"] .bi-chevron-down { transform:rotate(180deg); }
 </style>
 
 <div class="page-title">
@@ -187,7 +204,18 @@
 <!-- DATASET: Subir / perfilar / seleccionar columna               -->
 <!-- ============================================================ -->
 <div class="card-dark accent-panel accent-cyan mb-4">
-  <div class="card-header-label"><i class="bi bi-database me-2"></i>Dataset de entrada</div>
+  <div class="d-flex align-items-center gap-3 mb-2">
+    <div class="card-header-label mb-0"><i class="bi bi-database me-2"></i>Dataset de entrada</div>
+    <div id="dataset-panel-summary" class="small text-secondary text-truncate ms-auto" style="display:none;max-width:55%"></div>
+    <button type="button" class="btn btn-sm dataset-panel-toggle flex-shrink-0"
+            data-bs-toggle="collapse" data-bs-target="#dataset-panel-body"
+            aria-expanded="true" aria-controls="dataset-panel-body" title="Expandir o comprimir configuración del dataset">
+      <span class="dataset-toggle-label">Comprimir</span>
+      <i class="bi bi-chevron-down ms-1"></i>
+    </button>
+  </div>
+
+  <div class="collapse show" id="dataset-panel-body">
 
   <!-- PASO 1: Subir archivo -->
   <div id="step-1">
@@ -252,7 +280,7 @@
     <div class="ds-tab-pane" id="tab-info" style="display:none">
       <div class="ds-tab-scroll">
         <table class="table table-dark table-sm">
-          <thead><tr><th style="width:2rem">#</th><th>Columna</th><th>Tipo</th><th>No nulos</th><th class="text-end">% relleno</th><th>Muestra de valores</th></tr></thead>
+          <thead><tr><th style="width:2rem">#</th><th>Columna</th><th>Tipo</th><th>Valores no vacios</th><th class="text-end">% analizable</th><th>Muestra de valores</th></tr></thead>
           <tbody id="ds-info-body"></tbody>
         </table>
       </div>
@@ -289,7 +317,7 @@
       <div class="d-flex align-items-center gap-2 mb-2">
         <span class="col-type-badge" id="ds-col-type">texto</span>
         <span class="small text-secondary">
-          <span id="ds-col-fill">-</span>% con valor &nbsp;·&nbsp; <span id="ds-col-nonnull">-</span> no nulos
+          <span id="ds-col-fill">-</span>% analizables &nbsp;·&nbsp; <span id="ds-col-nonnull">-</span> textos no vacios
         </span>
       </div>
       <div class="small text-secondary mb-1">Muestra:</div>
@@ -316,6 +344,7 @@
       </button>
     </div>
   </div>
+  </div>
 </div>
 
 <!-- ============================================================ -->
@@ -329,9 +358,12 @@
         <label class="form-label small text-secondary">
           <i class="bi bi-sliders me-1"></i>Limite de entradas
         </label>
-        <input type="number" id="limit-input" class="form-control" min="1" value="10" placeholder="Vacio = procesar todo" oninput="updateLimitExplanation()">
+        <input type="number" id="limit-input" class="form-control" min="0" value="0" placeholder="0 = procesar todo el dataset" oninput="updateLimitExplanation()">
+        <div class="form-text text-info fw-semibold">
+          0 = procesar todo el dataset.
+        </div>
         <div class="form-text text-secondary">
-          Es un limite total desde el inicio del dataset, no una cantidad adicional.
+          Un valor mayor que 0 es un limite total desde el inicio del dataset, no una cantidad adicional.
         </div>
         <div class="form-text text-info" id="limit-explanation">
           Si hay checkpoint, las entradas ya guardadas se saltan.
@@ -367,8 +399,8 @@
   </div>
   <div class="row g-3 align-items-end">
     <div class="col-md-4">
-      <button id="btn-start" class="btn btn-primary btn-lg w-100" onclick="startRun().catch(e=>{appendLog('[ERROR interno] '+e.message,'error');showToast('Error interno: '+e.message,'error');})">
-        <i class="bi bi-play-fill me-1"></i>Iniciar
+      <button id="btn-start" class="btn btn-primary btn-lg w-100" disabled onclick="startRun().catch(e=>{appendLog('[ERROR interno] '+e.message,'error');showToast('Error interno: '+e.message,'error');})">
+        <span class="spinner-border spinner-border-sm me-2"></span>Sincronizando
       </button>
     </div>
     <div class="col-md-8">
@@ -376,19 +408,19 @@
         <div class="col-4">
           <div class="metric-mini accent-emerald text-center">
             <div class="metric-value" id="stat-processed">-</div>
-            <div class="metric-label">Entradas OK</div>
+            <div class="metric-label" id="stat-processed-label">Consolidadas OK</div>
           </div>
         </div>
         <div class="col-4">
           <div class="metric-mini accent-amber text-center">
             <div class="metric-value" id="stat-failed">-</div>
-            <div class="metric-label">Fallidos</div>
+            <div class="metric-label" id="stat-failed-label">Consolidadas fallidas</div>
           </div>
         </div>
         <div class="col-4">
           <div class="metric-mini accent-rose text-center">
             <div class="metric-value" id="stat-errors">-</div>
-            <div class="metric-label">Errores</div>
+            <div class="metric-label">Incidentes recientes</div>
           </div>
         </div>
       </div>
@@ -396,7 +428,7 @@
       <div id="progress-bars" class="mt-3" style="display:none">
         <div class="mb-2">
           <div class="d-flex justify-content-between align-items-baseline mb-1">
-            <span class="small text-secondary">Limite de ejecucion</span>
+            <span class="small text-secondary" id="pb-limit-label">Filas cerradas (consolidadas, fallidas u omitidas)</span>
             <span class="small fw-semibold" id="pb-limit-text" style="color:#22d3ee">-</span>
           </div>
           <div style="height:7px;background:#1e2234;border-radius:999px;overflow:hidden">
@@ -405,12 +437,22 @@
         </div>
         <div>
           <div class="d-flex justify-content-between align-items-baseline mb-1">
-            <span class="small text-secondary">Dataset completo</span>
+            <span class="small text-secondary" id="pb-total-label">Cobertura del dataset completo</span>
             <span class="small fw-semibold" id="pb-total-text" style="color:#8b5cf6">-</span>
           </div>
           <div style="height:7px;background:#1e2234;border-radius:999px;overflow:hidden">
             <div id="pb-total-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#7c3aed,#8b5cf6);border-radius:999px;transition:width .4s ease"></div>
           </div>
+        </div>
+        <div id="pb-arbiter-work" class="mt-2" style="display:none">
+          <div class="d-flex justify-content-between align-items-baseline mb-1">
+            <span class="small text-secondary" id="pb-arbiter-label">Pasadas de arbitros</span>
+            <span class="small fw-semibold" id="pb-arbiter-text" style="color:#34d399">-</span>
+          </div>
+          <div style="height:7px;background:#1e2234;border-radius:999px;overflow:hidden">
+            <div id="pb-arbiter-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#059669,#34d399);border-radius:999px;transition:width .4s ease"></div>
+          </div>
+          <div class="small text-secondary mt-1" id="pb-arbiter-global">-</div>
         </div>
       </div>
     </div>
@@ -431,7 +473,7 @@
       </div>
       <div class="log-box" id="log-box"></div>
       <div class="mt-3 flex-shrink-0">
-        <button id="btn-stop" class="btn btn-danger w-100" onclick="stopRun()" disabled>
+        <button type="button" id="btn-stop" class="btn btn-danger w-100" disabled>
           <i class="bi bi-stop-fill me-1"></i>Detener ejecucion
         </button>
       </div>
@@ -465,19 +507,19 @@
         <div class="col-sm-4 col-6">
           <div class="metric-mini accent-violet text-center">
             <div class="metric-value" id="live-total-tokens">-</div>
-            <div class="metric-label">Tokens ahora</div>
+            <div class="metric-label">Tokens acumulados</div>
           </div>
         </div>
         <div class="col-sm-4 col-6">
           <div class="metric-mini accent-amber text-center">
             <div class="metric-value" id="live-projected-tokens">-</div>
-            <div class="metric-label">Tokens estimados</div>
+            <div class="metric-label">Tokens proyectados al finalizar</div>
           </div>
         </div>
         <div class="col-sm-4 col-6">
           <div class="metric-mini accent-rose text-center">
             <div class="metric-value" id="live-attention">-</div>
-            <div class="metric-label">Fallos / reintentos</div>
+            <div class="metric-label">Fallidas / en cola</div>
           </div>
         </div>
       </div>
@@ -487,8 +529,8 @@
     <div class="card-dark accent-panel accent-rose mb-3">
       <div class="d-flex justify-content-between align-items-center mb-2">
         <div class="card-header-label mb-0">
-          <i class="bi bi-exclamation-triangle me-1"></i>Errores
-          <i class="bi bi-info-circle ms-1" style="color:#64748b;font-size:.72rem;cursor:help" title="Errores detectados durante la ejecucion: fallos de conexion, rate limits, errores de API, etc."></i>
+          <i class="bi bi-exclamation-triangle me-1"></i>Incidentes operativos recientes
+          <i class="bi bi-info-circle ms-1" style="color:#64748b;font-size:.72rem;cursor:help" title="Advertencias y errores observados en la actividad reciente cargada. Un incidente no implica necesariamente que una entrada haya fallado."></i>
         </div>
         <div class="d-flex align-items-center gap-2">
           <span class="badge bg-danger-subtle text-danger border border-danger" id="errors-count">0</span>
@@ -501,7 +543,7 @@
       <div class="d-flex justify-content-between align-items-center mb-2">
         <div class="card-header-label mb-0">
           <i class="bi bi-queue me-1"></i>Reintentos pendientes
-          <i class="bi bi-info-circle ms-1" style="color:#64748b;font-size:.72rem;cursor:help" title="Entradas que fallaron durante el procesamiento y seran reintentadas automaticamente al finalizar el loop principal."></i>
+          <i class="bi bi-info-circle ms-1" style="color:#64748b;font-size:.72rem;cursor:help" title="Entradas pendientes por un fallo de evaluacion. Pueden reintentarse o dejar la ejecucion pausada, segun la politica configurada."></i>
         </div>
         <div class="d-flex align-items-center gap-2">
           <span class="badge bg-warning-subtle text-warning border border-warning" id="queued-count">0</span>
@@ -527,7 +569,7 @@
     </div>
     <div class="col-lg-6">
       <div class="chart-box">
-        <div class="chart-box-title" id="chart-principles-title">Distribucion de principios (entradas etiquetadas hasta ahora)</div>
+        <div class="chart-box-title" id="chart-principles-title">Distribucion de principios (consensos consolidados)</div>
         <div class="chart-pending-overlay" id="overlay-principles">
           <div class="po-icon"><i class="bi bi-hourglass-split"></i></div>
           <div id="overlay-principles-msg">Inicia un proceso para ver datos en vivo</div>
@@ -550,37 +592,37 @@
     <div class="col-md-2 col-6">
       <div class="metric-mini accent-violet text-center">
         <div class="metric-value" id="stats-total-tokens">-</div>
-        <div class="metric-label">Tokens globales</div>
+        <div class="metric-label">Tokens acumulados</div>
       </div>
     </div>
     <div class="col-md-2 col-6">
       <div class="metric-mini accent-blue text-center">
         <div class="metric-value" id="stats-total-rows">-</div>
-        <div class="metric-label">Entradas totales</div>
+        <div class="metric-label">Filas guardadas</div>
       </div>
     </div>
     <div class="col-md-2 col-6">
       <div class="metric-mini accent-emerald text-center">
         <div class="metric-value" id="stats-successful-rows">-</div>
-        <div class="metric-label">Entradas OK</div>
+        <div class="metric-label">Consolidadas OK</div>
       </div>
     </div>
     <div class="col-md-2 col-6">
       <div class="metric-mini accent-rose text-center">
         <div class="metric-value" id="stats-failed-rows">-</div>
-        <div class="metric-label">Fallidos</div>
+        <div class="metric-label">Consolidadas fallidas</div>
       </div>
     </div>
     <div class="col-md-2 col-6">
       <div class="metric-mini accent-amber text-center">
         <div class="metric-value" id="stats-tpr">-</div>
-        <div class="metric-label">Tokens / entrada</div>
+        <div class="metric-label">Tokens / fila consolidada</div>
       </div>
     </div>
     <div class="col-md-2 col-6">
       <div class="metric-mini accent-cyan text-center">
         <div class="metric-value" id="stats-total-latency">-</div>
-        <div class="metric-label">Tiempo total</div>
+        <div class="metric-label">Suma de latencias LLM</div>
       </div>
     </div>
   </div>
@@ -611,9 +653,14 @@
   <div class="d-flex justify-content-between align-items-center mb-3">
     <div class="card-header-label mb-0"><i class="bi bi-folder me-1"></i>Archivos de salida generados</div>
     {% if current_user and current_user.role == 'admin' %}
-    <button class="btn btn-sm btn-outline-warning" id="btn-archive" onclick="archiveAllOutputs()">
-      <i class="bi bi-archive me-1"></i>Archivar todo
-    </button>
+    <div class="d-flex gap-2">
+      <button class="btn btn-sm btn-outline-warning" id="btn-archive" onclick="archiveAllOutputs()">
+        <i class="bi bi-archive me-1"></i>Archivar todo
+      </button>
+      <button class="btn btn-sm btn-outline-danger" id="btn-clear-all" onclick="clearAllExecutions()">
+        <i class="bi bi-trash3 me-1"></i>Limpiar todo
+      </button>
+    </div>
     {% endif %}
   </div>
   <div id="outputs-table"><span class="text-secondary small">Cargando...</span></div>
@@ -640,23 +687,31 @@ let chartPrinciples = null;
 let chartAgreementQuality = null;
 let chartAgreementKappa = null;
 const latencyHistory = {};
+const latencyHistoryCounts = {};
 const speedHistory   = [];
 const LATENCY_MAX_POINTS = 60;
 const SPEED_MAX_POINTS   = 60;
 let checkpointProcessedRows = 0;
 let checkpointTotalRows = 0;
+let checkpointArbiterEvaluations = 0;
 let resultsOffset = 0;
 let resultsPageSize = 'all';
 let statsRefreshTimer = null;
+let principleCountsTimer = null;
 let runSyncTimer = null;
 let runSyncSeq = 0;
 let runSyncBusy = false;
+let runStopPending = false;
+let serverInstanceId = null;
 let arbiterLogMeta = {};
 let itemLabel = 'entrada';
 let checkpointEvery = 10;
 let allArbiterConfigs = {};
 let hwProfile = null;
 let backendLogSeen = new Set();
+let backendLogSeqSeen = new Set();
+let runStateHydrated = false;
+let authoritativeRunning = false;
 let runStartedAtMs = 0;
 let lastStatsActivitySnapshot = '';
 let runWasActive = false;
@@ -691,25 +746,51 @@ function detectArbiterInLog(line) {
   return null;
 }
 
+function parseLogEnvelope(line) {
+  const text = String(line || '');
+  const timestampMatch = text.match(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:,\d+)?)/);
+  const levelMatch = text.match(/\[(DEBUG|INFO|WARNING|ERROR|CRITICAL)\]/i);
+  const level = levelMatch ? levelMatch[1].toUpperCase() : null;
+  const payload = levelMatch ? text.slice(levelMatch.index + levelMatch[0].length).trim() : text.trim();
+  return {text, level, payload, timestamp: timestampMatch ? timestampMatch[1] : null};
+}
+
+function logTypeFromEnvelope(envelope) {
+  if (envelope.level === 'CRITICAL') return 'critical';
+  if (envelope.level === 'ERROR') return 'error';
+  if (envelope.level === 'WARNING') return 'warn';
+  if (envelope.level === 'DEBUG') return 'debug';
+  if (envelope.level === 'INFO') return 'info';
+  // Mensajes propios de la interfaz sin nivel de Python.
+  if (/^\[(?:ERROR|ERROR RED|FATAL)\b/i.test(envelope.payload)) return 'error';
+  if (/^\[(?:WARNING|WARN)\b/i.test(envelope.payload)) return 'warn';
+  if (/^\[(?:OK|Respuesta servidor)\b/i.test(envelope.payload)) return 'ok';
+  return 'info';
+}
+
 function updateLimitExplanation() {
   const el = document.getElementById('limit-explanation');
   const input = document.getElementById('limit-input');
   if (!el || !input) return;
 
   const raw = input.value.trim();
-  if (!raw) {
+  const limit = Math.max(parseInt(raw, 10) || 0, 0);
+  if (!raw || limit === 0) {
     if (checkpointProcessedRows > 0) {
       el.textContent = `Procesara todo el dataset, saltando las ${formatNumber(checkpointProcessedRows)} entradas ya guardadas.`;
+    } else if (checkpointArbiterEvaluations > 0) {
+      el.textContent = `Procesara todo el dataset y reutilizara ${formatNumber(checkpointArbiterEvaluations)} evaluaciones de arbitro ya guardadas.`;
     } else {
       el.textContent = 'Procesara todo el dataset desde el inicio.';
     }
     return;
   }
 
-  const limit = Math.max(parseInt(raw, 10) || 0, 0);
   if (checkpointProcessedRows > 0) {
     const newRows = Math.max(limit - checkpointProcessedRows, 0);
     el.textContent = `Con checkpoint: limite ${formatNumber(limit)} = considerar las primeras ${formatNumber(limit)} entradas del dataset; nuevas por procesar aprox.: ${formatNumber(newRows)}.`;
+  } else if (checkpointArbiterEvaluations > 0) {
+    el.textContent = `Con checkpoint parcial: limite ${formatNumber(limit)}; se reutilizaran ${formatNumber(checkpointArbiterEvaluations)} evaluaciones de arbitro ya calculadas dentro de ese rango.`;
   } else {
     el.textContent = `Sin checkpoint: procesara como maximo las primeras ${formatNumber(limit)} entradas.`;
   }
@@ -724,13 +805,16 @@ async function loadCheckpoint() {
   if (!cp.exists || !runState) {
     checkpointProcessedRows = 0;
     checkpointTotalRows = 0;
+    checkpointArbiterEvaluations = 0;
     updateLimitExplanation();
     area.innerHTML = '<span class="text-secondary small"><i class="bi bi-bookmark-x me-1"></i>Sin punto de control: se procesara desde el inicio</span>';
+    syncDynamicControlLocks();
     return;
   }
 
   checkpointProcessedRows = Number(runState.processed_rows || 0);
   checkpointTotalRows = Number(runState.total_rows || 0);
+  checkpointArbiterEvaluations = Number(runState.arbiter_evaluations_saved ?? runState.arbiter_votes_saved ?? 0);
   updateLimitExplanation();
 
   const isPaused = runState.status === 'paused';
@@ -764,11 +848,13 @@ async function loadCheckpoint() {
             <span class="text-secondary small">${escapeHtml(runState.run_id || '')}</span>
           </div>
           <div class="small" style="color:#94a3b8">
-            <div class="mb-1"><span class="text-secondary">Procesadas:</span> <strong>${formatNumber(runState.processed_rows || 0)}</strong> / ${formatNumber(runState.total_rows || 0)} entradas</div>
-            <div class="mb-1"><span class="text-secondary">Exitosos:</span> ${formatNumber(runState.successful_rows || 0)}  -  <span class="text-secondary">Fallidos:</span> ${formatNumber(runState.failed_rows || 0)}</div>
+            <div class="mb-1"><span class="text-secondary">Filas cerradas:</span> <strong>${formatNumber(runState.processed_rows || 0)}</strong> / ${formatNumber(runState.total_rows || 0)}</div>
+            <div class="mb-1"><span class="text-secondary">Entradas analizables:</span> ${formatNumber(runState.eligible_rows ?? runState.total_rows ?? 0)}</div>
+            <div class="mb-1"><span class="text-secondary">Consolidadas OK:</span> ${formatNumber(runState.successful_rows || 0)}  -  <span class="text-secondary">Consolidadas fallidas:</span> ${formatNumber(runState.failed_rows || 0)}</div>
+            ${runState.execution_order === 'arbiter_major' ? `<div class="mb-1"><span class="text-secondary">Evaluaciones de arbitro guardadas:</span> <strong>${formatNumber(runState.arbiter_evaluations_saved ?? runState.arbiter_votes_saved ?? 0)}</strong> / ${formatNumber(runState.arbiter_evaluations_total ?? runState.arbiter_votes_total ?? 0)}</div>` : ''}
             ${runState.pause_kind ? `<div class="mb-1"><span class="text-secondary">Motivo pausa:</span> <span class="text-danger">${escapeHtml(runState.pause_kind)}</span> - ${escapeHtml(runState.pause_reason || '')}</div>` : ''}
             <div><span class="text-secondary">Ultima actualizacion:</span> ${escapeHtml(runState.updated_at || '')}</div>
-            ${runState.output_file ? `<div class="mt-1"><span class="text-secondary">CSV final:</span> ${escapeHtml(runState.output_file)}</div>` : ''}
+            ${runState.output_file ? `<div class="mt-1"><span class="text-secondary">${isCompleted ? 'CSV final' : 'Salida prevista'}:</span> ${escapeHtml(runState.output_file)}</div>` : ''}
           </div>
           ${resumeBtn}
         </div>
@@ -777,11 +863,14 @@ async function loadCheckpoint() {
         </button>
       </div>
     </div>`;
+  syncDynamicControlLocks();
 }
 
 async function clearCheckpoint() {
-  if (!confirm('Limpiar el punto de control? Se perdera el progreso guardado.')) return;
-  await fetch(APP_BASE + '/api/checkpoint/clear', {method: 'POST'});
+  if (!await appConfirm('Se perdera el progreso guardado en el punto de control.', {title:'Limpiar punto de control', confirmText:'Limpiar'})) return;
+  const res = await fetch(APP_BASE + '/api/checkpoint/clear', {method: 'POST'});
+  const data = await res.json();
+  if (!res.ok) { showToast(data.error || 'No se pudo limpiar el punto de control', 'error'); return; }
   await loadCheckpoint();
   showToast('Punto de control limpiado');
 }
@@ -820,13 +909,13 @@ async function loadConfigSummary() {
     const datasetEl = document.getElementById('config-dataset');
     datasetEl.textContent = datasetText;
     datasetEl.title = datasetText;
-    configureArbiterLogColors(cfg.arbiters || [], cfg.safety?.max_arbiters || 10);
+    configureArbiterLogColors(cfg.arbiters || [], Math.max(1, (cfg.arbiters || []).length));
     itemLabel = cfg.task?.item_label || 'entrada';
     checkpointEvery = cfg.processing?.checkpoint_every || 10;
     const speedTitle = document.getElementById('chart-speed-title');
     if (speedTitle) speedTitle.textContent = `Velocidad de etiquetado (${itemLabel}s/min)`;
     const princTitle = document.getElementById('chart-principles-title');
-    if (princTitle) princTitle.textContent = `Distribucion de principios (${itemLabel}s etiquetadas hasta ahora)`;
+    if (princTitle) princTitle.textContent = 'Distribucion de principios (consensos consolidados)';
     if (chartSpeed?.data?.datasets?.[0]) {
       chartSpeed.data.datasets[0].label = `${itemLabel}s/min`;
       chartSpeed.update('none');
@@ -872,6 +961,7 @@ async function loadOutputs() {
   const el = document.getElementById('outputs-table');
   if (!files.length) {
     el.innerHTML = '<span class="text-secondary small">Sin resultados todavia.</span>';
+    syncDynamicControlLocks();
     return;
   }
   el.innerHTML = `
@@ -902,7 +992,7 @@ async function loadOutputs() {
           <td>${f.size_kb} KB</td>
           <td>${f.modified}</td>
           <td>
-            <button class="btn btn-sm btn-danger-soft" style="padding:.15rem .5rem;font-size:.75rem" onclick="deleteOutput('${encodeURIComponent(f.name)}')" title="Eliminar archivo">
+            <button class="btn btn-sm btn-danger-soft output-delete-btn" style="padding:.15rem .5rem;font-size:.75rem" onclick="deleteOutput('${encodeURIComponent(f.name)}')" title="Eliminar archivo">
               <i class="bi bi-trash"></i>
             </button>
           </td>
@@ -910,16 +1000,18 @@ async function loadOutputs() {
       `).join('')}</tbody>
     </table>
     </div>`;
+  syncDynamicControlLocks();
 }
 
 async function deleteOutput(name) {
   const decoded = decodeURIComponent(name);
-  if (!confirm(`Eliminar el archivo "${decoded}"?`)) return;
+  if (!await appConfirm(`Se eliminara el archivo «${decoded}».`, {title:'Eliminar resultado', confirmText:'Eliminar'})) return;
   try {
     const r = await fetch(`${APP_BASE}/api/outputs/${name}`, { method: 'DELETE' });
     if (!r.ok) { const e = await r.json(); throw new Error(e.error); }
     showToast(`Archivo "${decoded}" eliminado`, 'success');
     await loadOutputs();
+    await loadRunStats();
   } catch (err) {
     showToast(`Error: ${err.message}`, 'error');
   }
@@ -937,6 +1029,19 @@ async function loadFailedQueue() {
 
 // ---------- run ----------
 async function startRun() {
+  if (!runStateHydrated) {
+    await syncRunSnapshot();
+    if (!runStateHydrated) {
+      showToast('No se pudo confirmar el estado del servidor.', 'error');
+      return;
+    }
+  }
+  if (authoritativeRunning) {
+    showToast('Ya existe una ejecucion activa.', 'warn');
+    setRunning(true);
+    return;
+  }
+  runStopPending = false;
   document.getElementById('btn-start').disabled = true;
   appendLog('[Iniciando...] Enviando solicitud al servidor...', 'ok');
   showToast('Iniciando proceso...', 'info');
@@ -946,6 +1051,8 @@ async function startRun() {
   }
 
   backendLogSeen = new Set();
+  backendLogSeqSeen = new Set();
+  runSyncSeq = 0;
   lastStatsActivitySnapshot = '';
   currentRunLogActive = false;
   runStartedAtMs = Date.now();
@@ -955,18 +1062,27 @@ async function startRun() {
   lastArbErrors = {};
   latestLiveStats = null;
   _lastSeenClaimRow = null;
+  speedHistory.splice(0, speedHistory.length);
+  Object.keys(latencyHistory).forEach(key => delete latencyHistory[key]);
+  Object.keys(latencyHistoryCounts).forEach(key => delete latencyHistoryCounts[key]);
   resultsOffset = 0;
   updateStats();
   renderRunLists();
   resetLiveStats();
+  document.getElementById('stats-panel').style.display = 'none';
+  document.getElementById('results-panel').style.display = 'none';
+  document.getElementById('paper-summary-panel').innerHTML = '';
+  document.getElementById('stats-arbiters-table').innerHTML = '';
+  document.getElementById('stats-results-table').innerHTML = '';
 
   const limitEl = document.getElementById('limit-input');
   const limit = limitEl ? limitEl.value.trim() : '';
+  const parsedLimit = Math.max(parseInt(limit, 10) || 0, 0);
 
   const body = {};
-  if (limit) body.limit = parseInt(limit);
+  if (parsedLimit > 0) body.limit = parsedLimit;
 
-  appendLog(`[Iniciando...] POST /api/run/start limit=${limit||'sin limite'}`, null);
+  appendLog(`[Iniciando...] POST /api/run/start limite=${parsedLimit > 0 ? parsedLimit : 'todo el dataset'}`, null);
 
   let res, data;
   try {
@@ -977,19 +1093,19 @@ async function startRun() {
     });
     data = await res.json();
   } catch (e) {
-    document.getElementById('btn-start').disabled = false;
     const msg = `Error de red al iniciar: ${e.message}`;
     showToast(msg, 'error');
     appendLog(`[ERROR RED] ${msg}`, 'error');
     runErrors.push({kind: 'Red', detail: msg, time: new Date().toLocaleTimeString()});
     renderRunLists();
+    await syncRunSnapshot();
+    setRunning(authoritativeRunning);
     return;
   }
 
   appendLog(`[Respuesta servidor] HTTP ${res.status}`, res.ok ? 'ok' : 'error');
 
   if (!res.ok) {
-    document.getElementById('btn-start').disabled = false;
     const issues = Array.isArray(data.issues) ? data.issues : [];
     const errMsg = data.error || `Error HTTP ${res.status}`;
     showToast(errMsg, 'error');
@@ -1001,23 +1117,49 @@ async function startRun() {
     });
     renderRunLists();
     updateStats();
+    await syncRunSnapshot();
+    setRunning(authoritativeRunning);
     return;
   }
 
   appendLog('[OK] Proceso iniciado. Conectando...', 'ok');
+  authoritativeRunning = true;
   setRunning(true);
   startRunSync();
 }
 
 async function stopRun() {
-  const res = await fetch(APP_BASE + '/api/run/stop', {method: 'POST'});
-  const data = await res.json();
-  if (!res.ok) { showToast(data.error || 'Error al detener', 'error'); return; }
-  showToast('Proceso detenido', 'warn');
-  setRunning(false);
-  stopRunSync();
-  await syncRunSnapshot();
+  const button = document.getElementById('btn-stop');
+  runStopPending = true;
+  button.disabled = true;
+  button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Deteniendo...';
+  try {
+    const res = await fetch(APP_BASE + '/api/run/stop', {method: 'POST'});
+    const data = await res.json();
+    if (!res.ok) {
+      runStopPending = false;
+      showToast(data.error || 'Error al detener', 'error');
+      await syncRunSnapshot();
+      return;
+    }
+    showToast('Detencion solicitada', 'warn');
+    await syncRunSnapshot();
+  } catch (e) {
+    runStopPending = false;
+    showToast(`Error de red al detener: ${e.message}`, 'error');
+    await syncRunSnapshot();
+  } finally {
+    setRunning(authoritativeRunning);
+  }
 }
+
+// Registrar el evento explicitamente: evita que una redefinicion global o el
+// comportamiento implicito de un formulario deje el control sin respuesta.
+document.getElementById('btn-stop')?.addEventListener('click', (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  stopRun();
+});
 
 function appendBackendLog(line, type = null) {
   const text = String(line || '').trim();
@@ -1028,38 +1170,88 @@ function appendBackendLog(line, type = null) {
   parseStats(text);
 }
 
+function appendSequencedBackendLog(entry) {
+  if (!entry || entry.seq === undefined || entry.seq === null) return;
+  const seq = Number(entry.seq);
+  if (!Number.isFinite(seq) || backendLogSeqSeen.has(seq)) return;
+  backendLogSeqSeen.add(seq);
+  const text = String(entry.line || '').trim();
+  if (!text) return;
+  appendLog(text);
+  parseStats(text);
+}
+
 function appendStatsActivity(data) {
   const source = data.source_file || 'sin archivo';
   const total = Number(data.total_rows || 0);
   const ok = Number(data.successful_rows || 0);
   const failed = Number(data.failed_rows || 0);
   const pending = Number(data.pending_rows || 0);
-  const processed = ok + failed;
+  const processed = Number(data.processed_rows ?? (ok + failed));
   const tokens = Number(data.total_tokens_global || 0);
-  const snapshot = `${source}|${total}|${ok}|${failed}|${pending}|${tokens}`;
+  const arbiterWork = Number(data.arbiter_work_completed || 0);
+  const arbiterWorkTotal = Number(data.arbiter_work_total || 0);
+  const snapshot = `${source}|${total}|${ok}|${failed}|${pending}|${tokens}|${arbiterWork}|${arbiterWorkTotal}`;
   if (snapshot === lastStatsActivitySnapshot) return;
   lastStatsActivitySnapshot = snapshot;
 
   appendBackendLog(
-    `[stats] ${processed} procesadas de ${total} (${ok} OK, ${failed} fallidas, ${pending} pendientes) desde ${source}`,
-    processed > 0 ? 'ok' : 'info'
+    `[stats] ${processed} entradas consolidadas de ${total} (${ok} OK, ${failed} fallidas, ${pending} pendientes)`
+      + (data.execution_order === 'arbiter_major' ? ` / ${arbiterWork} de ${arbiterWorkTotal} evaluaciones de arbitro calculadas` : '')
+      + ` desde ${source}`,
+    processed > 0 || arbiterWork > 0 ? 'ok' : 'info'
   );
 }
 
 function applyRunSnapshot(snapshot) {
   if (!snapshot) return;
+  const incomingInstanceId = snapshot.server_instance_id || null;
+  if (serverInstanceId && incomingInstanceId && serverInstanceId !== incomingInstanceId) {
+    // El backend se reinicio mientras esta pagina seguia abierta. Los logs y
+    // contadores pertenecen a otro proceso y no deben mezclarse con el nuevo.
+    backendLogSeen = new Set();
+    backendLogSeqSeen = new Set();
+    lastStatsActivitySnapshot = '';
+    currentRunLogActive = false;
+    runSyncSeq = 0;
+    statsOK = 0;
+    statsFailed = 0;
+    statsErrors = 0;
+    runErrors = [];
+    queuedClaims = [];
+    lastArbErrors = {};
+    latestLiveStats = null;
+    _lastSeenClaimRow = null;
+    speedHistory.splice(0, speedHistory.length);
+    Object.keys(latencyHistory).forEach(key => delete latencyHistory[key]);
+    Object.keys(latencyHistoryCounts).forEach(key => delete latencyHistoryCounts[key]);
+    clearLog();
+    updateStats();
+    renderRunLists();
+    resetLiveStats();
+    appendBackendLog('[ui] Servidor reiniciado; se descartaron mensajes de la instancia anterior.', 'info');
+  }
+  if (incomingInstanceId) serverInstanceId = incomingInstanceId;
   if (snapshot.run_log_available && !currentRunLogActive) {
     currentRunLogActive = true;
     appendBackendLog('[server-log] Bitacora local del servidor activada para esta ejecucion.', 'ok');
   }
-  (snapshot.lines || []).forEach(line => appendBackendLog(line));
-  runSyncSeq = Number(snapshot.seq || runSyncSeq || 0);
+  if (Array.isArray(snapshot.log_entries)) {
+    snapshot.log_entries.forEach(appendSequencedBackendLog);
+  } else {
+    // Compatibilidad durante una actualizacion gradual del backend.
+    (snapshot.lines || []).forEach(line => appendBackendLog(line));
+  }
+  runSyncSeq = Number(snapshot.seq ?? runSyncSeq ?? 0);
 
   if (snapshot.stats) {
     renderLiveStats(snapshot.stats);
   }
 
   const running = Boolean(snapshot.running);
+  runStateHydrated = true;
+  authoritativeRunning = running;
+  runStopPending = Boolean(snapshot.stop_requested && running);
   const justFinished = runWasActive && !running;
   runWasActive = running;
   setRunning(running);
@@ -1076,7 +1268,19 @@ async function syncRunSnapshot() {
   if (runSyncBusy) return null;
   runSyncBusy = true;
   try {
-    const res = await fetch(`${APP_BASE}/api/run/snapshot?since=${runSyncSeq}`);
+    const res = await fetch(`${APP_BASE}/api/run/snapshot?since=${runSyncSeq}`, {
+      headers: {'X-Return-To': window.location.pathname + window.location.search},
+    });
+    if (res.status === 401) {
+      stopRunSync();
+      let loginUrl = `${APP_BASE}/login`;
+      try {
+        const authError = await res.json();
+        if (authError.login_url) loginUrl = authError.login_url;
+      } catch (_) {}
+      window.location.assign(loginUrl);
+      return null;
+    }
     if (!res.ok) return null;
     const snapshot = await res.json();
     applyRunSnapshot(snapshot);
@@ -1103,23 +1307,64 @@ function stopRunSync() {
 }
 
 // ---------- barras de progreso dual ----------
-function updateProgressBars(processed, total, datasetTotal) {
+function updateProgressBars(processed, total, datasetTotal, data = {}) {
   const container = document.getElementById('progress-bars');
   if (!container) return;
   if (!processed && !total) return;
   container.style.display = '';
 
-  const pctLimit = total > 0 ? (processed / total) * 100 : 0;
+  const isArbiterMajor = data.execution_order === 'arbiter_major';
+  const arbiterDone = Number(data.arbiter_work_completed || 0);
+  const arbiterTotal = Number(data.arbiter_work_total || 0);
+  const evaluatedRows = Number(data.evaluated_rows || 0);
+  const primaryDone = isArbiterMajor ? arbiterDone : processed;
+  const primaryTotal = isArbiterMajor ? arbiterTotal : total;
+  const coverageDone = isArbiterMajor ? evaluatedRows : processed;
+  const limitLabel = document.getElementById('pb-limit-label');
+  const totalLabel = document.getElementById('pb-total-label');
+  if (limitLabel) limitLabel.textContent = isArbiterMajor
+    ? 'Trabajo global de los arbitros'
+    : 'Filas cerradas (consolidadas, fallidas u omitidas)';
+  if (totalLabel) totalLabel.textContent = isArbiterMajor
+    ? 'Entradas que ya recibieron al menos un analisis'
+    : 'Cobertura del dataset completo';
+
+  const pctLimit = primaryTotal > 0 ? (primaryDone / primaryTotal) * 100 : 0;
   document.getElementById('pb-limit-text').textContent =
-    `${formatNumber(processed)} de ${total ? formatNumber(total) : '-'}  -  ${pctLimit.toFixed(1)}%`;
+    `${formatNumber(primaryDone)} de ${primaryTotal ? formatNumber(primaryTotal) : '-'} ${isArbiterMajor ? 'evaluaciones' : ''}  -  ${pctLimit.toFixed(1)}%`;
   document.getElementById('pb-limit-bar').style.width = `${Math.min(pctLimit, 100)}%`;
 
-  const pctTotal = datasetTotal > 0 ? (processed / datasetTotal) * 100 : 0;
+  const pctTotal = datasetTotal > 0 ? (coverageDone / datasetTotal) * 100 : 0;
   document.getElementById('pb-total-text').textContent = datasetTotal > 0
-    ? `${formatNumber(processed)} de ${formatNumber(datasetTotal)}  -  ${pctTotal.toFixed(2)}%`
-    : `${formatNumber(processed)} de -  -  -`;
+    ? `${formatNumber(coverageDone)} de ${formatNumber(datasetTotal)}  -  ${pctTotal.toFixed(2)}%`
+    : `${formatNumber(coverageDone)} de -  -  -`;
   document.getElementById('pb-total-bar').style.width = datasetTotal > 0
     ? `${Math.min(pctTotal, 100)}%` : '0%';
+
+  const arbiterContainer = document.getElementById('pb-arbiter-work');
+  if (arbiterContainer) arbiterContainer.style.display = isArbiterMajor ? '' : 'none';
+  if (isArbiterMajor) {
+    const done = Number(data.arbiter_work_completed || 0);
+    const workTotal = Number(data.arbiter_work_total || 0);
+    const passDone = Number(data.current_pass_completed || 0);
+    const passWorkTotal = Number(data.current_pass_work_total || data.eligible_rows || 0);
+    const passPct = passWorkTotal > 0 ? passDone * 100 / passWorkTotal : 0;
+    const globalPct = workTotal > 0 ? done * 100 / workTotal : 0;
+    const passPos = Number(data.current_pass_position || 0);
+    const passTotal = Number(data.current_pass_total || 0);
+    const arbId = data.current_arbiter_id || 'preparando';
+    document.getElementById('pb-arbiter-label').textContent =
+      `Arbitro activo: ${arbId} (pasada ${passPos || '-'} de ${passTotal || '-'})`;
+    document.getElementById('pb-arbiter-text').textContent =
+      `${formatNumber(passDone)} de ${formatNumber(passWorkTotal)} entradas - ${passPct.toFixed(1)}%`;
+    document.getElementById('pb-arbiter-bar').style.width = `${Math.min(passPct, 100)}%`;
+    const global = document.getElementById('pb-arbiter-global');
+    if (global) global.textContent =
+      `Resultado consolidado disponible: ${formatNumber(processed)} de ${formatNumber(total)} filas. `
+      + (processed === 0 && done > 0
+        ? 'No es progreso cero: la consolidacion espera los votos pendientes; el trabajo realizado se muestra arriba.'
+        : `Trabajo computacional acumulado: ${globalPct.toFixed(1)}%.`);
+  }
 }
 
 // ---------- graficas en tiempo real ----------
@@ -1256,16 +1501,38 @@ function updateCharts(data) {
   const total     = Number(data.total_rows     || 0);
   const processed = Number(data.processed_rows || 0);
   const pending   = Math.max(0, total - processed);
+  const isArbiterMajor = data.execution_order === 'arbiter_major';
+  const activityCompleted = isArbiterMajor
+    ? Number(data.arbiter_work_completed || 0)
+    : processed;
 
-  // 1. Donut OK/Fallidos/Pendientes
-  if (chartDonut) { chartDonut.data.datasets[0].data = [ok, failed, pending]; chartDonut.update('none'); }
+  // 1. En arbiter-major el progreso útil son evaluaciones, no consensos que
+  // todavía no pueden existir durante las primeras pasadas.
+  if (chartDonut) {
+    if (isArbiterMajor) {
+      const workDone = Number(data.arbiter_work_completed || 0);
+      const workTotal = Number(data.arbiter_work_total || 0);
+      chartDonut.data.labels = ['Evaluaciones completadas', 'Evaluaciones pendientes'];
+      chartDonut.data.datasets[0].data = [workDone, Math.max(0, workTotal - workDone)];
+      chartDonut.data.datasets[0].backgroundColor = ['#34d399', '#334155'];
+    } else {
+      chartDonut.data.labels = ['OK', 'Fallidos', 'Pendientes'];
+      chartDonut.data.datasets[0].data = [ok, failed, pending];
+      chartDonut.data.datasets[0].backgroundColor = ['#34d399', '#fb7185', '#334155'];
+    }
+    chartDonut.update('none');
+  }
 
   // 2. Latencia historica por arbitro
   const arbEntries = Object.entries(data.arbiters || {});
   arbEntries.forEach(([id, s]) => {
     if (!latencyHistory[id]) latencyHistory[id] = [];
-    latencyHistory[id].push(Number(s.latency_avg_s || 0));
-    if (latencyHistory[id].length > LATENCY_MAX_POINTS) latencyHistory[id].shift();
+    const evaluationCount = Number(s.evaluations ?? s.calls ?? 0);
+    if (evaluationCount > 0 && latencyHistoryCounts[id] !== evaluationCount) {
+      latencyHistoryCounts[id] = evaluationCount;
+      latencyHistory[id].push(Number(s.latency_avg_s || 0));
+      if (latencyHistory[id].length > LATENCY_MAX_POINTS) latencyHistory[id].shift();
+    }
   });
   if (chartLatency) {
     const maxLen = Math.max(...Object.values(latencyHistory).map(h => h.length), 0);
@@ -1284,7 +1551,10 @@ function updateCharts(data) {
   }
 
   // 3. Velocidad claims/min
-  speedHistory.push({ t: Date.now(), p: processed });
+  const lastSpeedPoint = speedHistory[speedHistory.length - 1];
+  if (!lastSpeedPoint || lastSpeedPoint.p !== activityCompleted) {
+    speedHistory.push({ t: Date.now(), p: activityCompleted });
+  }
   if (speedHistory.length > SPEED_MAX_POINTS) speedHistory.shift();
   if (chartSpeed && speedHistory.length >= 2) {
     const speeds = [];
@@ -1295,6 +1565,7 @@ function updateCharts(data) {
     }
     chartSpeed.data.labels = Array.from({ length: speeds.length }, (_, i) => i + 1);
     chartSpeed.data.datasets[0].data = speeds;
+    chartSpeed.data.datasets[0].label = isArbiterMajor ? 'evaluaciones/min' : `${itemLabel}s/min`;
     chartSpeed.update('none');
   }
 
@@ -1388,17 +1659,48 @@ async function archiveAllOutputs() {
   }
 }
 
+async function clearAllExecutions() {
+  const confirmed = await appConfirm(
+    'Se borraran los CSV de salida, checkpoints y colas temporales.\n\nLos elementos archivados, datasets, configuracion y modelos no se modificaran.',
+    {title:'Limpiar todas las ejecuciones', confirmText:'Limpiar todo'}
+  );
+  if (!confirmed) return;
+
+  const btn = document.getElementById('btn-clear-all');
+  const archiveBtn = document.getElementById('btn-archive');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Limpiando...';
+  }
+  if (archiveBtn) archiveBtn.disabled = true;
+  try {
+    const res = await fetch(APP_BASE + '/api/outputs/clear-all', {method: 'DELETE'});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al limpiar las ejecuciones');
+
+    resetExecutionUi('[limpieza] Ejecuciones eliminadas. Interfaz lista para comenzar desde cero.');
+    await Promise.all([loadCheckpoint(), loadOutputs(), loadRunStats()]);
+    showToast(`${data.deleted_outputs || 0} ejecuciones eliminadas`, 'success');
+  } catch (err) {
+    showToast(`Error: ${err.message}`, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-trash3 me-1"></i>Limpiar todo';
+    }
+    if (archiveBtn) archiveBtn.disabled = false;
+  }
+}
+
 function appendLog(line, type = null) {
   const box = document.getElementById('log-box');
   const div = document.createElement('div');
+  const envelope = parseLogEnvelope(line);
   const arbMeta = detectArbiterInLog(line);
-  const claimStart = String(line || '').match(/^\[entrada\s+(\d+)\]\s+Procesando\s+(\d+)\/(\d+)\s+-\s+etapa=([^\s]+)\s+-\s+texto="(.*)"$/);
+  const claimStart = envelope.payload.match(/^\[entrada\s+(\d+)\]\s+Procesando\s+(\d+)\/(\d+)\s+-\s+etapa=([^\s]+)\s+-\s+texto="(.*)"$/);
   if (!type) {
     if (claimStart) type = 'claim-start';
-    else if (line.includes('[WARNING]') || line.includes('Fallo') || line.includes('fallido')) type = 'warn';
-    else if (line.includes('[ERROR]') || line.includes('Error') || line.includes('FAILED')) type = 'error';
-    else if (line.includes('OK') || line.includes('completad') || line.includes('guardado')) type = 'ok';
-    else type = 'info';
+    else type = logTypeFromEnvelope(envelope);
   }
   div.className = `log-${type}`;
   if (type === 'claim-start' && claimStart) {
@@ -1424,8 +1726,10 @@ function clearLog() {
 }
 
 function parseStats(line) {
-  const isErrorLine = line.includes('[ERROR]') || line.includes('Error permanente') || line.includes('ClientError') || line.includes('RESOURCE_EXHAUSTED') || line.includes('Too Many Requests');
-  const isWarnError = line.includes('[WARNING]') && (line.includes('Rate limiter') || line.includes('fallo') || line.includes('Fallo') || line.includes('429'));
+  const envelope = parseLogEnvelope(line);
+  const eventTime = envelope.timestamp ? envelope.timestamp.split(/\s+/)[1].replace(',', '.') : new Date().toLocaleTimeString();
+  const isErrorLine = ['ERROR', 'CRITICAL'].includes(envelope.level) || /^\[(?:ERROR|FATAL)\b/i.test(envelope.payload);
+  const isWarnError = envelope.level === 'WARNING' && /Rate limiter|fallo|429/i.test(envelope.payload);
   const arbError = line.match(/\[(arb[^\]]+)\]\s+\[([^\]]+)\]\s+(.+)/);
   if (arbError) {
     lastArbErrors[arbError[1]] = `${arbError[2]}: ${arbError[3]}`;
@@ -1434,32 +1738,42 @@ function parseStats(line) {
   const queued = line.match(/\[(?:claim|entrada)\s+(\d+)\]\s+Arbitro\s+(\S+)\s+fallo\s+-\s+(?:claim encolado|entrada encolada)(?:\s+-\s+(.+))?/);
   if (queued) {
     const reason = queued[3] || lastArbErrors[queued[2]] || 'No se encontro detalle previo del error.';
-    queuedClaims.push({claim: queued[1], arbiter: queued[2], reason});
-    statsFailed++;
+    if (!queuedClaims.some(q => String(q.claim) === String(queued[1]))) {
+      queuedClaims.push({claim: queued[1], arbiter: queued[2], reason});
+    }
     renderRunLists();
-    updateStats();
     return;
   }
 
-  if (line.includes('] OK -')) {
-    statsOK++;
-    updateStats();
-  } else if (line.includes('Fallo definitivo')) {
-    statsFailed++;
-    runErrors.push({kind: 'Fallo definitivo', detail: line, time: new Date().toLocaleTimeString()});
+  if (line.includes('Fallo definitivo')) {
+    runErrors.push({kind: 'Fallo definitivo', detail: line, time: eventTime});
     renderRunLists();
-    updateStats();
   } else if (isErrorLine || isWarnError) {
     statsErrors++;
-    runErrors.push({kind: line.includes('429') || line.includes('RESOURCE_EXHAUSTED') ? 'Rate limit / cuota' : 'Error', detail: line, time: new Date().toLocaleTimeString()});
+    runErrors.push({kind: line.includes('429') || line.includes('RESOURCE_EXHAUSTED') ? 'Rate limit / cuota' : 'Error', detail: line, time: eventTime});
     renderRunLists();
     updateStats();
   }
 }
 
 function updateStats() {
-  document.getElementById('stat-processed').textContent = statsOK;
-  document.getElementById('stat-failed').textContent = statsFailed;
+  const isArbiterMajor = latestLiveStats?.execution_order === 'arbiter_major';
+  const processedLabel = document.getElementById('stat-processed-label');
+  const failedLabel = document.getElementById('stat-failed-label');
+  if (isArbiterMajor) {
+    const done = Number(latestLiveStats.arbiter_work_completed || 0);
+    const total = Number(latestLiveStats.arbiter_work_total || 0);
+    const pct = total > 0 ? done * 100 / total : 0;
+    document.getElementById('stat-processed').textContent = `${pct.toFixed(1)}%`;
+    document.getElementById('stat-failed').textContent = formatNumber(latestLiveStats.evaluated_rows || 0);
+    if (processedLabel) processedLabel.textContent = `${formatNumber(done)} / ${formatNumber(total)} evaluaciones`;
+    if (failedLabel) failedLabel.textContent = `Entradas con analisis de ${formatNumber(latestLiveStats.dataset_total_rows || latestLiveStats.total_rows || 0)}`;
+  } else {
+    document.getElementById('stat-processed').textContent = statsOK;
+    document.getElementById('stat-failed').textContent = statsFailed;
+    if (processedLabel) processedLabel.textContent = 'Consolidadas OK';
+    if (failedLabel) failedLabel.textContent = 'Consolidadas fallidas';
+  }
   document.getElementById('stat-errors').textContent = statsErrors;
 }
 
@@ -1480,6 +1794,7 @@ function resetLiveStats() {
   document.getElementById('live-arbiters-table').innerHTML = '<span class="text-secondary small">Esperando metricas del pipeline...</span>';
   document.getElementById('live-last-claim').innerHTML = '';
   Object.keys(latencyHistory).forEach(k => delete latencyHistory[k]);
+  Object.keys(latencyHistoryCounts).forEach(k => delete latencyHistoryCounts[k]);
   speedHistory.length = 0;
   if (chartDonut)      { chartDonut.data.datasets[0].data = [0,0,1]; chartDonut.update('none'); }
   if (chartLatency)    { chartLatency.data.labels = []; chartLatency.data.datasets = []; chartLatency.update('none'); }
@@ -1500,10 +1815,15 @@ function resetExecutionUi(message = '') {
   lastArbErrors = {};
   latestLiveStats = null;
   _lastSeenClaimRow = null;
+  speedHistory.splice(0, speedHistory.length);
+  Object.keys(latencyHistory).forEach(key => delete latencyHistory[key]);
+  Object.keys(latencyHistoryCounts).forEach(key => delete latencyHistoryCounts[key]);
   checkpointProcessedRows = 0;
   checkpointTotalRows = 0;
+  checkpointArbiterEvaluations = 0;
   resultsOffset = 0;
   backendLogSeen = new Set();
+  backendLogSeqSeen = new Set();
   lastStatsActivitySnapshot = '';
   currentRunLogActive = false;
   latestAgreementData = null;
@@ -1521,10 +1841,14 @@ function resetExecutionUi(message = '') {
   if (progressBars) progressBars.style.display = 'none';
   const limitBar = document.getElementById('pb-limit-bar');
   const totalBar = document.getElementById('pb-total-bar');
+  const arbiterBar = document.getElementById('pb-arbiter-bar');
+  const arbiterWork = document.getElementById('pb-arbiter-work');
   const limitText = document.getElementById('pb-limit-text');
   const totalText = document.getElementById('pb-total-text');
   if (limitBar) limitBar.style.width = '0%';
   if (totalBar) totalBar.style.width = '0%';
+  if (arbiterBar) arbiterBar.style.width = '0%';
+  if (arbiterWork) arbiterWork.style.display = 'none';
   if (limitText) limitText.textContent = '-';
   if (totalText) totalText.textContent = '-';
 
@@ -1558,13 +1882,23 @@ function renderLiveStats(data) {
   const ok = Number(data.successful_rows || 0);
   const failed = Number(data.failed_rows || 0);
   const totalTokens = Number(data.total_tokens_global || 0);
-  const queued = Number(data.queued_rows || queuedClaims.length || 0);
-  const tokensPerProcessed = Number(data.tokens_per_processed_row || 0);
-  const speed = recentItemsPerMinute(processed);
-  const remaining = Math.max(0, total - processed);
-  const eta = speed > 0 && remaining > 0 ? remaining / speed : null;
-  const projectedTokens = processed > 0 && total > 0
-    ? Math.round(tokensPerProcessed * total)
+  if (Array.isArray(data.queued_indices)) {
+    const activeQueue = new Set(data.queued_indices.map(String));
+    queuedClaims = queuedClaims.filter(item => activeQueue.has(String(item.claim)));
+    renderRunLists();
+  }
+  const queued = Number(data.queued_rows ?? queuedClaims.length ?? 0);
+  const isArbiterMajor = data.execution_order === 'arbiter_major';
+  const arbiterWork = Number(data.arbiter_work_completed || 0);
+  const arbiterWorkTotal = Number(data.arbiter_work_total || 0);
+  const activityCompleted = isArbiterMajor ? arbiterWork : processed;
+  const activityTotal = isArbiterMajor ? arbiterWorkTotal : total;
+  const speed = recentItemsPerMinute(activityCompleted);
+  const remaining = Math.max(0, activityTotal - activityCompleted);
+  const etaReady = speedHistory.length >= 4;
+  const eta = etaReady && speed > 0 && remaining > 0 ? remaining / speed : null;
+  const projectedTokens = activityCompleted > 0 && activityTotal > 0
+    ? Math.round((totalTokens / activityCompleted) * activityTotal)
     : totalTokens;
 
   const datasetTotal = Number(data.dataset_total_rows || 0);
@@ -1572,11 +1906,17 @@ function renderLiveStats(data) {
   const pctDataset = datasetTotal > 0 ? ((processed / datasetTotal) * 100).toFixed(2) : null;
 
   document.getElementById('live-total-tokens').textContent = formatNumber(totalTokens);
-  document.getElementById('live-progress').textContent = `${formatNumber(processed)} / ${total ? formatNumber(total) : '-'}`;
+  document.getElementById('live-progress').textContent = isArbiterMajor
+    ? `${formatNumber(arbiterWork)} / ${formatNumber(arbiterWorkTotal)}`
+    : `${formatNumber(processed)} / ${total ? formatNumber(total) : '-'}`;
   document.getElementById('live-progress-pct').textContent =
-    (pctLimit !== null ? `${pctLimit}% limite` : 'Progreso') +
-    (pctDataset !== null ? `  -  ${pctDataset}% total` : '');
-  document.getElementById('live-eta').textContent = eta === null ? '-' : formatDurationFromMinutes(eta);
+    isArbiterMajor
+      ? `${activityTotal > 0 ? (activityCompleted * 100 / activityTotal).toFixed(1) : '0.0'}% evaluaciones / ${formatNumber(processed)} filas cerradas`
+      : (pctLimit !== null ? `${pctLimit}% limite` : 'Progreso') +
+        (pctDataset !== null ? `  -  ${pctDataset}% total` : '');
+  document.getElementById('live-eta').textContent = remaining === 0
+    ? 'Completado'
+    : eta === null ? 'Calculando...' : formatDurationFromMinutes(eta);
   document.getElementById('live-projected-tokens').textContent = formatNumber(projectedTokens);
   document.getElementById('live-attention').textContent = `${formatNumber(failed)} / ${formatNumber(queued)}`;
 
@@ -1591,6 +1931,14 @@ function renderLiveStats(data) {
       label = 'Atencion';
       cls = 'health-pill health-bad';
       detail = queued > 0 ? `${formatNumber(queued)} reintentos` : `${formatPercent(failedRate * 100)} fallos`;
+    } else if (data.finished) {
+      label = 'Completado';
+      cls = 'health-pill health-ok';
+      detail = `${formatNumber(ok)} OK`;
+    } else if (data.active && processed === 0 && arbiterWork > 0) {
+      label = 'Procesando';
+      cls = 'health-pill health-ok';
+      detail = `${formatNumber(arbiterWork)} evaluaciones`;
     } else if (failed > 0 || !data.active) {
       label = 'Vigilar';
       cls = 'health-pill health-warn';
@@ -1600,8 +1948,13 @@ function renderLiveStats(data) {
     health.className = cls;
     healthDetail.textContent = detail;
   }
-  updateProgressBars(processed, total, datasetTotal);
+  updateProgressBars(processed, total, datasetTotal, data);
   updateCharts(data);
+
+  const speedTitle = document.getElementById('chart-speed-title');
+  if (speedTitle) speedTitle.textContent = isArbiterMajor
+    ? 'Velocidad de calculo (evaluaciones de arbitro/min)'
+    : `Velocidad de etiquetado (${itemLabel}s/min)`;
 
   // Principle distribution chart: read directly from snapshot (every 1s, not every 15s)
   const _pc = data.principle_counts;
@@ -1614,6 +1967,8 @@ function renderLiveStats(data) {
       chartPrinciples.data.datasets[1].data = _snapshotPrinciples.map(p => _pc[p]?.zeros || 0);
       chartPrinciples.update('none');
       hideChartOverlay('principles');
+    } else if (isArbiterMajor && processed === 0) {
+      showChartOverlay('principles', 'Las evaluaciones avanzan por arbitro. La distribucion aparecera cuando existan entradas con consenso completo.');
     }
   }
 
@@ -1642,9 +1997,10 @@ function renderLiveStats(data) {
       </td>
       <td>${hwBadge(id)}</td>
       <td class="fw-semibold">${formatNumber(s.total_tokens)}</td>
-      <td>${formatNumber(s.calls)}</td>
+      <td>${formatNumber(s.evaluations ?? s.calls ?? 0)}</td>
+      <td>${formatNumber(s.model_calls ?? s.calls ?? 0)}</td>
       <td>${formatSeconds(s.latency_avg_s)}</td>
-      <td>${formatNumber(s.calls ? Math.round(Number(s.total_tokens || 0) / Number(s.calls || 1)) : 0)}</td>
+      <td>${formatNumber((s.evaluations ?? s.calls) ? Math.round(Number(s.total_tokens || 0) / Number(s.evaluations ?? s.calls ?? 1)) : 0)}</td>
     </tr>
   `).join('');
 
@@ -1655,11 +2011,12 @@ function renderLiveStats(data) {
           <th class="text-secondary">Arbitro</th>
           <th class="text-secondary">SW/HW</th>
           <th class="text-secondary">Tokens</th>
-          <th class="text-secondary">Llamadas</th>
+          <th class="text-secondary">Evaluaciones</th>
+          <th class="text-secondary">Llamadas modelo</th>
           <th class="text-secondary">Tiempo prom.</th>
-          <th class="text-secondary">Tokens / llamada</th>
+          <th class="text-secondary">Tokens / evaluacion</th>
         </tr></thead>
-        <tbody>${tbody || '<tr><td colspan="6" class="text-secondary">Sin metricas por arbitro todavia.</td></tr>'}</tbody>
+        <tbody>${tbody || '<tr><td colspan="7" class="text-secondary">Sin metricas por arbitro todavia.</td></tr>'}</tbody>
       </table>
     </div>`;
 
@@ -1676,9 +2033,16 @@ function renderLiveStats(data) {
     document.getElementById('live-last-claim').innerHTML = '';
     return;
   }
-  const isProcessing = last.event === 'claim_start';
-  const status = last.event === 'claim_ok' ? 'OK' : last.event === 'claim_failed' ? 'Fallido' : isProcessing ? 'Procesando' : 'Saltado';
-  const statusClass = last.event === 'claim_ok' ? 'text-success' : last.event === 'claim_failed' ? 'text-danger' : isProcessing ? 'text-info' : 'text-warning';
+  const isProcessing = last.event === 'claim_start' || last.event === 'arbiter_claim_start';
+  const provisionalFailure = last.event === 'claim_failed' && !last.definitive;
+  const status = last.event === 'claim_ok' ? 'OK'
+    : provisionalFailure ? (last.queued ? 'Pendiente de reintento' : 'Pausada')
+    : last.event === 'claim_failed' ? 'Fallida definitivamente'
+    : isProcessing ? 'Procesando' : 'Omitida';
+  const statusClass = last.event === 'claim_ok' ? 'text-success'
+    : provisionalFailure ? 'text-warning'
+    : last.event === 'claim_failed' ? 'text-danger'
+    : isProcessing ? 'text-info' : 'text-warning';
   const consensus = last.consensus && data.principles ? renderConsensus(last.consensus, data.principles) : '';
   const consensusMetrics = last.consensus_metrics ? renderEntryConsensusMetrics(last.consensus_metrics, data.principles || []) : '';
   const agreedPct = last.consensus_metrics ? parseFloat(last.consensus_metrics.observed_agreement_percent) : null;
@@ -1689,13 +2053,15 @@ function renderLiveStats(data) {
     <div class="p-3 rounded" style="background:${cardBg};border:1px solid ${cardBorder}">
       <div class="d-flex justify-content-between gap-3 mb-2">
         <div class="fw-semibold">${isProcessing ? 'Entrada en proceso' : 'Ultima entrada procesada'}</div>
-        <div class="${statusClass} small text-nowrap">#${escapeHtml(last.row_index)} / ${status}</div>
+        <div class="${statusClass} small text-nowrap">Fila ${formatNumber(Number(last.row_index) + 1)} / ${status}</div>
       </div>
-      <div class="small">${escapeHtml(claimText)}</div>
+      <div class="small live-claim-text">${escapeHtml(claimText)}</div>
       <div class="mt-2">${consensus}</div>
       ${consensusMetrics}
       <div class="text-secondary small mt-2">
         ${last.stage ? `Etapa: ${escapeHtml(last.stage)}` : ''}
+        ${last.arbiter_id ? ` / Arbitro: ${escapeHtml(last.arbiter_name || last.arbiter_id)}` : ''}
+        ${last.position && last.pass_pending_total ? ` / ${formatNumber(last.position)} de ${formatNumber(last.pass_pending_total)} en esta pasada` : ''}
         ${last.total_tokens ? ` / ${formatNumber(last.total_tokens)} tokens` : ''}
         ${last.total_latency_s !== null && last.total_latency_s !== undefined ? ` / ${formatSeconds(last.total_latency_s)}` : ''}
       </div>
@@ -1747,11 +2113,18 @@ function recentItemsPerMinute(currentProcessed = null) {
   const points = speedHistory.slice();
   if (currentProcessed !== null) points.push({ t: Date.now(), p: Number(currentProcessed || 0) });
   if (points.length < 2) return 0;
-  const first = points[0];
-  const last = points[points.length - 1];
-  const dt = (last.t - first.t) / 60000;
-  const dp = last.p - first.p;
-  return dt > 0 ? Math.max(0, dp / dt) : 0;
+  const rates = [];
+  for (let i = Math.max(1, points.length - 20); i < points.length; i++) {
+    const dt = (points[i].t - points[i - 1].t) / 60000;
+    const dp = points[i].p - points[i - 1].p;
+    if (dt > 0 && dp > 0) rates.push(dp / dt);
+  }
+  if (!rates.length) return 0;
+  // La mediana evita que la carga inicial del modelo convierta una sola
+  // evaluacion lenta en una ETA absurda para todo el dataset.
+  rates.sort((a, b) => a - b);
+  const mid = Math.floor(rates.length / 2);
+  return rates.length % 2 ? rates[mid] : (rates[mid - 1] + rates[mid]) / 2;
 }
 
 function formatMetric(value, decimals = 3) {
@@ -1969,7 +2342,7 @@ function renderPaperSummary(summary) {
                 <div>Tokens total: <strong>${formatNumber(resources.tokens_total)}</strong></div>
                 <div>Tokens por entrada: ${renderSummaryStats(resources.tokens_per_entry)}</div>
                 <div>Latencia por entrada: ${renderSummaryStats(resources.latency_s_per_entry, 's')}</div>
-                <div>Llamadas por entrada: ${renderSummaryStats(resources.arbiter_calls_per_entry)}</div>
+                <div>Evaluaciones de arbitro por entrada: ${renderSummaryStats(resources.arbiter_calls_per_entry)}</div>
               </div>
             </div>
           </div>
@@ -2000,7 +2373,7 @@ function renderPaperSummary(summary) {
           <summary>Arbitros: uso, tendencia y latencia</summary>
           <div class="quality-details-body" style="overflow-x:auto">
             <table class="table table-dark table-sm mb-0" style="border-color:#2d3148;font-size:.8rem">
-              <thead><tr><th>Arbitro</th><th>Llamadas</th><th>Votos</th><th>% votos positivos</th><th>Tokens/llamada</th><th>Latencia</th><th>Missing</th></tr></thead>
+              <thead><tr><th>Arbitro</th><th>Evaluaciones</th><th>Decisiones</th><th>% decisiones positivas</th><th>Tokens/evaluacion</th><th>Latencia/evaluacion</th><th>Faltantes</th></tr></thead>
               <tbody>${arbiterRows || '<tr><td colspan="7" class="text-secondary">Sin datos por arbitro.</td></tr>'}</tbody>
             </table>
           </div>
@@ -2231,7 +2604,7 @@ function renderResultsTable(data) {
             <th class="text-secondary">Tok. entrada</th>
             <th class="text-secondary">Tok. salida</th>
             <th class="text-secondary">Tok. total</th>
-            <th class="text-secondary">Llamadas</th>
+            <th class="text-secondary">Evaluaciones de arbitro</th>
             <th class="text-secondary">Tiempo</th>
           </tr>
         </thead>
@@ -2332,9 +2705,26 @@ function openQueuedModal() {
   bootstrap.Modal.getOrCreateInstance(document.getElementById('queuedModal')).show();
 }
 
+function syncDynamicControlLocks() {
+  const locked = !runStateHydrated || Boolean(authoritativeRunning);
+  document.querySelectorAll('#checkpoint-area button, .output-delete-btn').forEach(btn => {
+    btn.disabled = locked;
+  });
+}
+
 function setRunning(running) {
-  document.getElementById('btn-start').disabled = running;
-  document.getElementById('btn-stop').disabled = !running;
+  const startButton = document.getElementById('btn-start');
+  startButton.disabled = !runStateHydrated || running;
+  startButton.innerHTML = !runStateHydrated
+    ? '<span class="spinner-border spinner-border-sm me-2"></span>Sincronizando'
+    : running
+      ? '<span class="spinner-border spinner-border-sm me-2"></span>Ejecutando'
+      : '<i class="bi bi-play-fill me-1"></i>Iniciar';
+  const stopButton = document.getElementById('btn-stop');
+  stopButton.disabled = !running || runStopPending;
+  stopButton.innerHTML = runStopPending
+    ? '<span class="spinner-border spinner-border-sm me-2"></span>Deteniendo...'
+    : '<i class="bi bi-stop-fill me-1"></i>Detener ejecucion';
   const dot = document.getElementById('status-dot');
   const txt = document.getElementById('status-text');
   dot.className = `status-dot ${running ? 'running' : 'idle'}`;
@@ -2349,9 +2739,11 @@ function setRunning(running) {
   document.querySelectorAll('#step-1 button, #step-3 button, #ds-ready-banner button').forEach(btn => {
     btn.disabled = running;
   });
-  // Bloquear boton de limpiar checkpoint (dinamico)
-  const clearBtn = document.querySelector('#checkpoint-area button');
-  if (clearBtn) clearBtn.disabled = running;
+  syncDynamicControlLocks();
+  ['btn-archive', 'btn-clear-all'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = running;
+  });
 
   if (running && !statsRefreshTimer) {
     statsRefreshTimer = setInterval(() => loadRunStats(true), 4000);
@@ -2371,7 +2763,28 @@ async function loadRunStats(keepPosition = false) {
     offset: String(resultsOffset),
   });
   const res = await fetch(`${APP_BASE}/api/run/stats?${params.toString()}`);
-  if (!res.ok) return;
+  if (res.status === 202) {
+    const pending = await res.json();
+    document.getElementById('stats-panel').style.display = 'none';
+    document.getElementById('results-panel').style.display = '';
+    document.getElementById('stats-results-count').textContent = 'Esperando consensos';
+    document.getElementById('results-controls').innerHTML = '';
+    document.getElementById('stats-results-table').innerHTML = `
+      <div class="p-3 rounded text-secondary" style="background:#0a0c14;border:1px solid #2d3148">
+        <i class="bi bi-hourglass-split me-2 text-info"></i>${escapeHtml(pending.message || 'Esperando entradas consolidadas.')}
+        ${pending.execution_order === 'arbiter_major' ? '<div class="small mt-2">Las evaluaciones y recursos avanzan en Estado en vivo; esta tabla aparecera al completar los arbitros necesarios.</div>' : ''}
+      </div>`;
+    return;
+  }
+  if (!res.ok) {
+    if (res.status === 404) {
+      document.getElementById('stats-panel').style.display = 'none';
+      document.getElementById('results-panel').style.display = 'none';
+      document.getElementById('paper-summary-panel').innerHTML = '';
+      document.getElementById('stats-results-table').innerHTML = '';
+    }
+    return;
+  }
   const data = await res.json();
   if (data.error) return;
   resultsOffset = Number(data.results_offset || 0);
@@ -2384,7 +2797,7 @@ async function loadRunStats(keepPosition = false) {
   document.getElementById('stats-total-rows').textContent = formatNumber(data.total_rows);
   document.getElementById('stats-successful-rows').textContent = formatNumber(data.successful_rows);
   document.getElementById('stats-failed-rows').textContent = formatNumber(data.failed_rows);
-  document.getElementById('stats-tpr').textContent = formatNumber(data.tokens_per_row || 0);
+  document.getElementById('stats-tpr').textContent = formatNumber(data.tokens_per_processed_row || data.tokens_per_row || 0);
   document.getElementById('stats-total-latency').textContent = formatSeconds(data.total_latency_s);
 
   const arbiters = Object.entries(data.arbiters || {});
@@ -2395,7 +2808,8 @@ async function loadRunStats(keepPosition = false) {
       <td>${formatNumber(s.prompt_tokens)}</td>
       <td>${formatNumber(s.completion_tokens)}</td>
       <td class="fw-semibold">${formatNumber(s.total_tokens)}</td>
-      <td>${formatNumber(s.calls)}</td>
+      <td>${formatNumber(s.evaluations ?? s.calls ?? 0)}</td>
+      <td>${formatNumber(s.model_calls ?? s.calls ?? 0)}</td>
       <td>${formatSeconds(s.latency_avg_s)}</td>
       <td>${formatSeconds(s.latency_min_s)} / ${formatSeconds(s.latency_max_s)}</td>
       <td>${formatSeconds(s.latency_total_s)}</td>
@@ -2408,11 +2822,12 @@ async function loadRunStats(keepPosition = false) {
       <thead><tr>
         <th class="text-secondary">Arbitro</th>
         <th class="text-secondary">SW/HW</th>
-        <th class="text-secondary">Entrada</th>
-        <th class="text-secondary">Salida</th>
-        <th class="text-secondary">Total</th>
-        <th class="text-secondary">Llamadas</th>
-        <th class="text-secondary">Tiempo prom.</th>
+        <th class="text-secondary">Tokens entrada</th>
+        <th class="text-secondary">Tokens salida</th>
+        <th class="text-secondary">Tokens total</th>
+        <th class="text-secondary">Evaluaciones</th>
+        <th class="text-secondary">Llamadas modelo</th>
+        <th class="text-secondary">Tiempo prom. / evaluacion</th>
         <th class="text-secondary">Min / Max</th>
         <th class="text-secondary">Tiempo total</th>
       </tr></thead>
@@ -2508,7 +2923,7 @@ function renderDsProfile(profile) {
       <td class="text-secondary">${i}</td>
       <td class="fw-semibold text-light" title="${escapeHtml(col.name)}">${escapeHtml(dsTrunc(col.name, 28))}</td>
       <td><span class="col-type-badge ${col.type}">${col.type === 'number' ? 'numero' : 'texto'}</span></td>
-      <td>${col.non_null.toLocaleString()} / ${statBase.toLocaleString()}</td>
+      <td>${Number(col.non_empty ?? col.non_null).toLocaleString()} / ${statBase.toLocaleString()}</td>
       <td class="text-end"><span class="${col.fill_pct >= 99 ? 'text-success' : col.fill_pct >= 75 ? 'text-warning' : 'text-danger'}">${col.fill_pct}%</span></td>
       <td class="text-secondary" style="font-style:italic">${col.sample.map(s => escapeHtml(dsTrunc(s, 55))).join(' · ')}</td>
     </tr>`).join('');
@@ -2572,7 +2987,7 @@ function onColumnChange() {
   tb.textContent = info.type === 'number' ? 'numero' : 'texto';
   tb.className = `col-type-badge ${info.type}`;
   document.getElementById('ds-col-fill').textContent = info.fill_pct;
-  document.getElementById('ds-col-nonnull').textContent = info.non_null.toLocaleString();
+  document.getElementById('ds-col-nonnull').textContent = Number(info.non_empty ?? info.non_null).toLocaleString();
   document.getElementById('ds-col-samples').innerHTML = info.sample.length
     ? info.sample.map(s => `<div class="ds-col-sample-item">${escapeHtml(s)}</div>`).join('')
     : '<div class="text-secondary small fst-italic">Sin valores de muestra</div>';
@@ -2612,6 +3027,7 @@ async function confirmColumn() {
   showToast('Dataset configurado. Listo para ejecutar.');
   showReadyBanner(data);
   loadConfigSummary();
+  setDatasetPanelCollapsed(true);
 }
 
 function showReadyBanner(cfg) {
@@ -2621,6 +3037,17 @@ function showReadyBanner(cfg) {
   document.getElementById('ds-ready-detail').innerHTML =
     `${escapeHtml(fname)}${sheet} &nbsp;·&nbsp; columna: <strong>${escapeHtml(cfg.text_column)}</strong>`;
   document.getElementById('ds-ready-banner').style.display = '';
+  const summary = document.getElementById('dataset-panel-summary');
+  summary.textContent = `${fname}${cfg.sheet ? ` · ${cfg.sheet}` : ''} · columna: ${cfg.text_column}`;
+  summary.title = summary.textContent;
+  summary.style.display = '';
+}
+
+function setDatasetPanelCollapsed(collapsed) {
+  const body = document.getElementById('dataset-panel-body');
+  if (!body) return;
+  const collapse = bootstrap.Collapse.getOrCreateInstance(body, {toggle:false});
+  if (collapsed) collapse.hide(); else collapse.show();
 }
 
 function resetUpload() {
@@ -2634,6 +3061,8 @@ function resetUpload() {
   document.getElementById('step-1-num').className = 'ds-step-num active';
   document.getElementById('step-2-num').className = 'ds-step-num active';
   document.getElementById('step-3-num').className = 'ds-step-num active';
+  document.getElementById('dataset-panel-summary').style.display = 'none';
+  setDatasetPanelCollapsed(false);
   setDsSpinner(false, '');
 }
 
@@ -2644,6 +3073,8 @@ async function loadDatasetConfig() {
     if (!res.ok || !cfg.input_file) return;
     _savedDatasetConfig = cfg;
     _currentServerPath = cfg.input_file;
+    showReadyBanner(cfg);
+    setDatasetPanelCollapsed(true);
     document.getElementById('ds-fname').textContent = cfg.input_file.split(/[\\/]/).pop();
     setDsMeta(cfg.file_size_bytes ?? null, cfg.uploaded_at ?? null);
     document.getElementById('ds-upload-bar').style.display = '';
@@ -2687,6 +3118,10 @@ document.addEventListener('DOMContentLoaded', function () {
   document.getElementById('ds-dropzone')?.addEventListener('click', e => {
     if (!e.target.closest('button')) document.getElementById('ds-file-input').click();
   });
+  const datasetBody = document.getElementById('dataset-panel-body');
+  const toggleLabel = document.querySelector('.dataset-panel-toggle .dataset-toggle-label');
+  datasetBody?.addEventListener('shown.bs.collapse', () => { if (toggleLabel) toggleLabel.textContent = 'Comprimir'; });
+  datasetBody?.addEventListener('hidden.bs.collapse', () => { if (toggleLabel) toggleLabel.textContent = 'Expandir'; });
   loadDatasetConfig();
 });
 
@@ -2695,7 +3130,7 @@ initCharts();
 showChartOverlay('success',    'Inicia un proceso para ver datos en vivo');
 showChartOverlay('principles', 'Inicia un proceso para ver datos en vivo');
 loadPrincipleCounts();
-setInterval(loadPrincipleCounts, 15000);
+principleCountsTimer = setInterval(loadPrincipleCounts, 15000);
 loadConfigSummary();
 loadCheckpoint();
 loadOutputs();
@@ -2706,6 +3141,17 @@ syncRunSnapshot().then(snapshot => {
     startRunSync();
   }
 });
+window.addEventListener('pagehide', () => {
+  stopRunSync();
+  if (statsRefreshTimer) {
+    clearInterval(statsRefreshTimer);
+    statsRefreshTimer = null;
+  }
+  if (principleCountsTimer) {
+    clearInterval(principleCountsTimer);
+    principleCountsTimer = null;
+  }
+});
 </script>
 
 <!-- Modal: lista completa de errores -->
@@ -2713,7 +3159,7 @@ syncRunSnapshot().then(snapshot => {
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content" style="background:#1a1d27;border:1px solid rgba(244,63,94,.4);color:#e2e8f0">
       <div class="modal-header border-0 pb-0">
-        <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2" style="color:#f43f5e"></i>Errores <span id="errors-modal-count" class="badge bg-danger-subtle text-danger border border-danger ms-2">0</span></h5>
+        <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2" style="color:#f43f5e"></i>Incidentes operativos <span id="errors-modal-count" class="badge bg-danger-subtle text-danger border border-danger ms-2">0</span></h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body pt-3" id="errors-modal-body">

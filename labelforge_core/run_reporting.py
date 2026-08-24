@@ -430,6 +430,7 @@ def build_run_stats(
     stats = {}
     for arb_id in arbiter_ids:
         prompt_sum, completion_sum, total_sum = 0, 0, 0
+        model_calls = 0
         latencies = []
         for row in rows:
             pt = safe_int(row.get(f"prompt_tokens_{arb_id}", 0), 0) or 0
@@ -441,6 +442,7 @@ def build_run_stats(
                 completion_sum += ct
             if tt > 0:
                 total_sum += tt
+            model_calls += max(0, safe_int(row.get(f"model_calls_{arb_id}", 1), 1) or 0)
             lat = safe_float(row.get(f"latency_s_{arb_id}", -1), -1)
             if lat >= 0:
                 latencies.append(lat)
@@ -449,6 +451,8 @@ def build_run_stats(
             "completion_tokens": completion_sum,
             "total_tokens": total_sum,
             "calls": len(latencies),
+            "evaluations": len(latencies),
+            "model_calls": model_calls,
             "latency_avg_s": round(sum(latencies) / len(latencies), 3) if latencies else 0,
             "latency_min_s": round(min(latencies), 3) if latencies else 0,
             "latency_max_s": round(max(latencies), 3) if latencies else 0,
@@ -481,6 +485,7 @@ def build_run_stats(
         "pending_rows": status_counts["pending"],
         "total_tokens_global": total_tokens_global,
         "tokens_per_row": round(total_tokens_global / len(rows)) if rows else 0,
+        "tokens_per_processed_row": round(total_tokens_global / processed_result_rows) if processed_result_rows else 0,
         "tokens_per_successful_row": round(total_tokens_global / status_counts["ok"]) if status_counts["ok"] else 0,
         "total_latency_s": round(total_latency_global, 3),
         "arbiters": stats,
