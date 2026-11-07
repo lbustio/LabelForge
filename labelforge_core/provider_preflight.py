@@ -67,11 +67,13 @@ def _missing_api_key_message(arb_id: str, ptype: str, env_var: str) -> str:
         "gemini": "Gemini AI Studio",
         "anthropic": "Anthropic Claude",
         "openai": "OpenAI",
+        "saptiva": "Saptiva InferNode (Lab IBERO)",
     }.get(ptype, ptype)
     cli = {
         "gemini": "python main_cli.py --set-provider-key gemini",
         "anthropic": "python main_cli.py --set-provider-key anthropic",
         "openai": "python main_cli.py --set-provider-key openai",
+        "saptiva": "python main_cli.py --set-provider-key saptiva",
     }.get(ptype, "python main_cli.py --set-provider-key PROVEEDOR")
     return (
         f"{arb_id}: falta API key para {label} ({env_var}). "
@@ -159,6 +161,11 @@ def validate_provider_preflight(cfg: dict) -> list[str]:
                 issues.append(
                     f"{arb_id}: Vertex AI necesita provider.vertex_project o GOOGLE_CLOUD_PROJECT."
                 )
+
+        elif ptype == "saptiva":
+            if not _provider_key(provider) and not os.environ.get("SAPTIVA_API_KEY", "").strip():
+                env_var = provider.get("api_key_env") or "SAPTIVA_API_KEY"
+                issues.append(_missing_api_key_message(arb_id, ptype, env_var))
 
         elif ptype in {"gemini", "anthropic", "openai"}:
             if not _provider_key(provider):

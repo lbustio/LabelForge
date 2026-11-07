@@ -4,7 +4,7 @@ Plataforma completa para etiquetado de datos con LLMs locales y remotos, con mé
 
 ## Características Principales
 
-- **Soporte Multi-Proveedor**: OpenAI, Anthropic, Google Vertex AI, Gemini, Ollama, y modelos locales GGUF via `llama-cpp-python`
+- **Soporte Multi-Proveedor**: OpenAI, Anthropic, Google Vertex AI, Gemini, Ollama, Saptiva InferNode (Laboratorio de IA IBERO, en línea y por lotes) y modelos locales GGUF via `llama-cpp-python`
 - **Sistema de Árbitros**: Múltiples LLMs evaluando cada entrada con consenso por mayoría
 - **Métricas Avanzadas**: Kappa de Fleiss, Kappa de Cohen, Alfa de Krippendorff, acuerdo observado
 - **Interfaz Web Segura**: Flask con autenticación, CSRF protection, y hardening de seguridad
@@ -243,7 +243,8 @@ Proveedores soportados:
 - `openai`;
 - `openai_compat`;
 - `ollama` local compatible con API OpenAI;
-- `llama_cpp` para GGUF local.
+- `llama_cpp` para GGUF local;
+- `saptiva` para los modelos del Laboratorio de IA IBERO (Saptiva InferNode).
 
 La configuracion actual tiene tres arbitros locales GGUF:
 
@@ -252,6 +253,60 @@ La configuracion actual tiene tres arbitros locales GGUF:
 | `arb1` | Psicologo Clinico | Germinio | `llama_cpp` | `Qwen2.5-7B-Instruct-Q4_K_M.gguf` |
 | `arb3` | Investigador Forense | Gepetencio | `llama_cpp` | `Mistral-7B-Instruct-v0.3-Q4_K_M.gguf` |
 | `arb4` | Psicologo Forense | Claudio | `llama_cpp` | `Llama-3.2-3B-Instruct-Q4_K_M.gguf` |
+
+### Laboratorio de IA IBERO (proveedor `saptiva`)
+
+El proveedor `saptiva` usa la API de modelos de Saptiva Studio del laboratorio
+(`studio.laboratorioia.ibero.mx`). Es compatible con el SDK de OpenAI y apunta por
+defecto a `https://api.laboratorioia.ibero.mx/infernode/v1`. Documentación:
+[API desde código](https://docs.saptiva.com/usuario/modelos/api-desde-codigo) y
+[lotes](https://docs.saptiva.com/usuario/modelos/lotes).
+
+1. Pide tu llave `sk-saptiva-...` en Studio (API > API Keys) o al administrador del lab.
+2. Guárdala verificada:
+
+   ```bash
+   python main_cli.py --set-provider-key saptiva
+   ```
+
+3. Usa la configuración de ejemplo, que conserva los tres árbitros y sus prompts y
+   asigna a cada uno un modelo distinto del lab:
+
+   | ID | Nombre | Alias | Modelo actual (nov 2026) |
+   |---|---|---|---|
+   | `arb1` | Psicologo Clinico | `Saptiva Turbo` | Qwen3.6 35B A3B (FP8) |
+   | `arb3` | Investigador Forense | `Saptiva Omni` | Nemotron 3 Nano Omni 30B A3B (FP8) |
+   | `arb4` | Psicologo Forense | `Saptiva Cortex` | Qwen3.8 27B (FP8) |
+
+   ```bash
+   # Una llamada por entrada (rápido para pruebas)
+   python main_cli.py --config config/arbiters_config.saptiva.json --limit 20
+
+   # API de lotes: un lote por árbitro, del lado del servidor
+   python main_cli.py --config config/arbiters_config.saptiva.json --batch
+   ```
+
+Notas:
+
+- Usa siempre los alias (`Saptiva Turbo`, `Saptiva Omni`, `Saptiva Cortex`). El
+  nombre exacto del catálogo incluye versión y deja de resolver al actualizarse.
+- Los modelos del lab razonan por defecto y el razonamiento consume `max_tokens`.
+  LabelForge lo apaga con `chat_template_kwargs.enable_thinking=false`, que es la
+  única opción que funcionó en el lab. Para reactivarlo en un árbitro, pon
+  `"reasoning": true` en su `generation_config` y sube `max_output_tokens`.
+- Excepción en la config de ejemplo: `Saptiva Omni` razona (`max_output_tokens: 8192`).
+  Sin razonar respondió 0 en casi todo: 2 positivos en 200 correos de Tiltan, y 0
+  de 20 correos con autoridad marcada por humanos. Razonando detectó 9 de esos 20,
+  a cambio de unos 800 tokens de salida por llamada en vez de unos 25. Con un tope
+  de 4096, 9 de 200 llamadas agotaron el tope razonando; por eso el tope es 8192.
+- `--batch` exige que todos los árbitros sean `saptiva`. Divide en archivos de
+  hasta 50,000 líneas, guarda los ids en `checkpoints/saptiva_batch_state.json`
+  para retomar si se interrumpe, y reintenta en línea las entradas que fallen
+  dentro del lote (`--batch-no-retry` lo desactiva). Un lote puede tardar hasta
+  media hora en arrancar. Las líneas del lote no gastan rpm, pero cuestan lo mismo
+  que la llamada en línea.
+- Las peticiones llevan `metadata` con `app=labelforge` y el id del árbitro para
+  ver el consumo en `GET /v1/billing/usage`.
 
 ## Modelos locales GGUF
 
