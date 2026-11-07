@@ -50,8 +50,18 @@ def normalize_arbiter(data: dict, existing: dict = None) -> dict:
         }
 
     if "generation_config" in data:
-        gc = data["generation_config"]
+        gc = data["generation_config"] or {}
+        # Conservar claves que el formulario no edita (reasoning, reasoning_budget,
+        # seed...). Antes se descartaban y un arbitro que necesita razonar volvia a
+        # su comportamiento por defecto sin aviso al guardarlo desde la webapp.
+        extras = {
+            k: v
+            for source in ((existing or {}).get("generation_config") or {}, gc)
+            for k, v in source.items()
+            if k not in {"temperature", "max_output_tokens"}
+        }
         base["generation_config"] = {
+            **extras,
             "temperature": float(gc.get("temperature", 0.1)),
             "max_output_tokens": int(gc.get("max_output_tokens", 600)),
         }

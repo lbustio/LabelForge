@@ -316,12 +316,14 @@ def get_rate_limit_profile(provider: str, model_id: str, tier: str = "free") -> 
         "anthropic":     "Claude Console / Anthropic rate limits",
         "openai":        "OpenAI dashboard rate limits",
         "openai_compat": "Proveedor OpenAI-compatible",
+        "saptiva":       "Saptiva InferNode (plan de la llave; consulta GET /v1/me)",
         "ollama":        "Servidor local",
     }.get(provider, "Proveedor")
     source_url = {
         "vertex_gemini": "https://cloud.google.com/vertex-ai/generative-ai/docs/quotas",
         "anthropic":     "https://docs.anthropic.com/en/api/rate-limits",
         "openai":        "https://platform.openai.com/docs/guides/rate-limits",
+        "saptiva":       "https://docs.saptiva.com/usuario/modelos/api-desde-codigo",
     }.get(provider, "")
     return {
         **limits,

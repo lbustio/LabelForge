@@ -98,6 +98,9 @@
                 <button type="button" class="btn btn-sm provider-tab" data-provider="openai_compat" onclick="selectProvider('openai_compat')">
                   <i class="bi bi-plug me-1"></i>Compatible con OpenAI
                 </button>
+                <button type="button" class="btn btn-sm provider-tab" data-provider="saptiva" onclick="selectProvider('saptiva')">
+                  <i class="bi bi-hdd-network me-1"></i>Saptiva (Lab IBERO)
+                </button>
               </div>
             </div>
           </div>
@@ -448,6 +451,7 @@ const DEFAULT_ENV = {
   anthropic:     "ANTHROPIC_API_KEY",
   openai:        "OPENAI_API_KEY",
   openai_compat: "OPENAI_API_KEY",
+  saptiva:       "SAPTIVA_API_KEY",
   llama_cpp:     "",
 };
 
@@ -456,6 +460,7 @@ const API_KEY_HELP = {
   anthropic:     "Claude/Anthropic: se verificara y guardara como ANTHROPIC_API_KEY en secrets/secrets.env.",
   openai:        "OpenAI: se verificara y guardara como OPENAI_API_KEY en secrets/secrets.env.",
   openai_compat: "Compatible con OpenAI: se verificara contra la direccion base y se guardara como OPENAI_API_KEY en secrets/secrets.env.",
+  saptiva:       "Saptiva (Lab IBERO): llave sk-saptiva-... de Studio > API > API Keys. Se verifica y guarda como SAPTIVA_API_KEY. Usa los alias Saptiva Turbo / Omni / Cortex.",
   vertex_gemini: "Vertex AI usa credenciales de Google Cloud, no una API key directa aqui.",
   llama_cpp:     "Modelo local GGUF - sin API key. El backend se detecta automaticamente al ejecutar setup_env.py.",
 };
@@ -948,11 +953,11 @@ async function loadArbiterPreflight(shouldRender = true) {
 
 const PROVIDER_ICONS = {
   gemini:'bi-google', vertex_gemini:'bi-cloud-check', anthropic:'bi-stars', openai:'bi-robot',
-  llama_cpp:'bi-cpu', openai_compat:'bi-plug'
+  llama_cpp:'bi-cpu', openai_compat:'bi-plug', saptiva:'bi-hdd-network'
 };
 const PROVIDER_LABELS = {
   gemini:'Gemini AI Studio', vertex_gemini:'Gemini Vertex AI', anthropic:'Claude', openai:'ChatGPT',
-  llama_cpp:'Local (GGUF)', openai_compat:'Compatible con OpenAI'
+  llama_cpp:'Local (GGUF)', openai_compat:'Compatible con OpenAI', saptiva:'Saptiva (Lab IBERO)'
 };
 
 

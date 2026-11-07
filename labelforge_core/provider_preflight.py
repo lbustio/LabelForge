@@ -67,11 +67,13 @@ def _missing_api_key_message(arb_id: str, ptype: str, env_var: str) -> str:
         "gemini": "Gemini AI Studio",
         "anthropic": "Anthropic Claude",
         "openai": "OpenAI",
+        "saptiva": "Saptiva InferNode (Lab IBERO)",
     }.get(ptype, ptype)
     cli = {
         "gemini": "python main_cli.py --set-provider-key gemini",
         "anthropic": "python main_cli.py --set-provider-key anthropic",
         "openai": "python main_cli.py --set-provider-key openai",
+        "saptiva": "python main_cli.py --set-provider-key saptiva",
     }.get(ptype, "python main_cli.py --set-provider-key PROVEEDOR")
     return (
         f"{arb_id}: falta API key para {label} ({env_var}). "
@@ -132,9 +134,39 @@ def _check_llama_cpp(arb_id: str, provider: dict) -> list[str]:
     return issues
 
 
+def _model_identity(provider: dict) -> tuple[str, str]:
+    ptype = (provider.get("type") or "").strip()
+    model = (provider.get("model_path") or provider.get("model") or "").strip().lower()
+    return ptype, model
+
+
+def validate_distinct_models(cfg: dict) -> list[str]:
+    """Con safety.require_distinct_models, cada arbitro debe usar un modelo distinto.
+
+    El consenso por mayoria solo tiene sentido si los votos son independientes:
+    dos arbitros con el mismo modelo tienden a equivocarse igual.
+    """
+    if not bool(cfg.get("safety", {}).get("require_distinct_models", False)):
+        return []
+    seen: dict[tuple[str, str], str] = {}
+    issues: list[str] = []
+    for arb in cfg.get("arbiters", []):
+        key = _model_identity(arb.get("provider", {}))
+        if not key[1]:
+            continue
+        if key in seen:
+            issues.append(
+                f"{arb.get('id', '?')}: usa el mismo modelo que {seen[key]} ({key[1]}). "
+                "safety.require_distinct_models exige un modelo distinto por arbitro."
+            )
+        else:
+            seen[key] = arb.get("id", "?")
+    return issues
+
+
 def validate_provider_preflight(cfg: dict) -> list[str]:
     """Return human-readable issues that should block a labeling run."""
-    issues: list[str] = []
+    issues: list[str] = validate_distinct_models(cfg)
     vertex_arb_ids: list[str] = []
 
     for arb in cfg.get("arbiters", []):
@@ -159,6 +191,11 @@ def validate_provider_preflight(cfg: dict) -> list[str]:
                 issues.append(
                     f"{arb_id}: Vertex AI necesita provider.vertex_project o GOOGLE_CLOUD_PROJECT."
                 )
+
+        elif ptype == "saptiva":
+            if not _provider_key(provider) and not os.environ.get("SAPTIVA_API_KEY", "").strip():
+                env_var = provider.get("api_key_env") or "SAPTIVA_API_KEY"
+                issues.append(_missing_api_key_message(arb_id, ptype, env_var))
 
         elif ptype in {"gemini", "anthropic", "openai"}:
             if not _provider_key(provider):

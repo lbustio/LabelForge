@@ -26,6 +26,7 @@ PROVIDER_API_KEY_ENV = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
     "openai_compat": "OPENAI_API_KEY",
+    "saptiva": "SAPTIVA_API_KEY",
     "ollama": "",
     "vertex_gemini": "",
 }

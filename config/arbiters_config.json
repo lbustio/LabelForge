@@ -103,7 +103,8 @@
       "openai",
       "llama_cpp",
       "ollama",
-      "openai_compat"
+      "openai_compat",
+      "saptiva"
     ],
     "allow_remote_openai_compat": false,
     "max_total_tokens": 0,

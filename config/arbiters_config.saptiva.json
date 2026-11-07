@@ -1,0 +1,123 @@
+{
+  "task": {
+    "description": "Analyze a text entry and determine whether each configured persuasion principle is present (1) or absent (0).",
+    "principles": {
+      "AUTH": "Authority: invokes experts, institutions, official roles, policies, executives, government, banks, IT, or other authority to increase trust or compliance.",
+      "SP": "Social Proof: states or suggests that many people, users, customers, employees, or group members already act, agree, comply, or believe it.",
+      "LSD": "Liking, Similarity & Deception: creates trust through familiarity, affinity, flattery, shared identity, impersonation, or legitimate-looking identity.",
+      "CRC": "Commitment, Reciprocation & Consistency: pressures through obligation, duty, reciprocity, prior agreement, relationship, commitment, or expected consistency.",
+      "DIS": "Distraction: uses urgency, scarcity, fear, panic, reward, deadline, sensationalism, or cognitive/emotional overload to rush judgment."
+    },
+    "include_justifications": false,
+    "item_label": "entrada",
+    "user_prompt_template": "Task: label explicit persuasion cues in TEXT only, using the definitions below. Do not fact-check, use outside context, or infer hidden intent. Return 1 only when the cue is explicit; otherwise 0.\n\n{principles_catalog}\n\nTEXT: {item}\n\n{output_instruction}"
+  },
+  "arbiters": [
+    {
+      "name": "Psicologo Clinico",
+      "persona": "Germinio",
+      "system_prompt": "You are a clinical psychologist specializing in social influence, persuasion, and compliance behavior. Apply your expertise to identify explicit behavioral influence cues in text: authority or institutional appeals that compel belief or compliance (AUTH), assertions of mass adoption or consensus that create conformity pressure (SP), identity-based familiarity or trust construction through shared affinity or impersonation (LSD), obligation, reciprocity, or consistency pressure through duties or prior agreements (CRC), and urgency, fear, or emotional distraction tactics that bypass rational judgment (DIS). Apply strict observational standards: label only what is explicitly present in the text - no inference of intent, no fact-checking, no external knowledge. Return JSON only.",
+      "id": "arb1",
+      "provider": {
+        "type": "saptiva",
+        "model": "Saptiva Turbo",
+        "model_path": "",
+        "n_ctx": 4096,
+        "api_key_env": "SAPTIVA_API_KEY",
+        "api_key_override": "",
+        "base_url": "https://api.laboratorioia.ibero.mx/infernode/v1",
+        "vertex_project": "",
+        "vertex_location": "us-central1"
+      },
+      "generation_config": {
+        "temperature": 0.0,
+        "seed": 42,
+        "max_output_tokens": 256,
+        "reasoning": false
+      }
+    },
+    {
+      "name": "Investigador Forense",
+      "persona": "Gepetencio",
+      "system_prompt": "You are a forensic linguist and investigator specializing in deceptive and manipulative communication. Apply your expertise to identify explicit linguistic markers in text: invocations of authority or institutional legitimacy (AUTH), assertions of widespread agreement or mass compliance (SP), identity construction, impersonation, or familiarity signals that build false trust (LSD), obligation, duty, or consistency language that pressures through prior agreements or relationships (CRC), and urgency, scarcity, fear, or sensationalist wording that induces panic or rush (DIS). You work strictly from the text as written: only explicitly stated cues count as evidence - no imputed intent, no context beyond the text. Return JSON only.",
+      "id": "arb3",
+      "provider": {
+        "type": "saptiva",
+        "model": "Saptiva Omni",
+        "model_path": "",
+        "n_ctx": 4096,
+        "api_key_env": "SAPTIVA_API_KEY",
+        "api_key_override": "",
+        "base_url": "https://api.laboratorioia.ibero.mx/infernode/v1",
+        "vertex_project": "",
+        "vertex_location": "us-central1"
+      },
+      "generation_config": {
+        "temperature": 0.0,
+        "seed": 42,
+        "max_output_tokens": 2048,
+        "reasoning": true,
+        "reasoning_budget": 1024
+      }
+    },
+    {
+      "name": "Psicologo Forense",
+      "persona": "Claudio",
+      "system_prompt": "You are a forensic psychologist specializing in social manipulation, coercion, and deceptive influence. Apply your expertise to identify explicit manipulation patterns in text: invocation of authority figures or institutions to compel compliance or belief (AUTH), social proof claims asserting mass behavior or consensus to induce conformity (SP), identity-based trust building, flattery, shared-identity appeals, or impersonation to lower defenses (LSD), reciprocity, obligation, or commitment pressure through duties, relationships, or prior agreements (CRC), and emotional urgency, fear induction, panic, or cognitive overload designed to bypass deliberate judgment (DIS). Apply evidentiary standards: only what is explicitly stated in the text is admissible - intent cannot be imputed and no external context may be used. Return JSON only.",
+      "id": "arb4",
+      "provider": {
+        "type": "saptiva",
+        "model": "Saptiva Cortex",
+        "model_path": "",
+        "n_ctx": 4096,
+        "api_key_env": "SAPTIVA_API_KEY",
+        "api_key_override": "",
+        "base_url": "https://api.laboratorioia.ibero.mx/infernode/v1",
+        "vertex_project": "",
+        "vertex_location": "us-central1"
+      },
+      "generation_config": {
+        "temperature": 0.0,
+        "seed": 42,
+        "max_output_tokens": 256,
+        "reasoning": false
+      }
+    }
+  ],
+  "dataset": {
+    "input_file": "data/uploads/all_datasets_en_es.csv",
+    "sheet": "",
+    "text_column": "claim"
+  },
+  "processing": {
+    "checkpoint_every": 10,
+    "claim_max_chars": 3000,
+    "base_delay_seconds": 0.1,
+    "min_delay_seconds": 0.05,
+    "max_delay_seconds": 120.0,
+    "rate_limit_backoff_multiplier": 2.0,
+    "server_error_backoff_multiplier": 1.5,
+    "recovery_threshold_successes": 5,
+    "recovery_delay_multiplier": 0.5,
+    "batch_max_online_retries": 200
+  },
+  "safety": {
+    "free_only_mode": false,
+    "require_distinct_models": true,
+    "max_arbiters": 10,
+    "allowed_provider_types": [
+      "gemini",
+      "vertex_gemini",
+      "anthropic",
+      "openai",
+      "llama_cpp",
+      "ollama",
+      "openai_compat",
+      "saptiva"
+    ],
+    "allow_remote_openai_compat": false,
+    "max_total_tokens": 0,
+    "pause_on_quota_error": true,
+    "pause_on_network_error": true
+  }
+}

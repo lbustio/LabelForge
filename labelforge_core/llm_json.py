@@ -132,3 +132,19 @@ def parse_llm_json(raw: str, principles: Optional[list[str]] = None) -> tuple[di
         return salvaged, "salvage_fields"
 
     raise last_error or ValueError("No se pudo parsear JSON del LLM")
+
+
+def normalize_label_result(result: dict, principles: list[str], source: str = "") -> dict:
+    """Valida que estén todos los principios y los normaliza a 0/1 (mutando ``result``)."""
+    for p in principles:
+        if p not in result:
+            raise ValueError(f"Falta campo '{p}' en respuesta de {source or 'arbitro'}")
+        val = result[p]
+        if val not in (0, 1):
+            try:
+                result[p] = 1 if int(val) >= 1 else 0
+            except (TypeError, ValueError):
+                raise ValueError(f"Valor invalido para '{p}': {val}")
+        if f"{p}_why" not in result:
+            result[f"{p}_why"] = ""
+    return result

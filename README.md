@@ -4,7 +4,7 @@ Plataforma completa para etiquetado de datos con LLMs locales y remotos, con mé
 
 ## Características Principales
 
-- **Soporte Multi-Proveedor**: OpenAI, Anthropic, Google Vertex AI, Gemini, Ollama, y modelos locales GGUF via `llama-cpp-python`
+- **Soporte Multi-Proveedor**: OpenAI, Anthropic, Google Vertex AI, Gemini, Ollama, Saptiva InferNode (Laboratorio de IA IBERO, en línea y por lotes) y modelos locales GGUF via `llama-cpp-python`
 - **Sistema de Árbitros**: Múltiples LLMs evaluando cada entrada con consenso por mayoría
 - **Métricas Avanzadas**: Kappa de Fleiss, Kappa de Cohen, Alfa de Krippendorff, acuerdo observado
 - **Interfaz Web Segura**: Flask con autenticación, CSRF protection, y hardening de seguridad
@@ -243,7 +243,8 @@ Proveedores soportados:
 - `openai`;
 - `openai_compat`;
 - `ollama` local compatible con API OpenAI;
-- `llama_cpp` para GGUF local.
+- `llama_cpp` para GGUF local;
+- `saptiva` para los modelos del Laboratorio de IA IBERO (Saptiva InferNode).
 
 La configuracion actual tiene tres arbitros locales GGUF:
 
@@ -252,6 +253,90 @@ La configuracion actual tiene tres arbitros locales GGUF:
 | `arb1` | Psicologo Clinico | Germinio | `llama_cpp` | `Qwen2.5-7B-Instruct-Q4_K_M.gguf` |
 | `arb3` | Investigador Forense | Gepetencio | `llama_cpp` | `Mistral-7B-Instruct-v0.3-Q4_K_M.gguf` |
 | `arb4` | Psicologo Forense | Claudio | `llama_cpp` | `Llama-3.2-3B-Instruct-Q4_K_M.gguf` |
+
+### Laboratorio de IA IBERO (proveedor `saptiva`)
+
+El proveedor `saptiva` usa la API de modelos de Saptiva Studio del laboratorio
+(`studio.laboratorioia.ibero.mx`). Es compatible con el SDK de OpenAI y apunta por
+defecto a `https://api.laboratorioia.ibero.mx/infernode/v1`. Documentación:
+[API desde código](https://docs.saptiva.com/usuario/modelos/api-desde-codigo) y
+[lotes](https://docs.saptiva.com/usuario/modelos/lotes).
+
+1. Pide tu llave `sk-saptiva-...` en Studio (API > API Keys) o al administrador del lab.
+2. Guárdala verificada:
+
+   ```bash
+   python main_cli.py --set-provider-key saptiva
+   ```
+
+3. Usa la configuración de ejemplo, que conserva los tres árbitros y sus prompts y
+   asigna a cada uno un modelo distinto del lab:
+
+   | ID | Nombre | Alias | Modelo actual (nov 2026) |
+   |---|---|---|---|
+   | `arb1` | Psicologo Clinico | `Saptiva Turbo` | Qwen3.6 35B A3B (FP8) |
+   | `arb3` | Investigador Forense | `Saptiva Omni` | Nemotron 3 Nano Omni 30B A3B (FP8) |
+   | `arb4` | Psicologo Forense | `Saptiva Cortex` | Qwen3.8 27B (FP8) |
+
+   ```bash
+   # Una llamada por entrada (rápido para pruebas)
+   python main_cli.py --config config/arbiters_config.saptiva.json --limit 20
+
+   # API de lotes: un lote por árbitro, del lado del servidor
+   python main_cli.py --config config/arbiters_config.saptiva.json --batch
+   ```
+
+Notas:
+
+- Usa siempre los alias (`Saptiva Turbo`, `Saptiva Omni`, `Saptiva Cortex`). El
+  nombre exacto del catálogo incluye versión y deja de resolver al actualizarse.
+- Los modelos del lab razonan por defecto y el razonamiento consume `max_tokens`.
+  LabelForge lo apaga con `chat_template_kwargs.enable_thinking=false`, que es la
+  única opción que funcionó en el lab. Para reactivarlo en un árbitro, pon
+  `"reasoning": true` en su `generation_config`. Para acotarlo, usa
+  `"reasoning_budget": N`, que se envía como `thinking_token_budget`.
+  `chat_template_kwargs.reasoning_budget` se ignora en el lab.
+- Cada árbitro usa un modelo distinto. `safety.require_distinct_models: true` bloquea
+  la corrida si dos árbitros comparten modelo, porque el consenso por mayoría
+  necesita votos independientes.
+- La config de ejemplo usa `temperature: 0` y `seed: 42` para que las corridas sean
+  reproducibles.
+
+#### Por qué la config del lab es así
+
+Probada contra las etiquetas humanas de `pop_dataset_Full(Tiltan).csv`. Primero se
+eligió con 200 correos de ajuste y luego se validó con 400 correos distintos.
+
+| Árbitro | Modelo | Razonamiento | Motivo |
+|---|---|---|---|
+| `arb1` | Saptiva Turbo | apagado | Razonar no mejoró la calidad y con presupuesto devolvió JSON roto en 4% a 10% de las llamadas. |
+| `arb3` | Saptiva Omni | presupuesto de 1,024 tokens | Sin razonar marca 0 casi siempre. Con 1,024 iguala la calidad de razonar sin tope, con 11% menos tokens y cero llamadas cortadas; sin tope se cortaron 18 de 400. |
+| `arb4` | Saptiva Cortex | apagado | Razonar no mejoró la calidad. Sin razonar es el árbitro individual más acertado. |
+
+En los 400 correos de validación, el consenso logró kappa de Cohen de 0.42 en
+autoridad y 0.28 en distracción, contra la referencia humana. En compromiso, prueba
+social y afinidad quedó cerca de 0, porque esos principios tienen pocos positivos y
+los modelos no los distinguen bien. El techo de calidad lo ponen los prompts y las
+definiciones, no la configuración de InferNode.
+- `--batch` exige que todos los árbitros sean `saptiva`. Funciona así:
+  - Divide en archivos de hasta 50,000 líneas y 95 MiB.
+  - Guarda en `checkpoints/saptiva_batch_state.json` los ids y las filas de cada
+    lote. Si la corrida se interrumpe, al relanzar retoma esos mismos lotes.
+  - La huella de la corrida incluye el contenido del dataset, el prompt y los
+    árbitros. Si cambia algo, no retoma lotes viejos. `--fresh` borra el estado.
+  - Cada respuesta se guarda al llegar. Al relanzar solo se envían las
+    combinaciones de fila y árbitro que faltan.
+  - Las líneas que fallan dentro del lote se reintentan en línea hasta
+    `processing.batch_max_online_retries` (200 por defecto). Si fallan más, o si
+    el reintento da error de llave, cuota o red, la corrida se pausa sin marcar
+    filas como fallidas. `--batch-no-retry` pausa sin reintentar.
+  - Un lote puede tardar hasta media hora en arrancar. Las líneas del lote no
+    gastan rpm, pero cuestan lo mismo que la llamada en línea.
+  - `safety.max_total_tokens` no se aplica dentro de un lote.
+- Los CSV se leen en UTF-8 y, si no decodifican, en Windows-1252. Así se conservan
+  los acentos de archivos exportados desde Excel, como `data_pop.csv`.
+- Las peticiones llevan `metadata` con `app=labelforge` y el id del árbitro para
+  ver el consumo en `GET /v1/billing/usage`.
 
 ## Modelos locales GGUF
 

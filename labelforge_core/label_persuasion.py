@@ -11,6 +11,8 @@ Proveedores soportados:
   - openai       : OpenAI ChatGPT (openai)
   - openai_compat: Cualquier API compatible con OpenAI (Ollama, LM Studio, vLLM...)
   - ollama       : Ollama local (via openai-compatible endpoint)
+  - saptiva      : Saptiva InferNode (Laboratorio de IA IBERO). Admite modo --batch
+                   con la API de lotes (ver labelforge_core/saptiva_batch.py).
 
 Formatos de entrada soportados:
   - CSV  (.csv)  : cualquier CSV con cabeceras
@@ -71,7 +73,7 @@ from labelforge_core.checkpoint_io import (
     save_run_state,
 )
 from labelforge_core.dataset_io import DatasetError, load_dataset
-from labelforge_core.llm_json import parse_llm_json
+from labelforge_core.llm_json import normalize_label_result, parse_llm_json
 from labelforge_core.prompting import build_user_prompt
 from labelforge_core.secrets_io import provider_api_key_env, secrets_env_path, set_secret_value
 from labelforge_core.provider_preflight import require_provider_preflight
@@ -218,6 +220,9 @@ def verify_provider_key(provider: str, api_key: str, base_url: str = "") -> int:
         from openai import OpenAI
         client = OpenAI(api_key=api_key or "local", base_url=base_url)
         return len(client.models.list().data)
+    if provider == "saptiva":
+        from labelforge_core import saptiva
+        return len(saptiva.list_models(api_key, saptiva.resolve_base_url({"base_url": base_url})))
     raise ValueError(f"Proveedor sin verificacion de API key: {provider}")
 
 
@@ -550,6 +555,16 @@ def _call_openai_compat(arbiter: dict, prompt_user: str) -> tuple:
     return response.choices[0].message.content, usage_dict
 
 
+def _call_saptiva(arbiter: dict, prompt_user: str) -> tuple:
+    """Saptiva InferNode con el razonamiento apagado salvo que el arbitro lo pida."""
+    from labelforge_core import saptiva
+
+    api_key = resolve_api_key(arbiter["provider"]) or os.environ.get(saptiva.API_KEY_ENV, "").strip()
+    if not api_key:
+        raise RuntimeError(f"Falta {saptiva.API_KEY_ENV} (401 unauthorized) para el proveedor saptiva.")
+    return saptiva.call_chat(arbiter, prompt_user, api_key)
+
+
 def _call_llama_cpp(arbiter: dict, prompt_user: str) -> tuple:
     from labelforge_core.local_models import get_or_load_llama
 
@@ -638,6 +653,7 @@ PROVIDER_CALLERS = {
     "openai":        _call_openai_compat,
     "ollama":        _call_openai_compat,
     "openai_compat": _call_openai_compat,
+    "saptiva":       _call_saptiva,
     "llama_cpp":     _call_local,
 }
 
@@ -680,18 +696,7 @@ def call_arbiter(
         result["_latency_s"] = latency_s
         log.debug(f"[{arb_id}] Latencia: {latency_s:.3f}s")
 
-        # Validar y normalizar
-        for p in principles:
-            if p not in result:
-                raise ValueError(f"Falta campo '{p}' en respuesta de {arb_id}")
-            val = result[p]
-            if val not in (0, 1):
-                try:
-                    result[p] = 1 if int(val) >= 1 else 0
-                except (TypeError, ValueError):
-                    raise ValueError(f"Valor invalido para '{p}': {val}")
-            if f"{p}_why" not in result:
-                result[f"{p}_why"] = ""
+        normalize_label_result(result, principles, arb_id)
 
         rate_limiter.on_success()
         total_tokens = int(usage.get("prompt_tokens", 0) or 0) + int(usage.get("completion_tokens", 0) or 0)
@@ -963,7 +968,20 @@ def process_claim(
         partial_arbiter_results.setdefault(row_key, {})[arb["id"]] = result
         append_arbiter_result(row_index, arb["id"], result)
 
-    consensus = compute_majority_consensus(list(arb_results.values()), principles)
+    record = build_claim_record(arb_results, arbiters, principles)
+    entry_consensus_metrics = add_entry_consensus_metrics(record, arbiters, principles)
+    log.info(
+        f"[entrada {row_index}] OK  -  "
+        + " ".join(f"{p}={record[f'{p}_consensus']}" for p in principles)
+        + "  -  "
+        + format_entry_consensus_metrics(entry_consensus_metrics, principles)
+    )
+    return record
+
+
+def build_claim_record(arb_results: dict, arbiters: list, principles: list) -> dict:
+    """Combina los resultados de todos los arbitros de una entrada en un registro CSV."""
+    consensus = compute_majority_consensus([arb_results[a["id"]] for a in arbiters], principles)
 
     record = {}
     for p in principles:
@@ -983,13 +1001,6 @@ def process_claim(
         record[f"latency_s_{arb['id']}"]         = latency
 
     add_entry_usage_metrics(record, arbiters)
-    entry_consensus_metrics = add_entry_consensus_metrics(record, arbiters, principles)
-    log.info(
-        f"[entrada {row_index}] OK  -  "
-        + " ".join(f"{p}={consensus[p]}" for p in principles)
-        + "  -  "
-        + format_entry_consensus_metrics(entry_consensus_metrics, principles)
-    )
     return record
 
 
@@ -1028,6 +1039,154 @@ def write_output_csv(
 
 
 # ---------------------------------------------------------------------------
+# Modo lotes (Saptiva InferNode)
+# ---------------------------------------------------------------------------
+def run_batch_mode(
+    cfg: dict,
+    rows: list,
+    text_column: str,
+    total: int,
+    results: dict,
+    partial_arbiter_results: dict,
+    rate_limiters: dict,
+    input_file: str,
+    run_id: str,
+    state: dict,
+    poll_seconds: float = 30.0,
+    retry_online: bool = True,
+) -> Optional[dict]:
+    """
+    Etiqueta con la API de lotes: uno o varios lotes por arbitro, procesados del
+    lado del servidor.
+
+    - Lo que un arbitro ya resolvio (checkpoint por arbitro) no se reenvia.
+    - Cada resultado del lote se persiste al llegar (arbiter_results.jsonl).
+    - Las lineas que fallan dentro del lote se reintentan en linea hasta
+      ``processing.batch_max_online_retries`` (200 por defecto). Si fallan mas,
+      o si un reintento revela un problema de llave, cuota o red, la corrida se
+      pausa sin marcar filas como fallidas: al relanzar solo se envia lo que falta.
+    Devuelve ``results`` o ``None`` si la corrida quedo en pausa.
+    """
+    from labelforge_core import saptiva
+    from labelforge_core.saptiva_batch import BatchState, run_batches, run_fingerprint
+
+    arbiters = cfg["arbiters"]
+    task_cfg = cfg["task"]
+    proc_cfg = cfg["processing"]
+    principles = list(task_cfg["principles"].keys())
+    max_chars = int(proc_cfg.get("claim_max_chars", 3000))
+    max_online_retries = int(proc_cfg.get("batch_max_online_retries", 200))
+
+    not_saptiva = [a["id"] for a in arbiters if a["provider"].get("type") != saptiva.PROVIDER_TYPE]
+    if not_saptiva:
+        raise SystemExit(
+            "--batch solo funciona cuando todos los arbitros usan el proveedor 'saptiva'. "
+            f"No lo usan: {', '.join(not_saptiva)}."
+        )
+    if total_token_budget(cfg) > 0:
+        log.warning("safety.max_total_tokens no se aplica dentro de un lote: el lote se envia completo.")
+
+    claims: dict[int, str] = {}
+    prompts: dict[int, str] = {}
+    for i in range(total):
+        existing = results.get(str(i))
+        if existing and is_record_final(existing, principles):
+            continue
+        claim = rows[i].get(text_column, "").strip()
+        if not claim:
+            results[str(i)] = {f: "" for f in build_extra_fieldnames(arbiters, principles)}
+            append_claim_result(i, results[str(i)], "skipped")
+            continue
+        claims[i] = claim
+        prompts[i] = build_user_prompt(task_cfg, claim, max_chars)
+
+    prompts_by_arbiter = {
+        arb["id"]: {i: p for i, p in prompts.items() if arb["id"] not in partial_arbiter_results.get(str(i), {})}
+        for arb in arbiters
+    }
+    pending_lines = sum(len(v) for v in prompts_by_arbiter.values())
+    log.info(f"=== Modo lotes: {len(prompts)} entradas pendientes, {pending_lines} lineas por enviar ===")
+
+    def _key(provider: dict) -> str:
+        return resolve_api_key(provider) or os.environ.get(saptiva.API_KEY_ENV, "").strip()
+
+    def _store(row_index: int, arb_id: str, result: dict):
+        partial_arbiter_results.setdefault(str(row_index), {})[arb_id] = result
+        append_arbiter_result(row_index, arb_id, result)
+
+    def _pause(kind: str, reason: str):
+        log.error(f"=== RUN PAUSADO [{kind}] (lotes) === {reason}")
+        save_checkpoint(max_persisted_index(results), results)
+        save_progress_state(state, results, arbiters, principles, "paused", kind, reason)
+        emit_run_metric("paused", run_id=run_id, pause_kind=kind, pause_reason=reason)
+
+    batch_state = BatchState(CHECKPOINTS_DIR / "saptiva_batch_state.json", run_fingerprint(input_file, cfg, total))
+    state["batch_mode"] = True
+    save_progress_state(state, results, arbiters, principles, "running")
+
+    failures: dict = {}
+    if pending_lines:
+        try:
+            _results, failures = run_batches(
+                arbiters, prompts_by_arbiter, principles, _key, batch_state,
+                poll_seconds=poll_seconds,
+                on_progress=lambda snap: emit_run_metric("batch_progress", run_id=run_id, batches=snap),
+                on_result=_store,
+            )
+        except Exception as exc:
+            classification = classify_llm_error(exc)
+            _pause(classification["kind"], f"{type(exc).__name__}: {str(exc)[:300]}")
+            return None
+        # Lo que fallo se reenviara en un lote nuevo si la corrida se relanza.
+        batch_state.clear()
+
+    failed_lines = sum(len(v) for v in failures.values())
+    log.info(f"Lotes terminados: {failed_lines} lineas sin resultado valido")
+    if failed_lines and not retry_online:
+        _pause("batch_partial", f"{failed_lines} lineas fallaron en el lote y --batch-no-retry esta activo; relanza para reenviarlas.")
+        return None
+    if failed_lines > max_online_retries:
+        _pause(
+            "batch_failures",
+            f"{failed_lines} lineas fallaron en el lote (tope de reintento en linea: {max_online_retries}). "
+            "Revisa el log; al relanzar solo se envian las lineas que faltan.",
+        )
+        return None
+
+    for i in sorted(prompts):
+        arb_results = dict(partial_arbiter_results.get(str(i), {}))
+        for arb in arbiters:
+            if arb["id"] in arb_results:
+                continue
+            reason = failures.get(i, {}).get(arb["id"], "sin resultado")
+            log.info(f"[entrada {i}] {arb['id']} sin resultado del lote ({reason[:120]}); reintento en linea")
+            result = call_arbiter(arb, claims[i], rate_limiters[arb["id"]], task_cfg, proc_cfg)
+            if result is not None:
+                _store(i, arb["id"], result)
+                arb_results[arb["id"]] = result
+            elif arb.get("_last_error_kind") not in {"invalid_response"} and arb.get("_last_pause_recommended", True):
+                _pause(arb.get("_last_error_kind", "unknown"), arb.get("_last_error", "sin detalle"))
+                return None
+
+        if all(a["id"] in arb_results for a in arbiters):
+            record = build_claim_record(arb_results, arbiters, principles)
+            add_entry_consensus_metrics(record, arbiters, principles)
+            results[str(i)] = record
+            append_claim_result(i, record, "ok")
+            emit_run_metric("claim_ok", run_id=run_id, **build_claim_metric(i, rows[i], record, arbiters, principles, "batch"))
+        else:
+            results[str(i)] = make_failed_record(arbiters, principles)
+            append_claim_result(i, results[str(i)], "failed")
+            emit_run_metric("claim_failed", run_id=run_id, row_index=i, stage="batch",
+                            reason="respuesta invalida tras lote y reintento", queued=False, definitive=True,
+                            claim=rows[i].get(text_column, ""), claim_es=rows[i].get("claim_es", ""))
+
+    save_checkpoint(max_persisted_index(results), results)
+    save_progress_state(state, results, arbiters, principles, "running")
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main():
@@ -1056,8 +1215,14 @@ def main():
                         help="Contrasena para importar/exportar arbitros cifrados")
     parser.add_argument("--arbiters-password-file", default=None,
                         help="Archivo que contiene la contrasena para importar/exportar arbitros cifrados")
+    parser.add_argument("--batch", action="store_true",
+                        help="Arbitros saptiva: usar la API de lotes de InferNode en vez de una llamada por entrada")
+    parser.add_argument("--batch-poll-seconds", type=float, default=30.0,
+                        help="Segundos entre consultas del estado de los lotes (minimo 30 recomendado)")
+    parser.add_argument("--batch-no-retry", action="store_true",
+                        help="No reintentar en linea las entradas que fallen dentro del lote")
     parser.add_argument("--set-provider-key", default=None,
-                        help="Verificar y guardar API key para proveedor: gemini, anthropic, openai u openai_compat")
+                        help="Verificar y guardar API key para proveedor: gemini, anthropic, openai, openai_compat o saptiva")
     parser.add_argument("--api-key", default=None,
                         help="API key para --set-provider-key")
     parser.add_argument("--api-key-env", default=None,
@@ -1146,6 +1311,7 @@ def main():
 
     if args.fresh:
         clear_runtime_checkpoints(include_run_state=True, include_claim_results=True)
+        (CHECKPOINTS_DIR / "saptiva_batch_state.json").unlink(missing_ok=True)
         log.info("Modo --fresh: checkpoints reanudables previos limpiados")
 
     previous_state = load_run_state()
@@ -1260,6 +1426,17 @@ def main():
         ],
         initial_summary=initial_summary,
     )
+
+    if args.batch:
+        results = run_batch_mode(
+            cfg, rows, text_column, total, results, partial_arbiter_results, rate_limiters,
+            input_file=str(input_file), run_id=run_id, state=state,
+            poll_seconds=args.batch_poll_seconds, retry_online=not args.batch_no_retry,
+        )
+        if results is None:
+            return
+        _finalize_run(rows, results, original_fieldnames, arbiters, principles, output_path, total, run_id, state)
+        return
 
     checkpoint_every = int(proc_cfg.get("checkpoint_every", 10))
     paused = False
@@ -1398,6 +1575,11 @@ def main():
         clear_failed_queue()
         save_checkpoint(total - 1, results)
 
+    _finalize_run(rows, results, original_fieldnames, arbiters, principles, output_path, total, run_id, state)
+
+
+def _finalize_run(rows, results, original_fieldnames, arbiters, principles, output_path, total, run_id, state):
+    """Escribe el CSV final, reporta consumo y marca la corrida como completada."""
     log.info("=== Escribiendo CSV final ===")
     write_output_csv(rows[:total], results, original_fieldnames, arbiters, principles, output_path)
     emit_run_metric("output_written", run_id=run_id, output_file=output_path.name, output_path=str(output_path))

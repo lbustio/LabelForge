@@ -1669,6 +1669,8 @@ def api_models():
             result = _list_openai_models(api_key)
         elif provider in ("ollama", "openai_compat"):
             result = _list_openai_compat_models(api_key, base_url)
+        elif provider == "saptiva":
+            result = _list_saptiva_models(api_key, base_url)
         elif provider == "llama_cpp":
             result = _list_local_gguf_models()
         else:
@@ -1710,6 +1712,8 @@ def api_provider_key():
             models = _list_openai_models(api_key)
         elif provider == "openai_compat":
             models = _list_openai_compat_models(api_key, base_url)
+        elif provider == "saptiva":
+            models = _list_saptiva_models(api_key, base_url)
         else:
             return jsonify({"error": f"Proveedor desconocido: {provider}"}), 400
     except Exception as exc:
@@ -1843,6 +1847,16 @@ def _list_openai_compat_models(api_key: str, base_url: str) -> list:
     ]
     result.sort(key=lambda m: m["id"])
     return result
+
+
+def _list_saptiva_models(api_key: str, base_url: str = "") -> list:
+    """Alias de Saptiva InferNode (recomendados) y nombres exactos del catalogo."""
+    from labelforge_core import saptiva
+    if not api_key:
+        raise ValueError(f"Se requiere {saptiva.API_KEY_ENV} en secrets/secrets.env o como parametro.")
+    resolved = saptiva.resolve_base_url({"base_url": base_url})
+    _validate_base_url(resolved)
+    return saptiva.list_models(api_key, resolved)
 
 
 def _list_local_gguf_models() -> list:
@@ -2659,6 +2673,8 @@ def _preflight_status_by_arbiter(cfg: dict) -> dict:
                 models = _list_openai_models(_get_api_key("openai"))
             elif ptype in {"ollama", "openai_compat"}:
                 models = _list_openai_compat_models(_get_api_key(ptype), provider.get("base_url", ""))
+            elif ptype == "saptiva":
+                models = _list_saptiva_models(_get_api_key(ptype), provider.get("base_url", ""))
             elif ptype == "vertex_gemini":
                 # validate_provider_preflight already checks ADC/project. Vertex model discovery
                 # is curated locally to avoid extra provider calls in this screen.
@@ -2734,7 +2750,7 @@ def api_arbiter_hw_check(arb_id):
     prov = arb.get("provider", {})
     prov_type = prov.get("type", "gemini")
 
-    CLOUD_TYPES = {"gemini", "anthropic", "openai", "vertex_gemini"}
+    CLOUD_TYPES = {"gemini", "anthropic", "openai", "vertex_gemini", "saptiva"}
 
     is_local_compat = False
     if prov_type == "openai_compat":

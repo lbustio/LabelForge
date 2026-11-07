@@ -10,6 +10,7 @@ centraliza formatos, sheets, columnas y conversion de filas.
 from __future__ import annotations
 
 import csv
+import sys
 from pathlib import Path
 from typing import Iterable
 
@@ -117,8 +118,28 @@ def _excel_rows(path: Path, sheet: str | int | None = "") -> tuple[list[dict], l
         wb.close()
 
 
+# Campos de texto largos (correos, noticias) rebasan el limite por defecto de 128 KiB.
+csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
+
+
+def detect_csv_encoding(path: Path) -> str:
+    """UTF-8 (con o sin BOM) si decodifica limpio; si no, Windows-1252 o latin-1.
+
+    Antes se leia todo como UTF-8 con errors="replace" y un CSV exportado desde
+    Excel en Windows perdia los acentos sin aviso (por ejemplo "Leg\ufffdtimo").
+    """
+    raw = Path(path).read_bytes()
+    for encoding in ("utf-8-sig", "cp1252"):
+        try:
+            raw.decode(encoding)
+            return encoding
+        except UnicodeDecodeError:
+            continue
+    return "latin-1"
+
+
 def _csv_rows(path: Path) -> tuple[list[dict], list[str]]:
-    with open(path, "r", encoding="utf-8-sig", errors="replace", newline="") as f:
+    with open(path, "r", encoding=detect_csv_encoding(path), newline="") as f:
         reader = csv.DictReader(f)
         return list(reader), list(reader.fieldnames or [])
 
@@ -266,7 +287,7 @@ def inspect_dataset(input_path: str | Path, sheet: str | int | None = "") -> dic
         finally:
             wb.close()
     if suffix in CSV_SUFFIXES:
-        with open(path, "r", encoding="utf-8-sig", errors="replace", newline="") as f:
+        with open(path, "r", encoding=detect_csv_encoding(path), newline="") as f:
             reader = csv.DictReader(f)
             return {"is_excel": False, "sheets": [], "columns": list(reader.fieldnames or [])}
     raise DatasetError(f"Formato no soportado: '{suffix}'. Usa {_format_suffixes()}.")
