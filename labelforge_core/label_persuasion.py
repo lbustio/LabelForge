@@ -1047,18 +1047,25 @@ def run_batch_mode(
     text_column: str,
     total: int,
     results: dict,
+    partial_arbiter_results: dict,
     rate_limiters: dict,
     input_file: str,
-    config_file: str,
     run_id: str,
     state: dict,
     poll_seconds: float = 30.0,
     retry_online: bool = True,
 ) -> Optional[dict]:
     """
-    Etiqueta con la API de lotes: un lote por arbitro, en paralelo del lado del
-    servidor. Las entradas que fallen dentro del lote se reintentan en linea
-    (una llamada normal) salvo ``retry_online=False``.
+    Etiqueta con la API de lotes: uno o varios lotes por arbitro, procesados del
+    lado del servidor.
+
+    - Lo que un arbitro ya resolvio (checkpoint por arbitro) no se reenvia.
+    - Cada resultado del lote se persiste al llegar (arbiter_results.jsonl).
+    - Las lineas que fallan dentro del lote se reintentan en linea hasta
+      ``processing.batch_max_online_retries`` (200 por defecto). Si fallan mas,
+      o si un reintento revela un problema de llave, cuota o red, la corrida se
+      pausa sin marcar filas como fallidas: al relanzar solo se envia lo que falta.
+    Devuelve ``results`` o ``None`` si la corrida quedo en pausa.
     """
     from labelforge_core import saptiva
     from labelforge_core.saptiva_batch import BatchState, run_batches, run_fingerprint
@@ -1068,6 +1075,7 @@ def run_batch_mode(
     proc_cfg = cfg["processing"]
     principles = list(task_cfg["principles"].keys())
     max_chars = int(proc_cfg.get("claim_max_chars", 3000))
+    max_online_retries = int(proc_cfg.get("batch_max_online_retries", 200))
 
     not_saptiva = [a["id"] for a in arbiters if a["provider"].get("type") != saptiva.PROVIDER_TYPE]
     if not_saptiva:
@@ -1075,9 +1083,11 @@ def run_batch_mode(
             "--batch solo funciona cuando todos los arbitros usan el proveedor 'saptiva'. "
             f"No lo usan: {', '.join(not_saptiva)}."
         )
+    if total_token_budget(cfg) > 0:
+        log.warning("safety.max_total_tokens no se aplica dentro de un lote: el lote se envia completo.")
 
-    prompts: dict[int, str] = {}
     claims: dict[int, str] = {}
+    prompts: dict[int, str] = {}
     for i in range(total):
         existing = results.get(str(i))
         if existing and is_record_final(existing, principles):
@@ -1090,52 +1100,73 @@ def run_batch_mode(
         claims[i] = claim
         prompts[i] = build_user_prompt(task_cfg, claim, max_chars)
 
-    log.info(f"=== Modo lotes: {len(prompts)} entradas x {len(arbiters)} arbitros ===")
-    if not prompts:
-        return results
+    prompts_by_arbiter = {
+        arb["id"]: {i: p for i, p in prompts.items() if arb["id"] not in partial_arbiter_results.get(str(i), {})}
+        for arb in arbiters
+    }
+    pending_lines = sum(len(v) for v in prompts_by_arbiter.values())
+    log.info(f"=== Modo lotes: {len(prompts)} entradas pendientes, {pending_lines} lineas por enviar ===")
 
     def _key(provider: dict) -> str:
         return resolve_api_key(provider) or os.environ.get(saptiva.API_KEY_ENV, "").strip()
 
-    batch_state = BatchState(
-        CHECKPOINTS_DIR / "saptiva_batch_state.json",
-        run_fingerprint(input_file, config_file, total, arbiters),
-    )
+    def _store(row_index: int, arb_id: str, result: dict):
+        partial_arbiter_results.setdefault(str(row_index), {})[arb_id] = result
+        append_arbiter_result(row_index, arb_id, result)
+
+    def _pause(kind: str, reason: str):
+        log.error(f"=== RUN PAUSADO [{kind}] (lotes) === {reason}")
+        save_checkpoint(max_persisted_index(results), results)
+        save_progress_state(state, results, arbiters, principles, "paused", kind, reason)
+        emit_run_metric("paused", run_id=run_id, pause_kind=kind, pause_reason=reason)
+
+    batch_state = BatchState(CHECKPOINTS_DIR / "saptiva_batch_state.json", run_fingerprint(input_file, cfg, total))
     state["batch_mode"] = True
     save_progress_state(state, results, arbiters, principles, "running")
 
-    def _progress(snapshot: dict):
-        emit_run_metric("batch_progress", run_id=run_id, batches=snapshot)
-
-    try:
-        batch_results, failures = run_batches(
-            arbiters, prompts, principles, _key, batch_state,
-            poll_seconds=poll_seconds, on_progress=_progress,
-        )
-    except Exception as exc:
-        classification = classify_llm_error(exc)
-        reason = f"{type(exc).__name__}: {str(exc)[:300]}"
-        log.error(f"=== RUN PAUSADO [{classification['kind']}] (lotes) === {reason}")
-        save_progress_state(state, results, arbiters, principles, "paused", classification["kind"], reason)
-        emit_run_metric("paused", run_id=run_id, pause_kind=classification["kind"], pause_reason=reason)
-        return None
+    failures: dict = {}
+    if pending_lines:
+        try:
+            _results, failures = run_batches(
+                arbiters, prompts_by_arbiter, principles, _key, batch_state,
+                poll_seconds=poll_seconds,
+                on_progress=lambda snap: emit_run_metric("batch_progress", run_id=run_id, batches=snap),
+                on_result=_store,
+            )
+        except Exception as exc:
+            classification = classify_llm_error(exc)
+            _pause(classification["kind"], f"{type(exc).__name__}: {str(exc)[:300]}")
+            return None
+        # Lo que fallo se reenviara en un lote nuevo si la corrida se relanza.
+        batch_state.clear()
 
     failed_lines = sum(len(v) for v in failures.values())
-    log.info(f"Lotes terminados: {len(batch_results)} entradas con respuesta, {failed_lines} lineas por reintentar")
+    log.info(f"Lotes terminados: {failed_lines} lineas sin resultado valido")
+    if failed_lines and not retry_online:
+        _pause("batch_partial", f"{failed_lines} lineas fallaron en el lote y --batch-no-retry esta activo; relanza para reenviarlas.")
+        return None
+    if failed_lines > max_online_retries:
+        _pause(
+            "batch_failures",
+            f"{failed_lines} lineas fallaron en el lote (tope de reintento en linea: {max_online_retries}). "
+            "Revisa el log; al relanzar solo se envian las lineas que faltan.",
+        )
+        return None
 
     for i in sorted(prompts):
-        arb_results = dict(batch_results.get(i, {}))
+        arb_results = dict(partial_arbiter_results.get(str(i), {}))
         for arb in arbiters:
             if arb["id"] in arb_results:
                 continue
             reason = failures.get(i, {}).get(arb["id"], "sin resultado")
-            if not retry_online:
-                log.warning(f"[entrada {i}] {arb['id']} fallo en lote: {reason}")
-                continue
-            log.info(f"[entrada {i}] {arb['id']} fallo en lote ({reason[:120]}); reintento en linea")
+            log.info(f"[entrada {i}] {arb['id']} sin resultado del lote ({reason[:120]}); reintento en linea")
             result = call_arbiter(arb, claims[i], rate_limiters[arb["id"]], task_cfg, proc_cfg)
             if result is not None:
+                _store(i, arb["id"], result)
                 arb_results[arb["id"]] = result
+            elif arb.get("_last_error_kind") not in {"invalid_response"} and arb.get("_last_pause_recommended", True):
+                _pause(arb.get("_last_error_kind", "unknown"), arb.get("_last_error", "sin detalle"))
+                return None
 
         if all(a["id"] in arb_results for a in arbiters):
             record = build_claim_record(arb_results, arbiters, principles)
@@ -1147,12 +1178,11 @@ def run_batch_mode(
             results[str(i)] = make_failed_record(arbiters, principles)
             append_claim_result(i, results[str(i)], "failed")
             emit_run_metric("claim_failed", run_id=run_id, row_index=i, stage="batch",
-                            reason="arbitros sin resultado tras lote", queued=False, definitive=True,
+                            reason="respuesta invalida tras lote y reintento", queued=False, definitive=True,
                             claim=rows[i].get(text_column, ""), claim_es=rows[i].get("claim_es", ""))
 
     save_checkpoint(max_persisted_index(results), results)
     save_progress_state(state, results, arbiters, principles, "running")
-    batch_state.clear()
     return results
 
 
@@ -1281,6 +1311,7 @@ def main():
 
     if args.fresh:
         clear_runtime_checkpoints(include_run_state=True, include_claim_results=True)
+        (CHECKPOINTS_DIR / "saptiva_batch_state.json").unlink(missing_ok=True)
         log.info("Modo --fresh: checkpoints reanudables previos limpiados")
 
     previous_state = load_run_state()
@@ -1398,8 +1429,8 @@ def main():
 
     if args.batch:
         results = run_batch_mode(
-            cfg, rows, text_column, total, results, rate_limiters,
-            input_file=str(input_file), config_file=str(args.config), run_id=run_id, state=state,
+            cfg, rows, text_column, total, results, partial_arbiter_results, rate_limiters,
+            input_file=str(input_file), run_id=run_id, state=state,
             poll_seconds=args.batch_poll_seconds, retry_online=not args.batch_no_retry,
         )
         if results is None:

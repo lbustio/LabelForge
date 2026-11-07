@@ -22,7 +22,9 @@ Decisiones relevantes para el etiquetador:
   ``max_tokens`` y, con topes bajos, ``content`` llega vacio. Para etiquetar
   (salida JSON corta) se apaga con ``chat_template_kwargs.enable_thinking=false``.
   Verificado el 2026-11-07 contra el lab: ``reasoning.effort=none`` NO lo apaga.
-  Se puede reactivar por arbitro con ``generation_config.reasoning=true``.
+  Se puede reactivar por arbitro con ``generation_config.reasoning=true`` y
+  acotar con ``generation_config.reasoning_budget`` (tokens de razonamiento,
+  enviado como ``thinking_token_budget``).
 * Este modulo construye el mismo ``body`` para la llamada en linea y para las
   lineas del archivo de lotes, asi ambos modos etiquetan igual.
 """
@@ -79,8 +81,16 @@ def build_chat_body(arbiter: dict, prompt_user: str, json_mode: bool = True) -> 
     }
     if json_mode:
         body["response_format"] = {"type": "json_object"}
+    if gen_cfg.get("seed") is not None:
+        body["seed"] = int(gen_cfg["seed"])
     if not bool(gen_cfg.get("reasoning", False)):
         body["chat_template_kwargs"] = {"enable_thinking": False}
+    else:
+        budget = int(gen_cfg.get("reasoning_budget", 0) or 0)
+        if budget > 0:
+            # Verificado en el lab (2026-11-07): thinking_token_budget si acota el
+            # razonamiento; chat_template_kwargs.reasoning_budget se ignora.
+            body["thinking_token_budget"] = budget
     return body
 
 

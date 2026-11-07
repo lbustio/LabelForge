@@ -130,21 +130,40 @@ def _jsonl(text: str) -> list[dict]:
     return out
 
 
-def run_fingerprint(input_file: str, config_file: str, total: int, arbiters: list) -> str:
+def run_fingerprint(input_file: str, cfg: dict, total: int) -> str:
+    """Huella de la corrida: contenido del dataset, task, arbitros y recorte del texto.
+
+    Si cambia cualquiera de esos datos (aunque el archivo se llame igual y tenga
+    las mismas filas) los lotes previos no se retoman.
+    """
+    h = hashlib.sha256()
+    try:
+        with open(input_file, "rb") as f:
+            for block in iter(lambda: f.read(1 << 20), b""):
+                h.update(block)
+    except OSError:
+        h.update(str(input_file).encode("utf-8"))
     payload = json.dumps(
         {
-            "input": str(input_file),
-            "config": str(config_file),
             "total": int(total),
+            "task": cfg.get("task", {}),
+            "claim_max_chars": cfg.get("processing", {}).get("claim_max_chars"),
             "arbiters": [
-                [a["id"], a["provider"].get("model"), a.get("system_prompt"), a.get("generation_config")]
-                for a in arbiters
+                {
+                    "id": a["id"],
+                    "model": a["provider"].get("model"),
+                    "base_url": saptiva.resolve_base_url(a["provider"]),
+                    "system_prompt": a.get("system_prompt"),
+                    "generation_config": a.get("generation_config"),
+                }
+                for a in cfg.get("arbiters", [])
             ],
         },
         sort_keys=True,
         ensure_ascii=False,
     )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    h.update(payload.encode("utf-8"))
+    return h.hexdigest()[:16]
 
 
 class BatchState:
@@ -178,9 +197,36 @@ class BatchState:
             self.path.unlink()
 
 
+def _is_transient(exc: Exception) -> bool:
+    status = getattr(exc, "status_code", None)
+    if status is not None:
+        return status == 429 or status >= 500
+    name = type(exc).__name__
+    return name in {"APIConnectionError", "APITimeoutError"} or "timeout" in name.lower()
+
+
+def _submit(client, arb: dict, key: str, rows: list[int], prompts: dict[int, str], job: dict, state: "BatchState"):
+    """Sube el archivo (una sola vez) y crea el lote, guardando cada id en cuanto existe."""
+    if not job.get("input_file_id"):
+        lines = build_batch_lines(arb, {i: prompts[i] for i in rows})
+        content = ("\n".join(lines) + "\n").encode("utf-8")
+        uploaded = client.files.create(file=(f"labelforge_{key.replace('#', '_')}.jsonl", io.BytesIO(content)), purpose="batch")
+        job["input_file_id"] = uploaded.id
+        state.save()
+    batch = client.batches.create(
+        input_file_id=job["input_file_id"],
+        endpoint=saptiva.CHAT_ENDPOINT,
+        completion_window="24h",
+        metadata={"app": "labelforge", "arbiter": str(arb["id"]), "part": key.partition("#")[2]},
+    )
+    job.update({"batch_id": batch.id, "status": batch.status})
+    state.save()
+    log.info("[%s] Lote creado %s con %d lineas (modelo %s)", key, batch.id, len(rows), job.get("model"))
+
+
 def run_batches(
     arbiters: list,
-    prompts: dict[int, str],
+    prompts_by_arbiter: dict[str, dict[int, str]],
     principles: list[str],
     resolve_key: Callable[[dict], str],
     state: BatchState,
@@ -188,9 +234,17 @@ def run_batches(
     client_factory: Callable[[str, str], object] = saptiva.make_client,
     sleep: Callable[[float], None] = time.sleep,
     on_progress: Optional[Callable[[dict], None]] = None,
+    on_result: Optional[Callable[[int, str, dict], None]] = None,
+    max_consecutive_poll_errors: int = 20,
 ) -> tuple[dict, dict]:
     """
-    Envia un lote por arbitro (o varios si excede limites), espera y descarga.
+    Envia uno o varios lotes por arbitro, espera y descarga.
+
+    ``prompts_by_arbiter`` mapea id de arbitro -> {indice_fila: prompt}; permite
+    no reenviar lo que un arbitro ya resolvio en una corrida previa.
+
+    Cada lote guarda en el estado las filas que envio. Al reanudar se usan esos
+    lotes tal cual, aunque el conjunto de filas pendientes haya cambiado.
 
     Devuelve:
       results  : {indice_fila: {arb_id: resultado}}
@@ -198,53 +252,67 @@ def run_batches(
     """
     results: dict[int, dict] = {}
     failures: dict[int, dict] = {}
-    jobs: list[tuple[str, dict, object]] = []
+    by_id = {a["id"]: a for a in arbiters}
+    clients: dict[str, object] = {}
 
-    # 1-2. Subir y crear (o retomar) lotes
+    def client_for(arb: dict):
+        if arb["id"] not in clients:
+            clients[arb["id"]] = client_factory(resolve_key(arb["provider"]), saptiva.resolve_base_url(arb["provider"]))
+        return clients[arb["id"]]
+
+    # 1. Planear: retomar los jobs guardados o partir las filas pendientes en archivos
     for arb in arbiters:
-        api_key = resolve_key(arb["provider"])
-        client = client_factory(api_key, saptiva.resolve_base_url(arb["provider"]))
+        if any(j.get("arbiter_id") == arb["id"] for j in state.data["jobs"].values()):
+            continue
+        prompts = prompts_by_arbiter.get(arb["id"], {})
+        if not prompts:
+            continue
+        rows_sorted = sorted(prompts)
         chunks = chunk_lines(build_batch_lines(arb, prompts))
+        offset = 0
         for n, chunk in enumerate(chunks):
-            key = f"{arb['id']}#{n}"
-            job = state.job(key)
-            if job.get("batch_id"):
-                log.info("[%s] Retomando lote %s (%s)", key, job["batch_id"], job.get("status", "?"))
-            else:
-                content = ("\n".join(chunk) + "\n").encode("utf-8")
-                uploaded = client.files.create(
-                    file=(f"labelforge_{arb['id']}_{n}.jsonl", io.BytesIO(content)),
-                    purpose="batch",
-                )
-                batch = client.batches.create(
-                    input_file_id=uploaded.id,
-                    endpoint=saptiva.CHAT_ENDPOINT,
-                    completion_window="24h",
-                    metadata={"app": "labelforge", "arbiter": str(arb["id"]), "part": str(n)},
-                )
-                job.update({
-                    "arbiter_id": arb["id"],
-                    "model": arb["provider"].get("model"),
-                    "input_file_id": uploaded.id,
-                    "batch_id": batch.id,
-                    "status": batch.status,
-                    "lines": len(chunk),
-                })
-                state.save()
-                log.info("[%s] Lote creado %s con %d lineas (modelo %s)", key, batch.id, len(chunk), job["model"])
-            jobs.append((key, arb, client))
+            state.job(f"{arb['id']}#{n}").update({
+                "arbiter_id": arb["id"],
+                "model": arb["provider"].get("model"),
+                "rows": rows_sorted[offset:offset + len(chunk)],
+                "lines": len(chunk),
+            })
+            offset += len(chunk)
+    state.save()
 
-    # 3. Consultar hasta estado terminal
-    by_key = {key: (arb, client) for key, arb, client in jobs}
-    pending = set(by_key)
+    # 2. Subir y crear los que aun no tienen lote
+    for key, job in state.data["jobs"].items():
+        arb = by_id.get(job.get("arbiter_id"))
+        if arb is None:
+            continue
+        if job.get("batch_id"):
+            log.info("[%s] Retomando lote %s (%s)", key, job["batch_id"], job.get("status", "?"))
+            continue
+        prompts = prompts_by_arbiter.get(arb["id"], {})
+        missing = [i for i in job["rows"] if i not in prompts]
+        if missing:
+            raise RuntimeError(f"[{key}] faltan prompts para {len(missing)} filas al crear el lote; usa --fresh.")
+        _submit(client_for(arb), arb, key, job["rows"], prompts, job, state)
+
+    # 3. Consultar hasta estado terminal, tolerando errores transitorios
+    errors_in_a_row = 0
     while True:
         snapshot = {}
-        for key in sorted(pending):
-            arb, client = by_key[key]
-            job = state.job(key)
-            if job.get("status") in TERMINAL_STATUSES:
+        for key, job in sorted(state.data["jobs"].items()):
+            arb = by_id.get(job.get("arbiter_id"))
+            if arb is None or job.get("status") in TERMINAL_STATUSES:
                 continue
-            batch = client.batches.retrieve(job["batch_id"])
+            try:
+                batch = client_for(arb).batches.retrieve(job["batch_id"])
+                errors_in_a_row = 0
+            except Exception as exc:
+                if not _is_transient(exc):
+                    raise
+                errors_in_a_row += 1
+                log.warning("[%s] Consulta fallo (%s); se reintenta en la siguiente vuelta", key, type(exc).__name__)
+                if errors_in_a_row >= max_consecutive_poll_errors:
+                    raise
+                continue
             counts = getattr(batch, "request_counts", None)
             job.update({
                 "status": batch.status,
@@ -263,49 +331,44 @@ def run_batches(
             ))
             if on_progress:
                 on_progress(snapshot)
-        if all(state.job(k).get("status") in TERMINAL_STATUSES for k in pending):
+        if all(j.get("status") in TERMINAL_STATUSES for j in state.data["jobs"].values() if j.get("arbiter_id") in by_id):
             break
         sleep(poll_seconds)
 
-    # 4. Descargar y casar por custom_id
-    for key, arb, client in jobs:
-        job = state.job(key)
+    # 4. Descargar y casar por custom_id con las filas que envio cada lote
+    for key, job in state.data["jobs"].items():
+        arb = by_id.get(job.get("arbiter_id"))
+        if arb is None:
+            continue
         arb_id = arb["id"]
         if job.get("status") == "failed":
             log.error("[%s] Lote fallido completo: %s", key, job.get("errors"))
+        sent = set(job.get("rows", []))
         seen: set[int] = set()
         for file_key in ("output_file_id", "error_file_id"):
             file_id = job.get(file_key)
             if not file_id:
                 continue
-            text = client.files.content(file_id).text
-            for line in _jsonl(text):
-                row_index, result, reason = parse_result_line(line, principles)
-                if row_index is None:
+            text = client_for(arb).files.content(file_id).text
+            for raw in text.splitlines():
+                if not raw.strip():
+                    continue
+                row_index, result, reason = parse_result_line(json.loads(raw), principles)
+                if row_index is None or row_index not in sent:
                     continue
                 seen.add(row_index)
                 if result is not None:
                     results.setdefault(row_index, {})[arb_id] = result
+                    if on_result:
+                        on_result(row_index, arb_id, result)
                 else:
                     failures.setdefault(row_index, {})[arb_id] = reason
-        # Lineas sin salida (lote fallido/expirado/cancelado): se marcan para reintento
-        part_rows = _rows_of_chunk(prompts, key, arbiters)
-        for row_index in part_rows - seen:
+        for row_index in sent - seen:
             failures.setdefault(row_index, {})[arb_id] = f"sin resultado en lote ({job.get('status')})"
         job["downloaded"] = True
         state.save()
 
     return results, failures
-
-
-def _rows_of_chunk(prompts: dict[int, str], key: str, arbiters: list) -> set[int]:
-    """Reconstruye que filas fueron a la parte ``n`` del arbitro (mismo orden que build_batch_lines)."""
-    arb_id, _, part = key.partition("#")
-    arb = next(a for a in arbiters if a["id"] == arb_id)
-    rows = sorted(prompts)
-    chunks = chunk_lines(build_batch_lines(arb, prompts))
-    start = sum(len(c) for c in chunks[: int(part)])
-    return set(rows[start:start + len(chunks[int(part)])])
 
 
 def _errors_to_list(errors) -> list:

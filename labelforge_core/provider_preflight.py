@@ -134,9 +134,39 @@ def _check_llama_cpp(arb_id: str, provider: dict) -> list[str]:
     return issues
 
 
+def _model_identity(provider: dict) -> tuple[str, str]:
+    ptype = (provider.get("type") or "").strip()
+    model = (provider.get("model_path") or provider.get("model") or "").strip().lower()
+    return ptype, model
+
+
+def validate_distinct_models(cfg: dict) -> list[str]:
+    """Con safety.require_distinct_models, cada arbitro debe usar un modelo distinto.
+
+    El consenso por mayoria solo tiene sentido si los votos son independientes:
+    dos arbitros con el mismo modelo tienden a equivocarse igual.
+    """
+    if not bool(cfg.get("safety", {}).get("require_distinct_models", False)):
+        return []
+    seen: dict[tuple[str, str], str] = {}
+    issues: list[str] = []
+    for arb in cfg.get("arbiters", []):
+        key = _model_identity(arb.get("provider", {}))
+        if not key[1]:
+            continue
+        if key in seen:
+            issues.append(
+                f"{arb.get('id', '?')}: usa el mismo modelo que {seen[key]} ({key[1]}). "
+                "safety.require_distinct_models exige un modelo distinto por arbitro."
+            )
+        else:
+            seen[key] = arb.get("id", "?")
+    return issues
+
+
 def validate_provider_preflight(cfg: dict) -> list[str]:
     """Return human-readable issues that should block a labeling run."""
-    issues: list[str] = []
+    issues: list[str] = validate_distinct_models(cfg)
     vertex_arb_ids: list[str] = []
 
     for arb in cfg.get("arbiters", []):

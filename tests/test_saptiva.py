@@ -1,5 +1,6 @@
 """Tests del proveedor Saptiva InferNode y del modo por lotes (sin red)."""
 
+import io
 import json
 import os
 import sys
@@ -83,6 +84,43 @@ class TestSaptivaPreflight(unittest.TestCase):
         cfg = {"arbiters": [arbiter()]}
         with mock.patch.dict(os.environ, {"SAPTIVA_API_KEY": "sk-saptiva-x"}):
             self.assertEqual(validate_provider_preflight(cfg), [])
+
+
+class TestDistinctModels(unittest.TestCase):
+    def _cfg(self, models, required=True):
+        return {"safety": {"require_distinct_models": required},
+                "arbiters": [arbiter(f"a{i}", m) for i, m in enumerate(models)]}
+
+    def test_repeated_model_blocks_run(self):
+        with mock.patch.dict(os.environ, {"SAPTIVA_API_KEY": "sk-saptiva-x"}):
+            issues = validate_provider_preflight(self._cfg(["Saptiva Turbo", "Saptiva Omni", "saptiva turbo"]))
+        self.assertEqual(len(issues), 1)
+        self.assertIn("a2", issues[0])
+        self.assertIn("a0", issues[0])
+
+    def test_three_distinct_models_pass(self):
+        with mock.patch.dict(os.environ, {"SAPTIVA_API_KEY": "sk-saptiva-x"}):
+            self.assertEqual(validate_provider_preflight(self._cfg(["Saptiva Turbo", "Saptiva Omni", "Saptiva Cortex"])), [])
+
+    def test_rule_is_opt_in(self):
+        with mock.patch.dict(os.environ, {"SAPTIVA_API_KEY": "sk-saptiva-x"}):
+            self.assertEqual(validate_provider_preflight(self._cfg(["Saptiva Turbo"] * 2, required=False)), [])
+
+    def test_lab_config_uses_three_distinct_models(self):
+        cfg = json.loads((ROOT / "config/arbiters_config.saptiva.json").read_text(encoding="utf-8"))
+        self.assertTrue(cfg["safety"]["require_distinct_models"])
+        models = [a["provider"]["model"] for a in cfg["arbiters"]]
+        self.assertEqual(sorted(models), ["Saptiva Cortex", "Saptiva Omni", "Saptiva Turbo"])
+
+
+class TestArbiterEditKeepsReasoning(unittest.TestCase):
+    def test_webapp_edit_keeps_reasoning_and_seed(self):
+        from labelforge_core.arbiters_io import normalize_arbiter
+        existing = arbiter("arb3", "Saptiva Omni", reasoning=True, reasoning_budget=1024, seed=42)
+        edited = normalize_arbiter({"name": "Nuevo nombre", "generation_config": {"temperature": 0.0, "max_output_tokens": 2048}}, existing)
+        gc = edited["generation_config"]
+        self.assertEqual((gc["reasoning"], gc["reasoning_budget"], gc["seed"]), (True, 1024, 42))
+        self.assertEqual((gc["temperature"], gc["max_output_tokens"]), (0.0, 2048))
 
 
 class TestBatchFiles(unittest.TestCase):
@@ -177,48 +215,107 @@ class FakeBatchClient:
 
 
 class TestRunBatches(unittest.TestCase):
+    def _run(self, client, arbs, prompts_by_arb, state, **kw):
+        return saptiva_batch.run_batches(
+            arbs, prompts_by_arb, PRINCIPLES, lambda p: "sk-saptiva-x", state,
+            poll_seconds=30, client_factory=lambda k, u: client, **kw,
+        )
+
     def test_end_to_end_with_fake_server(self):
         answers = {0: {"AUTH": 1, "SP": 0, "DIS": 0}, 1: {"AUTH": 0, "SP": 1, "DIS": 1}, 2: {"AUTH": 0, "SP": 0, "DIS": 0}}
         client = FakeBatchClient(answers, fail_rows={2})
         arbs = [arbiter("a1", "Saptiva Turbo"), arbiter("a2", "Saptiva Omni")]
-        sleeps = []
+        prompts = {0: "p0", 1: "p1", 2: "p2"}
+        sleeps, stored = [], []
         with tempfile.TemporaryDirectory() as tmp:
             state = saptiva_batch.BatchState(Path(tmp) / "s.json", "fp")
-            results, failures = saptiva_batch.run_batches(
-                arbs, {0: "p0", 1: "p1", 2: "p2"}, PRINCIPLES, lambda p: "sk-saptiva-x", state,
-                poll_seconds=30, client_factory=lambda k, u: client, sleep=sleeps.append,
-            )
+            results, failures = self._run(client, arbs, {"a1": prompts, "a2": prompts}, state,
+                                          sleep=sleeps.append, on_result=lambda i, a, r: stored.append((i, a)))
             saved = json.loads((Path(tmp) / "s.json").read_text())
         self.assertEqual(results[0]["a1"]["AUTH"], 1)
         self.assertEqual(results[1]["a2"]["DIS"], 1)
         self.assertNotIn(2, results)
         self.assertEqual(set(failures[2]), {"a1", "a2"})
-        self.assertEqual(sleeps, [30])  # una espera: primera consulta in_progress, segunda completed
+        self.assertEqual(sleeps, [30])
         self.assertEqual(len(client.batches_store()), 2)  # un lote por arbitro
-        self.assertTrue(all(j["downloaded"] for j in saved["jobs"].values()))
+        self.assertEqual(sorted(stored), [(0, "a1"), (0, "a2"), (1, "a1"), (1, "a2")])
+        self.assertTrue(all(j["downloaded"] and j["rows"] == [0, 1, 2] for j in saved["jobs"].values()))
 
-    def test_resume_does_not_recreate_batches(self):
-        answers = {0: {"AUTH": 1, "SP": 1, "DIS": 1}}
+    def test_already_resolved_rows_are_not_resent(self):
+        client = FakeBatchClient({0: {"AUTH": 1, "SP": 0, "DIS": 0}, 1: {"AUTH": 0, "SP": 0, "DIS": 0}})
+        arbs = [arbiter("a1"), arbiter("a2")]
+        with tempfile.TemporaryDirectory() as tmp:
+            state = saptiva_batch.BatchState(Path(tmp) / "s.json", "fp")
+            self._run(client, arbs, {"a1": {0: "p0", 1: "p1"}, "a2": {1: "p1"}}, state, sleep=lambda s: None)
+        sent = [len(t.splitlines()) for k, t in client.uploaded.items() if k.startswith("file-")]
+        self.assertEqual(sorted(sent), [1, 2])
+
+    def test_arbiter_without_pending_rows_creates_no_batch(self):
+        client = FakeBatchClient({0: {"AUTH": 1, "SP": 0, "DIS": 0}})
+        with tempfile.TemporaryDirectory() as tmp:
+            state = saptiva_batch.BatchState(Path(tmp) / "s.json", "fp")
+            self._run(client, [arbiter("a1"), arbiter("a2")], {"a1": {0: "p0"}, "a2": {}}, state, sleep=lambda s: None)
+        self.assertEqual(len(client.batches_store()), 1)
+
+    def test_resume_uses_saved_rows_even_if_pending_set_shrank(self):
+        answers = {0: {"AUTH": 1, "SP": 1, "DIS": 1}, 1: {"AUTH": 0, "SP": 0, "DIS": 1}}
         client = FakeBatchClient(answers)
         arbs = [arbiter("a1")]
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "s.json"
             state = saptiva_batch.BatchState(path, "fp")
-            # Simula una corrida previa que alcanzo a crear el lote y se interrumpio
-            client._create_file(("f", __import__("io").BytesIO(
-                ("\n".join(saptiva_batch.build_batch_lines(arbs[0], {0: "p0"})) + "\n").encode())), "batch")
+            lines = saptiva_batch.build_batch_lines(arbs[0], {0: "p0", 1: "p1"})
+            client._create_file(("f", io.BytesIO(("\n".join(lines) + "\n").encode())), "batch")
             client._create_batch("file-0", "/v1/chat/completions", "24h")
-            state.job("a1#0").update({"batch_id": "batch_0", "status": "in_progress", "lines": 1})
+            state.job("a1#0").update({"arbiter_id": "a1", "rows": [0, 1], "lines": 2,
+                                      "input_file_id": "file-0", "batch_id": "batch_0", "status": "in_progress"})
             state.save()
 
             resumed = saptiva_batch.BatchState(path, "fp")
-            results, failures = saptiva_batch.run_batches(
-                arbs, {0: "p0"}, PRINCIPLES, lambda p: "k", resumed,
-                client_factory=lambda k, u: client, sleep=lambda s: None,
-            )
-        self.assertEqual(len(client.batches_store()), 1)
-        self.assertEqual(results[0]["a1"]["SP"], 1)
+            # La fila 0 se termino entre corridas: solo queda la 1 pendiente
+            results, failures = self._run(client, arbs, {"a1": {1: "p1"}}, resumed, sleep=lambda s: None)
+        self.assertEqual(len(client.batches_store()), 1)  # no se crea un lote nuevo
+        self.assertEqual(results[1]["a1"]["DIS"], 1)
         self.assertEqual(failures, {})
+
+    def test_uploaded_file_is_reused_if_batch_creation_failed(self):
+        client = FakeBatchClient({0: {"AUTH": 1, "SP": 0, "DIS": 0}})
+        real_create = client.batches.create
+        calls = {"n": 0}
+
+        def flaky_create(**kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("503 Service Unavailable")
+            return real_create(**kw)
+
+        client.batches.create = flaky_create
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "s.json"
+            with self.assertRaises(RuntimeError):
+                self._run(client, [arbiter("a1")], {"a1": {0: "p0"}}, saptiva_batch.BatchState(path, "fp"), sleep=lambda s: None)
+            self._run(client, [arbiter("a1")], {"a1": {0: "p0"}}, saptiva_batch.BatchState(path, "fp"), sleep=lambda s: None)
+        self.assertEqual(len([k for k in client.uploaded if k.startswith("file-")]), 1)
+
+    def test_transient_poll_errors_do_not_abort(self):
+        client = FakeBatchClient({0: {"AUTH": 1, "SP": 0, "DIS": 0}})
+        real_retrieve = client.batches.retrieve
+        calls = {"n": 0}
+
+        class Unavailable(Exception):
+            status_code = 503
+
+        def flaky_retrieve(bid):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise Unavailable("503")
+            return real_retrieve(bid)
+
+        client.batches.retrieve = flaky_retrieve
+        with tempfile.TemporaryDirectory() as tmp:
+            results, failures = self._run(client, [arbiter("a1")], {"a1": {0: "p0"}},
+                                          saptiva_batch.BatchState(Path(tmp) / "s.json", "fp"), sleep=lambda s: None)
+        self.assertEqual(results[0]["a1"]["AUTH"], 1)
 
     def test_state_with_other_fingerprint_is_ignored(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -226,6 +323,48 @@ class TestRunBatches(unittest.TestCase):
             path.write_text(json.dumps({"fingerprint": "old", "jobs": {"a1#0": {"batch_id": "b"}}}))
             state = saptiva_batch.BatchState(path, "new")
             self.assertEqual(state.data["jobs"], {})
+
+    def test_fingerprint_changes_with_dataset_content_and_prompt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp) / "d.csv"
+            cfg = {"task": {"user_prompt_template": "A"}, "processing": {"claim_max_chars": 3000}, "arbiters": [arbiter()]}
+            data.write_text("claim\nhola\n", encoding="utf-8")
+            fp1 = saptiva_batch.run_fingerprint(str(data), cfg, 1)
+            data.write_text("claim\nadios\n", encoding="utf-8")
+            fp2 = saptiva_batch.run_fingerprint(str(data), cfg, 1)
+            cfg["task"]["user_prompt_template"] = "B"
+            fp3 = saptiva_batch.run_fingerprint(str(data), cfg, 1)
+        self.assertEqual(len({fp1, fp2, fp3}), 3)
+
+
+class TestReasoningBudget(unittest.TestCase):
+    def test_budget_and_seed_go_in_body(self):
+        body = saptiva.build_chat_body(arbiter(reasoning=True, reasoning_budget=256, seed=7), "x")
+        self.assertEqual(body["thinking_token_budget"], 256)
+        self.assertEqual(body["seed"], 7)
+        self.assertNotIn("chat_template_kwargs", body)
+
+    def test_budget_ignored_when_reasoning_off(self):
+        body = saptiva.build_chat_body(arbiter(reasoning_budget=256), "x")
+        self.assertNotIn("thinking_token_budget", body)
+
+
+class TestCsvEncoding(unittest.TestCase):
+    def test_latin1_csv_keeps_accents(self):
+        from labelforge_core.dataset_io import load_dataset
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "l1.csv"
+            path.write_bytes("txt,label\nCorreo leg\u00edtimo,Leg\u00edtimo\n".encode("latin-1"))
+            rows, _ = load_dataset(path, text_column="txt")
+        self.assertEqual(rows[0]["label"], "Leg\u00edtimo")
+
+    def test_utf8_bom_csv(self):
+        from labelforge_core.dataset_io import load_dataset
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "u8.csv"
+            path.write_bytes("\ufefftxt\nacci\u00f3n\n".encode("utf-8"))
+            rows, fields = load_dataset(path, text_column="txt")
+        self.assertEqual((fields, rows[0]["txt"]), (["txt"], "acci\u00f3n"))
 
 
 if __name__ == "__main__":

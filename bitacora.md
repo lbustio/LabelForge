@@ -3216,3 +3216,61 @@ de lotes para el etiquetado masivo (~50K noticias).
 - `secrets/secrets.env.example`
 - `tests/test_saptiva.py` (nuevo)
 - `README.md`, `bitacora.md`
+
+---
+
+### 2026-11-07 - Revision, endurecimiento del modo lotes y config optimizada del lab
+
+**Autor/agente:** Claude Code, con Jaziel Flores (Saptiva).
+
+**Objetivo:** revisar el PR del proveedor Saptiva, corregir lo encontrado, ajustar
+la config de InferNode con evidencia y probar con los dos CSV que compartio Lazaro.
+
+**Correcciones (revision independiente del codigo):**
+
+- Lotes: cada lote guarda las filas que envio; al reanudar se usan esos lotes aunque
+  el conjunto pendiente haya cambiado. La huella de la corrida cubre el contenido del
+  dataset, la tarea y los arbitros. El archivo subido se reutiliza si falla la
+  creacion del lote. Las consultas toleran errores 429/5xx/red transitorios.
+- Lotes: los resultados se persisten por arbitro al llegar y no se reenvia lo ya
+  resuelto. El reintento en linea tiene tope (`processing.batch_max_online_retries`,
+  200) y la corrida se pausa ante errores de llave, cuota o red sin marcar filas
+  como fallidas. `--batch-no-retry` pausa en vez de dar filas por perdidas.
+- CSV: deteccion de encoding (UTF-8 o Windows-1252). Antes `data_pop.csv` perdia los
+  acentos sin aviso ("Leg?timo"). Se subio el limite de tamano de campo del modulo csv.
+- Webapp/importacion: al editar un arbitro se descartaban `reasoning`,
+  `reasoning_budget` y `seed`; Omni habria vuelto a marcar 0 en todo sin aviso.
+- Nueva regla `safety.require_distinct_models`: bloquea la corrida si dos arbitros
+  comparten modelo. Activa en la config del lab (cada agente usa un modelo distinto).
+- `generation_config.reasoning_budget` se envia como `thinking_token_budget`, que si
+  acota el razonamiento en el lab; `chat_template_kwargs.reasoning_budget` se ignora.
+
+**Ajuste de config (Tiltan: 200 correos para elegir, 400 distintos para validar):**
+
+- Turbo y Cortex no mejoran razonando. Turbo con presupuesto devolvio JSON roto en
+  4-10% de las llamadas. Ambos quedan sin razonar, con `max_output_tokens` 256.
+- Omni necesita razonar. Con presupuesto de 1024 tokens iguala la calidad de razonar
+  sin tope, con 11% menos tokens y cero llamadas cortadas (sin tope: 18 de 400).
+- `temperature` 0 y `seed` 42 en los tres.
+
+**Corridas completas con la config final (modo lotes):**
+
+| Dataset | Etiquetadas | Reintentos en linea | Duracion | Tokens |
+|---|---|---|---|---|
+| Tiltan (2,093, EN) | 2,093 | 2 | ~32 min | 5.7 M |
+| data_pop (3,646, EN+ES) | 3,642 (4 vacias) | 1 | ~57 min | 10.5 M |
+
+- Tiltan contra la referencia humana (kappa de Cohen del consenso): AUTH 0.39,
+  DIS 0.27, CRC 0.04, LSD 0.06, SP 0.02.
+- data_pop: con al menos un principio presente, phishing 87% contra legitimo 44%
+  en ingles, y 82% contra 71% en espanol. En espanol AUTH aparece mas en
+  legitimos (64%) que en phishing (52%); DIS si separa (64% contra 15%).
+- Reproducibilidad (mismos 2,091 correos en ambas corridas): mismas cinco etiquetas
+  en 94% para Turbo y Cortex, 63% para Omni (razona) y 88% para el consenso.
+
+**Pendientes:**
+
+- El techo de calidad esta en los prompts y definiciones: SP, LSD y CRC casi no
+  coinciden con la referencia humana. Calibrar con Lazaro antes de las 50K.
+- Reportar variacion entre corridas o promediar varias, por el no determinismo del
+  servidor (sobre todo en Omni).

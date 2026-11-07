@@ -293,18 +293,48 @@ Notas:
 - Los modelos del lab razonan por defecto y el razonamiento consume `max_tokens`.
   LabelForge lo apaga con `chat_template_kwargs.enable_thinking=false`, que es la
   única opción que funcionó en el lab. Para reactivarlo en un árbitro, pon
-  `"reasoning": true` en su `generation_config` y sube `max_output_tokens`.
-- Excepción en la config de ejemplo: `Saptiva Omni` razona (`max_output_tokens: 8192`).
-  Sin razonar respondió 0 en casi todo: 2 positivos en 200 correos de Tiltan, y 0
-  de 20 correos con autoridad marcada por humanos. Razonando detectó 9 de esos 20,
-  a cambio de unos 800 tokens de salida por llamada en vez de unos 25. Con un tope
-  de 4096, 9 de 200 llamadas agotaron el tope razonando; por eso el tope es 8192.
-- `--batch` exige que todos los árbitros sean `saptiva`. Divide en archivos de
-  hasta 50,000 líneas, guarda los ids en `checkpoints/saptiva_batch_state.json`
-  para retomar si se interrumpe, y reintenta en línea las entradas que fallen
-  dentro del lote (`--batch-no-retry` lo desactiva). Un lote puede tardar hasta
-  media hora en arrancar. Las líneas del lote no gastan rpm, pero cuestan lo mismo
-  que la llamada en línea.
+  `"reasoning": true` en su `generation_config`. Para acotarlo, usa
+  `"reasoning_budget": N`, que se envía como `thinking_token_budget`.
+  `chat_template_kwargs.reasoning_budget` se ignora en el lab.
+- Cada árbitro usa un modelo distinto. `safety.require_distinct_models: true` bloquea
+  la corrida si dos árbitros comparten modelo, porque el consenso por mayoría
+  necesita votos independientes.
+- La config de ejemplo usa `temperature: 0` y `seed: 42` para que las corridas sean
+  reproducibles.
+
+#### Por qué la config del lab es así
+
+Probada contra las etiquetas humanas de `pop_dataset_Full(Tiltan).csv`. Primero se
+eligió con 200 correos de ajuste y luego se validó con 400 correos distintos.
+
+| Árbitro | Modelo | Razonamiento | Motivo |
+|---|---|---|---|
+| `arb1` | Saptiva Turbo | apagado | Razonar no mejoró la calidad y con presupuesto devolvió JSON roto en 4% a 10% de las llamadas. |
+| `arb3` | Saptiva Omni | presupuesto de 1,024 tokens | Sin razonar marca 0 casi siempre. Con 1,024 iguala la calidad de razonar sin tope, con 11% menos tokens y cero llamadas cortadas; sin tope se cortaron 18 de 400. |
+| `arb4` | Saptiva Cortex | apagado | Razonar no mejoró la calidad. Sin razonar es el árbitro individual más acertado. |
+
+En los 400 correos de validación, el consenso logró kappa de Cohen de 0.42 en
+autoridad y 0.28 en distracción, contra la referencia humana. En compromiso, prueba
+social y afinidad quedó cerca de 0, porque esos principios tienen pocos positivos y
+los modelos no los distinguen bien. El techo de calidad lo ponen los prompts y las
+definiciones, no la configuración de InferNode.
+- `--batch` exige que todos los árbitros sean `saptiva`. Funciona así:
+  - Divide en archivos de hasta 50,000 líneas y 95 MiB.
+  - Guarda en `checkpoints/saptiva_batch_state.json` los ids y las filas de cada
+    lote. Si la corrida se interrumpe, al relanzar retoma esos mismos lotes.
+  - La huella de la corrida incluye el contenido del dataset, el prompt y los
+    árbitros. Si cambia algo, no retoma lotes viejos. `--fresh` borra el estado.
+  - Cada respuesta se guarda al llegar. Al relanzar solo se envían las
+    combinaciones de fila y árbitro que faltan.
+  - Las líneas que fallan dentro del lote se reintentan en línea hasta
+    `processing.batch_max_online_retries` (200 por defecto). Si fallan más, o si
+    el reintento da error de llave, cuota o red, la corrida se pausa sin marcar
+    filas como fallidas. `--batch-no-retry` pausa sin reintentar.
+  - Un lote puede tardar hasta media hora en arrancar. Las líneas del lote no
+    gastan rpm, pero cuestan lo mismo que la llamada en línea.
+  - `safety.max_total_tokens` no se aplica dentro de un lote.
+- Los CSV se leen en UTF-8 y, si no decodifican, en Windows-1252. Así se conservan
+  los acentos de archivos exportados desde Excel, como `data_pop.csv`.
 - Las peticiones llevan `metadata` con `app=labelforge` y el id del árbitro para
   ver el consumo en `GET /v1/billing/usage`.
 
