@@ -1,0 +1,6 @@
+# Dependencias minimas para correr con el proveedor saptiva en el laboratorio.
+# Las instala: python3 run_lab.py setup
+openai>=2.41.1
+python-dotenv>=1.0.0
+cryptography>=41.0.0
+openpyxl>=3.1.0
