@@ -8,6 +8,7 @@ Solo usa la biblioteca estandar para poder ejecutarse antes de instalar nada.
 
     python3 run_lab.py setup             # crea .venv e instala dependencias
     python3 run_lab.py key               # pide la llave sin mostrarla y la guarda
+    python3 run_lab.py ip 172.16.127.20  # solo si el notebook no resuelve la API
     python3 run_lab.py check             # valida llave, modelos y config
     python3 run_lab.py run data/lab/*.csv --bg
     python3 run_lab.py status
@@ -24,6 +25,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import hashlib
+import ipaddress
 import json
 import os
 import shutil
@@ -47,6 +49,7 @@ MANIFEST = OUTPUT_DIR / "lab_runs.json"
 PID_FILE = LOGS_DIR / "lab_run.pid"
 CHAIN_LOG = LOGS_DIR / "lab_run.log"
 KEY_ENV = "SAPTIVA_API_KEY"
+IP_ENV = "SAPTIVA_API_IP"
 
 
 def _read_json(path: Path, default):
@@ -86,8 +89,8 @@ def _python() -> str:
     return str(VENV_PYTHON)
 
 
-def _load_key() -> str:
-    value = os.environ.get(KEY_ENV, "").strip()
+def _load_secret(name: str) -> str:
+    value = os.environ.get(name, "").strip()
     if value:
         return value
     try:
@@ -95,9 +98,13 @@ def _load_key() -> str:
     except OSError:
         return ""
     for line in lines:
-        if line.strip().startswith(f"{KEY_ENV}="):
+        if line.strip().startswith(f"{name}="):
             return line.split("=", 1)[1].strip().strip("\"'")
     return ""
+
+
+def _load_key() -> str:
+    return _load_secret(KEY_ENV)
 
 
 def cmd_setup(_args) -> int:
@@ -124,6 +131,16 @@ def cmd_key(_args) -> int:
     )
     # La llave viaja por stdin: no aparece en la lista de procesos ni en el historial.
     return subprocess.run([_python(), "-c", code, str(ROOT), str(SECRETS_ENV), KEY_ENV], input=key, text=True).returncode
+
+
+def cmd_ip(args) -> int:
+    ipaddress.ip_address(args.address)
+    sys.path.insert(0, str(ROOT))
+    from labelforge_core.secrets_io import set_secret_value
+
+    set_secret_value(SECRETS_ENV, IP_ENV, args.address)
+    print(f"IP de la API fijada en {args.address}. Siguiente paso: python3 run_lab.py key")
+    return 0
 
 
 def cmd_check(args) -> int:
@@ -261,6 +278,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("setup", help="Crear .venv e instalar dependencias").set_defaults(func=cmd_setup)
     sub.add_parser("key", help="Guardar la llave de InferNode (prompt oculto)").set_defaults(func=cmd_key)
+    ip = sub.add_parser("ip", help="Fijar la IP de la API si el DNS del notebook no la resuelve")
+    ip.add_argument("address")
+    ip.set_defaults(func=cmd_ip)
     check = sub.add_parser("check", help="Validar llave, modelos y config")
     check.add_argument("--config", default=str(DEFAULT_CONFIG))
     check.set_defaults(func=cmd_check)
@@ -279,6 +299,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
+    api_ip = _load_secret(IP_ENV)
+    if api_ip:
+        os.environ[IP_ENV] = api_ip
     return args.func(args)
 
 

@@ -42,5 +42,31 @@ class TestRunLab(unittest.TestCase):
         self.assertEqual((args.datasets, args.bg, args.column), (["a.csv", "b.csv"], True, "txt"))
 
 
+class TestApiIpOverride(unittest.TestCase):
+    def test_only_the_api_host_is_redirected(self):
+        import os
+        import socket
+        from unittest import mock
+        from labelforge_core import saptiva
+
+        with mock.patch.dict(os.environ, {saptiva.API_IP_ENV: "172.16.127.20"}), \
+                mock.patch.object(socket, "getaddrinfo", socket.getaddrinfo), \
+                mock.patch.object(saptiva, "_real_getaddrinfo", return_value=["ok"]) as real, \
+                mock.patch.dict(saptiva._ip_overrides, clear=True):
+            saptiva.apply_ip_override("https://api.lab.test/infernode/v1")
+            socket.getaddrinfo("api.lab.test", 443)
+            socket.getaddrinfo("github.com", 443)
+        self.assertEqual([c.args[0] for c in real.call_args_list], ["172.16.127.20", "github.com"])
+
+    def test_invalid_ip_is_rejected(self):
+        import os
+        from unittest import mock
+        from labelforge_core import saptiva
+
+        with mock.patch.dict(os.environ, {saptiva.API_IP_ENV: "no-es-ip"}):
+            with self.assertRaises(ValueError):
+                saptiva.apply_ip_override("https://api.lab.test/v1")
+
+
 if __name__ == "__main__":
     unittest.main()

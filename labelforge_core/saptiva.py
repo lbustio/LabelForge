@@ -31,11 +31,15 @@ Decisiones relevantes para el etiquetador:
 
 from __future__ import annotations
 
+import ipaddress
 import os
+import socket
+from urllib.parse import urlparse
 
 PROVIDER_TYPE = "saptiva"
 API_KEY_ENV = "SAPTIVA_API_KEY"
 BASE_URL_ENV = "SAPTIVA_BASE_URL"
+API_IP_ENV = "SAPTIVA_API_IP"
 DEFAULT_BASE_URL = "https://api.laboratorioia.ibero.mx/infernode/v1"
 CHAT_ENDPOINT = "/v1/chat/completions"
 DEFAULT_ALIASES = ("Saptiva Turbo", "Saptiva Omni", "Saptiva Cortex")
@@ -52,13 +56,39 @@ def resolve_base_url(provider: dict | None = None) -> str:
     return (url or DEFAULT_BASE_URL).rstrip("/")
 
 
+_real_getaddrinfo = socket.getaddrinfo
+_ip_overrides: dict[str, str] = {}
+
+
+def _getaddrinfo_with_overrides(host, *args, **kwargs):
+    target = _ip_overrides.get(host.decode() if isinstance(host, bytes) else host, host)
+    return _real_getaddrinfo(target, *args, **kwargs)
+
+
+def apply_ip_override(base_url: str) -> None:
+    """Con SAPTIVA_API_IP, resuelve el host de la API a esa IP sin tocar /etc/hosts.
+
+    Sirve en notebooks sin root cuyo DNS no conoce el dominio privado del lab.
+    Solo cambia la resolucion: TLS sigue validando el certificado con el nombre real.
+    """
+    ip = os.environ.get(API_IP_ENV, "").strip()
+    host = urlparse(base_url).hostname
+    if not ip or not host:
+        return
+    ipaddress.ip_address(ip)  # rechaza valores que no sean una IP
+    _ip_overrides[host] = ip
+    socket.getaddrinfo = _getaddrinfo_with_overrides
+
+
 def make_client(api_key: str, base_url: str = "", max_retries: int = 2, timeout: float = 300.0):
     """Cliente OpenAI apuntando a InferNode. Una peticion no debe pasar de ~300 s."""
     from openai import OpenAI
 
+    base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
+    apply_ip_override(base_url)
     return OpenAI(
         api_key=api_key,
-        base_url=(base_url or DEFAULT_BASE_URL).rstrip("/"),
+        base_url=base_url,
         max_retries=max_retries,
         timeout=timeout,
     )
